@@ -1,0 +1,2327 @@
+hola google te mostrare mi back y   front  para  que  entres  en  c ontexto,,  dame un alista  de   cada archivo  que te di solo con  algunas  palabras  no mas  de una linea  para  saber  que  tienes  conexto:  backend:  /**
+ * types.ts
+ * Tipos compartidos del backend.
+ */
+
+export type Candle = {
+  time:  number   // timestamp ms del CIERRE de la vela
+  open:  number
+  high:  number
+  low:   number
+  close: number
+  closed: boolean // true = vela cerrada, false = vela en construcción
+}
+
+export type Timeframe = 'M5' | 'M15'
+
+export type MarketState = 'GREEN' | 'YELLOW' | 'RED'
+
+// Lo que el backend calcula y envía al frontend
+export type MarketSnapshot = {
+  timeframe:   Timeframe
+  price:       number
+  ema100:      number
+  atr:         number
+  elasticity:  number
+  state:       MarketState
+  timestamp:   number
+}
+
+// Mensaje que el backend emite al frontend via WebSocket propio
+export type BackendMessage =
+  | { type: 'snapshot'; m5: MarketSnapshot; m15: MarketSnapshot; finalState: MarketState }
+  | { type: 'status';   status: 'connecting' | 'connected' | 'disconnected'; message: string }
+  | { type: 'error';    message: string }
+
+// Mensaje que llega de Twelve Data WebSocket
+export type TwelveTickMessage = {
+  event?:     string   // 'price' | 'subscribe-status' | 'heartbeat'
+  symbol?:    string
+  price?:     number
+  timestamp?: number
+  exchange?:  string
+} /**
+ * twelveDataClient.ts
+ *
+ * Cliente WebSocket hacia Twelve Data.
+ * Recibe precio tick a tick y notifica al servidor.
+ *
+ * Manejo de reconexión automática:
+ *   Si la conexión se cae (internet, reinicio de Twelve Data),
+ *   reintenta cada 5 segundos hasta reconectar.
+ *   Esto garantiza que el backend nunca quede sin datos silenciosamente.
+ */
+
+import WebSocket from 'ws'
+import type { TwelveTickMessage } from './types'
+import { EventEmitter } from 'events'
+
+const RECONNECT_DELAY_MS = 5_000
+
+export class TwelveDataClient extends EventEmitter {
+  private apiKey:  string
+  private symbol:  string
+  private ws:      WebSocket | null = null
+  private stopped: boolean = false
+
+  constructor(apiKey: string, symbol: string) {
+    super()
+    this.apiKey = apiKey
+    this.symbol = symbol
+  }
+
+  connect(): void {
+    this.stopped = false
+    this._connect()
+  }
+
+  disconnect(): void {
+    this.stopped = true
+    this.ws?.close()
+  }
+
+  private _connect(): void {
+    const url = `wss://ws.twelvedata.com/v1/quotes/price?apikey=${this.apiKey}`
+
+    console.log('[TwelveData] Conectando WebSocket...')
+    this.emit('status', 'connecting', 'Conectando con Twelve Data...')
+
+    this.ws = new WebSocket(url)
+
+    this.ws.on('open', () => {
+      console.log('[TwelveData] Conectado ✓')
+      this.emit('status', 'connected', 'WebSocket conectado')
+
+      // Suscribirse al símbolo
+      this.ws!.send(JSON.stringify({
+        action: 'subscribe',
+        params: { symbols: this.symbol },
+      }))
+    })
+
+    this.ws.on('message', (raw: Buffer) => {
+      let msg: TwelveTickMessage
+
+      try {
+        msg = JSON.parse(raw.toString())
+      } catch {
+        return
+      }
+
+      // Solo procesar mensajes de precio
+      if (msg.event !== 'price' || !msg.price) return
+
+      this.emit('tick', msg.price, Date.now())
+    })
+
+    this.ws.on('error', (err) => {
+      console.error('[TwelveData] Error:', err.message)
+      this.emit('status', 'disconnected', `Error: ${err.message}`)
+    })
+
+    this.ws.on('close', () => {
+      console.log('[TwelveData] Conexión cerrada')
+      this.emit('status', 'disconnected', 'Conexión cerrada')
+
+      if (!this.stopped) {
+        console.log(`[TwelveData] Reconectando en ${RECONNECT_DELAY_MS / 1000}s...`)
+        setTimeout(() => this._connect(), RECONNECT_DELAY_MS)
+      }
+    })
+  }
+}/**
+ * server.ts — Backend completo del Elasticity System
+ *
+ * Expone dos interfaces:
+ *
+ *   WebSocket ws://localhost:8080
+ *     → snapshots en tiempo real al frontend
+ *
+ *   HTTP GET http://localhost:8080/history?timeframe=5min
+ *     → devuelve las velas históricas al frontend (para backtest)
+ *     → 0 créditos: el backend ya las tiene en memoria
+ *
+ * Al arrancar:
+ *   1. Pide historial M5 + M15 a Twelve Data REST (1 vez al día)
+ *   2. Pre-calienta CandleBuilders → EMA y percentiles listos
+ *   3. Conecta WebSocket de Twelve Data → ticks en tiempo real
+ * 
+ * VIGILAR  A  const twelveClient = new TwelveDataClient(API_KEY, SYMBOL)
+ * twelveClient.connect() para que:
+ * -No se duplique
+ * -No se reconecte mal
+ *-No cree múltiples instancias
+ */
+
+import http from 'http'
+import WebSocket, { WebSocketServer } from 'ws'
+import https from 'https'
+import { TwelveDataClient } from './twelveDataClient'
+import { CandleBuilder } from './candleBuilder'
+import { calculateSnapshot, resolveMultiTF } from './marketEngine'
+import type { BackendMessage, Candle, MarketSnapshot } from './types'
+
+// ─── ⚙️ CONFIGURACIÓN ────────────────────────────────────────────────────────
+
+const API_KEY        = 'b584cd192ee6441a86f06373b685283b'
+const SYMBOL         = 'EUR/USD'
+const PORT           = 8080
+const HISTORY_OUTPUT = 500
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+const builderM5  = new CandleBuilder('M5')
+const builderM15 = new CandleBuilder('M15')
+
+let lastSnapshotM5:  MarketSnapshot | null = null
+let lastSnapshotM15: MarketSnapshot | null = null
+
+// Guardamos el historial en memoria para servirlo al frontend
+let historicalM5:  Candle[] = []
+let historicalM15: Candle[] = []
+
+// ─── HTTP server (historial + CORS) ──────────────────────────────────────────
+
+const httpServer = http.createServer((req, res) => {
+  // CORS — permite que el frontend en localhost:5173 acceda
+  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Methods', 'GET')
+  res.setHeader('Content-Type', 'application/json')
+
+  if (req.url?.startsWith('/history')) {
+    const url        = new URL(req.url, `http://localhost:${PORT}`)
+    const timeframe  = url.searchParams.get('timeframe') ?? '5min'
+    const candles    = timeframe === '15min' ? historicalM15 : historicalM5
+
+    res.writeHead(200)
+    res.end(JSON.stringify(candles))
+    return
+  }
+
+  // Health check
+  if (req.url === '/health') {
+    res.writeHead(200)
+    res.end(JSON.stringify({ status: 'ok', candlesM5: historicalM5.length, candlesM15: historicalM15.length }))
+    return
+  }
+
+  res.writeHead(404)
+  res.end(JSON.stringify({ error: 'Not found' }))
+})
+
+// ─── WebSocket server sobre el mismo puerto HTTP ──────────────────────────────
+
+const wss = new WebSocketServer({ server: httpServer })
+
+function broadcast(msg: BackendMessage): void {
+  const data = JSON.stringify(msg)
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(data)
+    }
+  })
+}
+
+wss.on('connection', (ws) => {
+  console.log('[Server] Frontend conectado')
+
+  if (lastSnapshotM5 && lastSnapshotM15) {
+    const finalState = resolveMultiTF(lastSnapshotM5, lastSnapshotM15)
+    ws.send(JSON.stringify({
+      type: 'snapshot',
+      m5:   lastSnapshotM5,
+      m15:  lastSnapshotM15,
+      finalState,
+    } satisfies BackendMessage))
+  }
+
+  ws.on('close', () => console.log('[Server] Frontend desconectado'))
+})
+
+// ─── Fetch historial via REST ─────────────────────────────────────────────────
+
+type TwelveCandle = {
+  datetime: string
+  open:     string
+  high:     string
+  low:      string
+  close:    string
+}
+
+function fetchHistoricalCandles(
+  interval: '5min' | '15min',
+  outputSize: number
+): Promise<Candle[]> {
+  return new Promise((resolve) => {
+    const path =
+      `/v1/time_series?symbol=${encodeURIComponent(SYMBOL)}` +
+      `&interval=${interval}&outputsize=${outputSize}&apikey=${API_KEY}`
+
+    const req = https.request({ hostname: 'api.twelvedata.com', path, method: 'GET' }, (res) => {
+      let raw = ''
+      res.on('data', (chunk: Buffer) => { raw += chunk.toString() })
+      res.on('end', () => {
+        try {
+          const data = JSON.parse(raw)
+          if (data.status !== 'ok' || !data.values) {
+            console.error(`[History] Error ${interval}:`, data.message)
+            resolve([])
+            return
+          }
+          const candles: Candle[] = [...(data.values as TwelveCandle[])].reverse().map((c) => ({
+            time:   new Date(c.datetime).getTime(),
+            open:   parseFloat(c.open),
+            high:   parseFloat(c.high),
+            low:    parseFloat(c.low),
+            close:  parseFloat(c.close),
+            closed: true,
+          }))
+          resolve(candles)
+        } catch {
+          resolve([])
+        }
+      })
+    })
+    req.on('error', () => resolve([]))
+    req.end()
+  })
+}
+
+function warmUpBuilder(builder: CandleBuilder, candles: Candle[]): void {
+  candles.forEach((c) => builder.injectHistoricalCandle(c))
+  console.log(`[WarmUp] ${builder.getTimeframe()} precalentado con ${candles.length} velas`)
+}
+
+// ─── Procesamiento de ticks ───────────────────────────────────────────────────
+
+function processTick(price: number, timestamp: number): void {
+  builderM5.tick(price, timestamp)
+  builderM15.tick(price, timestamp)
+
+  const snapshotM5  = calculateSnapshot(builderM5.getCandles(),  price, 'M5',  timestamp)
+  const snapshotM15 = calculateSnapshot(builderM15.getCandles(), price, 'M15', timestamp)
+
+  if (!snapshotM5 || !snapshotM15) return
+
+  lastSnapshotM5  = snapshotM5
+  lastSnapshotM15 = snapshotM15
+
+  const finalState = resolveMultiTF(snapshotM5, snapshotM15)
+  broadcast({ type: 'snapshot', m5: snapshotM5, m15: snapshotM15, finalState })
+
+  if (Math.random() < 0.05) {
+    console.log(
+      `[Engine] ${new Date(timestamp).toLocaleTimeString()}`,
+      `· ${price.toFixed(5)}`,
+      `· M5: ${snapshotM5.elasticity.toFixed(3)} ${snapshotM5.state}`,
+      `· M15: ${snapshotM15.elasticity.toFixed(3)} ${snapshotM15.state}`,
+      `· ${finalState}`
+    )
+  }
+}
+
+// ─── Main ─────────────────────────────────────────────────────────────────────
+
+async function main() {
+  console.log('╔════════════════════════════════════╗')
+  console.log('║   Elasticity System — Backend      ║')
+  console.log('║   EUR/USD  ·  M5 + M15             ║')
+  console.log(`║   Puerto: ${PORT}                      ║`)
+  console.log('╚════════════════════════════════════╝')
+
+  // 1. Cargar historial para pre-calentar
+  console.log('[Server] Cargando historial M5 (500 velas)...')
+  historicalM5 = await fetchHistoricalCandles('5min', HISTORY_OUTPUT)
+
+  await new Promise((r) => setTimeout(r, 2000))   // pausa entre llamadas REST
+
+  console.log('[Server] Cargando historial M15 (500 velas)...')
+  historicalM15 = await fetchHistoricalCandles('15min', HISTORY_OUTPUT)
+
+  if (historicalM5.length  > 0) warmUpBuilder(builderM5,  historicalM5)
+  if (historicalM15.length > 0) warmUpBuilder(builderM15, historicalM15)
+
+  // Calcular snapshot inicial con último precio del historial
+  if (historicalM5.length > 0 && historicalM15.length > 0) {
+    const lastPrice = historicalM5[historicalM5.length - 1].close
+    const ts        = historicalM5[historicalM5.length - 1].time
+    const snap5     = calculateSnapshot(builderM5.getCandles(),  lastPrice, 'M5',  ts)
+    const snap15    = calculateSnapshot(builderM15.getCandles(), lastPrice, 'M15', ts)
+
+    if (snap5 && snap15) {
+      lastSnapshotM5  = snap5
+      lastSnapshotM15 = snap15
+      console.log(
+        '[Server] Snapshot inicial:',
+        `M5: ${snap5.elasticity.toFixed(3)} ${snap5.state}`,
+        `· M15: ${snap15.elasticity.toFixed(3)} ${snap15.state}`
+      )
+    }
+  }
+
+  // 2. Arrancar HTTP + WebSocket server
+  httpServer.listen(PORT, () => {
+    console.log(`[Server] HTTP  → http://localhost:${PORT}/history`)
+    console.log(`[Server] WS    → ws://localhost:${PORT}`)
+  })
+
+  // 3. Conectar Twelve Data WebSocket
+  const twelveClient = new TwelveDataClient(API_KEY, SYMBOL)
+
+  twelveClient.on('tick', processTick)
+  twelveClient.on('status', (status: string, message: string) => {
+    broadcast({ type: 'status', status: status as 'connecting' | 'connected' | 'disconnected', message })
+  })
+
+  twelveClient.connect()
+
+  builderM5.on('candle:closed',  () => console.log(`[Server] Vela M5  cerrada — ${builderM5.getClosedCandles().length} velas`))
+  builderM15.on('candle:closed', () => console.log(`[Server] Vela M15 cerrada — ${builderM15.getClosedCandles().length} velas`))
+}
+
+main().catch(console.error) /**
+ * marketEngine.ts
+ *
+ * Motor matemático del backend.
+ * Dado un array de velas, calcula EMA100, ATR14, elasticidad y estado.
+ *
+ * Idéntico en lógica al frontend pero en Node.js puro (sin React).
+ * Al estar en el backend, los cálculos corren una sola vez
+ * y el resultado se envía a todos los clientes conectados.
+ */
+
+import type { Candle, MarketState, MarketSnapshot, Timeframe } from './types'
+
+// ─── configuración (debe coincidir con el frontend) ───────────────────────────
+
+const EMA_PERIOD = 100
+const ATR_PERIOD = 14
+
+// Umbrales del stateEngine — se actualizan con calibración
+let config = {
+  percentileGreen:  80,
+  percentileYellow: 60,
+  elasticityMin:    1.0,
+  elasticityMax:    5.5,
+}
+
+export function updateEngineConfig(c: Partial<typeof config>): void {
+  config = { ...config, ...c }
+}
+
+// ─── EMA ─────────────────────────────────────────────────────────────────────
+
+function calculateEMA(closes: number[], period: number): number {
+  if (closes.length === 0) return 0
+  if (closes.length < period) return closes[closes.length - 1]
+
+  const alpha = 2 / (period + 1)
+  let ema = closes.slice(0, period).reduce((s, v) => s + v, 0) / period
+
+  for (let i = period; i < closes.length; i++) {
+    ema = alpha * closes[i] + (1 - alpha) * ema
+  }
+
+  return ema
+}
+
+// ─── ATR ─────────────────────────────────────────────────────────────────────
+
+function calculateATR(candles: Candle[], period: number): number {
+  if (candles.length < 2) return 0.0006
+
+  const trues: number[] = []
+  for (let i = 1; i < candles.length; i++) {
+    const { high, low } = candles[i]
+    const prev = candles[i - 1].close
+    trues.push(Math.max(high - low, Math.abs(high - prev), Math.abs(low - prev)))
+  }
+
+  const slice = trues.slice(-period)
+  return slice.reduce((s, v) => s + v, 0) / slice.length
+}
+
+// ─── Percentile engine (ventana deslizante) ───────────────────────────────────
+
+class PercentileEngine {
+  private window: number[] = []
+  private maxSize: number
+
+  constructor(maxSize = 200) {
+    this.maxSize = maxSize
+  }
+
+  push(value: number): number {
+    this.window.push(value)
+    if (this.window.length > this.maxSize) this.window.shift()
+
+    const sorted = [...this.window].sort((a, b) => a - b)
+    const rank   = sorted.filter(v => v <= value).length
+    return (rank / this.window.length) * 100
+  }
+}
+
+const percentileM5  = new PercentileEngine(200)
+const percentileM15 = new PercentileEngine(200)
+
+// ─── State resolution ─────────────────────────────────────────────────────────
+
+function resolveState(elasticity: number, percentile: number): MarketState {
+  if (
+    percentile  >= config.percentileGreen &&
+    elasticity  >= config.elasticityMin   &&
+    elasticity  <= config.elasticityMax
+  ) return 'GREEN'
+
+  if (percentile >= config.percentileYellow) return 'YELLOW'
+
+  return 'RED'
+}
+
+// ─── Snapshot calculator ──────────────────────────────────────────────────────
+
+/**
+ * Dado el array de velas de un timeframe, calcula el snapshot completo.
+ * price = precio del último tick (puede ser intracandle)
+ */
+export function calculateSnapshot(
+  candles:   Candle[],
+  price:     number,
+  timeframe: Timeframe,
+  timestamp: number
+): MarketSnapshot | null {
+  if (candles.length < EMA_PERIOD + 2) return null
+
+  const closes  = candles.map(c => c.close)
+  const ema100  = calculateEMA(closes, EMA_PERIOD)
+  const atr     = calculateATR(candles, ATR_PERIOD)
+
+  if (atr === 0) return null
+
+  const elasticity = Math.abs(price - ema100) / atr
+
+  const percentileEngine = timeframe === 'M5' ? percentileM5 : percentileM15
+  const percentile       = percentileEngine.push(elasticity)
+
+  const state = resolveState(elasticity, percentile)
+
+  return {
+    timeframe,
+    price,
+    ema100,
+    atr,
+    elasticity,
+    state,
+    timestamp,
+  }
+}
+
+// ─── Multi-timeframe resolver ─────────────────────────────────────────────────
+
+export function resolveMultiTF(
+  m5:  MarketSnapshot,
+  m15: MarketSnapshot
+): MarketState {
+  if (m5.state === 'GREEN'  && m15.state === 'GREEN')  return 'GREEN'
+  if (m5.state === 'GREEN'  && m15.state === 'YELLOW') return 'YELLOW'
+  return 'RED'
+} /**
+ * candleBuilder.ts
+ *
+ * Construye velas M5/M15 desde ticks en tiempo real.
+ * También acepta velas históricas para pre-calentar el engine.
+ */
+
+import type { Candle, Timeframe } from './types'
+import { EventEmitter } from 'events'
+
+const TIMEFRAME_MS: Record<Timeframe, number> = {
+  M5:  5  * 60 * 1000,
+  M15: 15 * 60 * 1000,
+}
+
+const MAX_CANDLES = 150
+
+export class CandleBuilder extends EventEmitter {
+  private timeframe: Timeframe
+  private periodMs:  number
+  private current:   Candle | null = null
+  private closed:    Candle[] = []
+
+  constructor(timeframe: Timeframe) {
+    super()
+    this.timeframe = timeframe
+    this.periodMs  = TIMEFRAME_MS[timeframe]
+  }
+
+  /**
+   * Inyecta una vela histórica cerrada directamente al historial.
+   * Usado para pre-calentar el engine sin esperar ticks reales.
+   */
+  injectHistoricalCandle(candle: Candle): void {
+    this.closed.push({ ...candle, closed: true })
+    if (this.closed.length > MAX_CANDLES) {
+      this.closed.shift()
+    }
+  }
+
+  /**
+   * Procesa un tick en tiempo real.
+   * Emite 'candle:closed' cuando cierra una vela.
+   */
+  tick(price: number, timestamp: number): void {
+    const periodId = Math.floor(timestamp / this.periodMs)
+
+    if (this.current === null) {
+      this.current = this.openCandle(price, periodId)
+      this.emit('candle:update', this.current)
+      return
+    }
+
+    const currentPeriodId = Math.floor(this.current.time / this.periodMs)
+
+    if (periodId !== currentPeriodId) {
+      // Cerrar vela actual
+      const closedCandle: Candle = { ...this.current, closed: true }
+      this.closed.push(closedCandle)
+      if (this.closed.length > MAX_CANDLES) this.closed.shift()
+
+      console.log(
+        `[CandleBuilder ${this.timeframe}] Vela cerrada:`,
+        `O:${closedCandle.open.toFixed(5)}`,
+        `H:${closedCandle.high.toFixed(5)}`,
+        `L:${closedCandle.low.toFixed(5)}`,
+        `C:${closedCandle.close.toFixed(5)}`
+      )
+
+      this.emit('candle:closed', closedCandle, this.closed)
+
+      // Abrir nueva vela
+      this.current = this.openCandle(price, periodId)
+    } else {
+      this.current.high  = Math.max(this.current.high, price)
+      this.current.low   = Math.min(this.current.low,  price)
+      this.current.close = price
+    }
+
+    this.emit('candle:update', this.current)
+  }
+
+  private openCandle(price: number, periodId: number): Candle {
+    return {
+      time:   periodId * this.periodMs,
+      open:   price,
+      high:   price,
+      low:    price,
+      close:  price,
+      closed: false,
+    }
+  }
+
+  getCandles(): Candle[] {
+    if (this.current) return [...this.closed, this.current]
+    return [...this.closed]
+  }
+
+  getClosedCandles(): Candle[] {
+    return [...this.closed]
+  }
+
+  getCurrentCandle(): Candle | null {
+    return this.current
+  }
+
+  getTimeframe(): Timeframe {
+    return this.timeframe
+  }
+}  frontend  import './App.css'
+
+import { useMarketData } from './hooks/useMarketData'
+import { useHistoricalData } from './hooks/useHistoricalData'
+import { useBacktest } from './hooks/useBacktest'
+
+import { Semaforo } from './components/Semaforo'
+import { BacktestMetrics } from './components/BacktestMetrics'
+import { ElasticityCard } from './components/ElasticityCard'
+
+import { compareSignalWithHistory } from './backtest/compareSignal'
+import { fuseMarketState } from './logic/fuseMarketState'
+
+function App() {
+  // 🟢 1. Mercado en tiempo real — via backend WebSocket local
+  const { data: market, status: wsStatus } = useMarketData()
+
+  // 📜 2. Historial real — 500 velas M5 via REST (1 llamada al día)
+  const historical = useHistoricalData()
+
+  // 🧪 3. Backtest real — devuelve BacktestResult | null directamente
+  const backtest = useBacktest(historical)
+
+  // ── Pantalla de carga / conexión ──────────────────────────────────────────
+  if (!market) {
+    return (
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        height: '100vh', flexDirection: 'column', gap: 12,
+        color: '#555', fontFamily: 'monospace',
+      }}>
+        <div style={{
+          width: 10, height: 10, borderRadius: '50%',
+          background: wsStatus === 'connecting' ? '#eab308' : '#dc2626',
+          boxShadow: wsStatus === 'connecting'
+            ? '0 0 10px #eab308'
+            : '0 0 10px #dc2626',
+        }}/>
+        <p style={{ margin: 0, fontSize: 13 }}>
+          {wsStatus === 'connecting'
+            ? 'Conectando con el backend...'
+            : 'Backend desconectado — verifica que corre en puerto 8080'}
+        </p>
+        <p style={{ margin: 0, fontSize: 11, color: '#333' }}>
+          ws://localhost:8080
+        </p>
+      </div>
+    )
+  }
+
+  // 🧠 4. Comparación señal actual vs histórico real
+  const comparison =
+    backtest
+      ? compareSignalWithHistory(
+          { state: market.finalState, elasticity: market.m5.elasticity },
+          backtest
+        )
+      : null
+
+  // 🧠 5. Fusión final → { state, explanation }
+  const fused = fuseMarketState(market.finalState, comparison)
+
+  return (
+    <div style={{ padding: 24, maxWidth: 720, margin: '0 auto' }}>
+      <h2>EUR/USD — Elasticity System</h2>
+
+      {/* Badge de conexión con el backend */}
+      <div style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        padding: '4px 10px', borderRadius: 12, marginBottom: 8,
+        background: 'rgba(22,163,74,0.1)', border: '1px solid #16a34a33',
+      }}>
+        <div style={{
+          width: 6, height: 6, borderRadius: '50%',
+          background: '#16a34a', boxShadow: '0 0 6px #16a34a',
+        }}/>
+        <span style={{ fontSize: 11, color: '#16a34a', fontFamily: 'monospace' }}>
+          Backend conectado · ws://localhost:8080
+        </span>
+      </div>
+
+      {/* ============================= */}
+      {/* 🔵 SECCIÓN 1 — TIEMPO REAL   */}
+      {/* ============================= */}
+      <div style={{
+        marginTop: 16, padding: 16,
+        border: '1px solid #2a2a2a', borderRadius: 8,
+      }}>
+        <h3>🟢 Tiempo real (motor)</h3>
+        <p style={{ opacity: 0.7, fontSize: 14 }}>
+          Precio tick a tick via WebSocket. EMA y ATR calculados
+          sobre velas cerradas reales construidas en el backend.
+        </p>
+        <p>M5 Elasticidad: {market.m5.elasticity.toFixed(2)} | {market.m5.state}</p>
+        <p>M15 Elasticidad: {market.m15.elasticity.toFixed(2)} | {market.m15.state}</p>
+        <Semaforo state={market.finalState} label="Actual" />
+      </div>
+
+      {/* ============================= */}
+      {/* 📊 SECCIÓN 2 — ELASTICIDAD   */}
+      {/* ============================= */}
+      <div style={{
+        marginTop: 32, padding: 16,
+        border: '1px solid #2a2a2a', borderRadius: 8,
+      }}>
+        <h3>📊 Elasticidad (detalle visual)</h3>
+        <p style={{ opacity: 0.7, fontSize: 14 }}>
+          Muestra cuánto se ha estirado el precio respecto a su promedio
+          (EMA100). Responde al "¿por qué?" del semáforo.
+        </p>
+        <ElasticityCard
+          m5={market.m5}
+          m15={market.m15}
+          fusedState={market.finalState}
+        />
+      </div>
+
+      {/* ============================= */}
+      {/* 🟠 SECCIÓN 3 — BACKTEST      */}
+      {/* ============================= */}
+      <div style={{
+        marginTop: 32, padding: 16,
+        border: '1px solid #2a2a2a', borderRadius: 8,
+      }}>
+        <h3>🧪 Backtesting (histórico)</h3>
+        <p style={{ opacity: 0.7, fontSize: 14 }}>
+          Resultados estadísticos sobre las últimas 500 velas M5.
+          Los umbrales se calibran automáticamente con estos datos.
+        </p>
+        {backtest
+          ? <BacktestMetrics data={backtest} />
+          : <p style={{ opacity: 0.5, fontSize: 13 }}>
+              Cargando velas históricas...
+            </p>
+        }
+      </div>
+
+      {/* ============================= */}
+      {/* 🟣 SECCIÓN 4 — COMPARACIÓN   */}
+      {/* ============================= */}
+      <div style={{
+        marginTop: 32, padding: 16,
+        border: '1px solid #2a2a2a', borderRadius: 8,
+      }}>
+        <h3>📊 Comparación señal actual vs histórico</h3>
+        <p style={{ opacity: 0.7, fontSize: 14 }}>
+          Busca situaciones históricas con mismo estado y
+          elasticidad similar (±0.1) para estimar probabilidad contextual.
+        </p>
+        {comparison ? (
+          <>
+            <p>Señales similares: {comparison.similarSignals}</p>
+            <p>Win rate: {comparison.winRate.toFixed(2)}%</p>
+            <p>Promedio barras a revertir: {comparison.avgBarsToRevert.toFixed(2)}</p>
+          </>
+        ) : (
+          <p style={{ opacity: 0.6 }}>Cargando contexto histórico...</p>
+        )}
+      </div>
+
+      {/* ============================= */}
+      {/* 🔴 SECCIÓN 5 — SEÑAL FINAL   */}
+      {/* ============================= */}
+      <div style={{
+        marginTop: 32, padding: 16,
+        border: '2px solid #444', borderRadius: 8,
+        background: 'rgba(255,255,255,0.02)',
+      }}>
+        <h3>🚦 Señal confirmada</h3>
+        <p style={{ opacity: 0.7, fontSize: 14 }}>
+          Resultado final que combina la señal en tiempo real
+          con el contexto histórico real.
+        </p>
+        <p style={{
+          fontSize: 13, color: '#666',
+          background: '#111', border: '1px solid #222',
+          borderRadius: 6, padding: '10px 14px',
+          margin: '0 0 8px', lineHeight: 1.6,
+        }}>
+          {fused.explanation}
+        </p>
+        <Semaforo state={fused.state} label="Confirmado" />
+      </div>
+    </div>
+  )
+}
+
+export default App /**
+ * useMarketData.ts
+ *
+ * Conecta al backend local via WebSocket.
+ * El backend hace todo el trabajo pesado — este hook
+ * solo recibe el snapshot ya calculado y actualiza el estado.
+ *
+ * Antes:  Frontend → Twelve Data REST (consume créditos)
+ * Ahora:  Frontend → Backend local → Twelve Data WebSocket (0 créditos)
+ *
+ * Reconexión automática: si el backend se reinicia,
+ * el frontend reconecta solo después de 3 segundos.
+ */
+
+import { useEffect, useRef, useState } from 'react'
+import type { MarketSnapshot } from '@/types/market'
+
+// ─── ⚙️ CONFIGURACIÓN ────────────────────────────────────────────────────────
+
+const BACKEND_WS_URL  = 'ws://localhost:8080'
+const RECONNECT_MS    = 3_000
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type FinalMarketView = {
+  m5:         MarketSnapshot
+  m15:        MarketSnapshot
+  finalState: 'GREEN' | 'YELLOW' | 'RED'
+}
+
+type BackendMessage =
+  | { type: 'snapshot'; m5: MarketSnapshot; m15: MarketSnapshot; finalState: 'GREEN' | 'YELLOW' | 'RED' }
+  | { type: 'status';   status: string; message: string }
+  | { type: 'error';    message: string }
+
+export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected'
+
+export function useMarketData(): {
+  data:   FinalMarketView | null
+  status: ConnectionStatus
+} {
+  const [data,   setData]   = useState<FinalMarketView | null>(null)
+  const [status, setStatus] = useState<ConnectionStatus>('connecting')
+  const wsRef               = useRef<WebSocket | null>(null)
+  const stoppedRef          = useRef(false)
+
+  useEffect(() => {
+    stoppedRef.current = false
+
+    function connect() {
+      if (stoppedRef.current) return
+
+      console.log('[useMarketData] Conectando al backend...')
+      setStatus('connecting')
+
+      const ws = new WebSocket(BACKEND_WS_URL)
+      wsRef.current = ws
+
+      ws.onopen = () => {
+        console.log('[useMarketData] Backend conectado ✓')
+        setStatus('connected')
+      }
+
+      ws.onmessage = (event: MessageEvent) => {
+        let msg: BackendMessage
+        try {
+          msg = JSON.parse(event.data as string)
+        } catch {
+          return
+        }
+
+        if (msg.type === 'snapshot') {
+          setData({
+            m5:         msg.m5,
+            m15:        msg.m15,
+            finalState: msg.finalState,
+          })
+        }
+
+        if (msg.type === 'status') {
+          console.log(`[useMarketData] Backend status: ${msg.message}`)
+          if (msg.status === 'disconnected') setStatus('disconnected')
+          if (msg.status === 'connected')    setStatus('connected')
+        }
+      }
+
+      ws.onerror = () => {
+        console.error('[useMarketData] Error de conexión con backend')
+        setStatus('disconnected')
+      }
+
+      ws.onclose = () => {
+        console.log('[useMarketData] Backend desconectado — reintentando...')
+        setStatus('disconnected')
+        if (!stoppedRef.current) {
+          setTimeout(connect, RECONNECT_MS)
+        }
+      }
+    }
+
+    connect()
+
+    return () => {
+      stoppedRef.current = true
+      wsRef.current?.close()
+    }
+  }, [])
+
+  return { data, status }
+} /**
+ * useHistoricalData.ts
+ *
+ * Antes: llamaba directamente a Twelve Data REST (consumía créditos)
+ * Ahora: pide el historial al backend via HTTP
+ *
+ * El backend ya tiene las 500 velas históricas cargadas al arrancar.
+ * El frontend solo las pide para el backtest y la comparación contextual.
+ *
+ * Endpoint: GET http://localhost:8080/history?timeframe=5min
+ */
+
+import { useEffect, useState } from 'react'
+import type { Candle } from '../backtest/types'
+
+const BACKEND_HTTP_URL = 'http://localhost:8080'
+
+export function useHistoricalData(): Candle[] | null {
+  const [candles, setCandles] = useState<Candle[] | null>(null)
+
+  useEffect(() => {
+    fetch(`${BACKEND_HTTP_URL}/history?timeframe=5min`)
+      .then((res) => res.json())
+      .then((data: Candle[]) => {
+        if (Array.isArray(data) && data.length > 0) {
+          setCandles(data)
+          console.log(`[useHistoricalData] ${data.length} velas recibidas del backend`)
+        }
+      })
+      .catch((err) => {
+        console.error('[useHistoricalData] Error al pedir historial al backend:', err)
+      })
+  }, [])
+
+  return candles
+} /**
+ * useBacktest.ts
+ *
+ * Conecta el hook de React con el motor real de backtesting (runBacktest).
+ *
+ * ANTES: usaba Math.random() → números ficticios, inútiles para trading.
+ * AHORA: usa runBacktest() con las velas reales de useHistoricalData.
+ *
+ * ¿Qué hace runBacktest?
+ *   Recorre cada vela histórica, calcula elasticidad y percentil en ese
+ *   punto, y si el estado sería GREEN busca cuántas velas tardó el precio
+ *   en volver a la EMA. Eso genera eventos reales con win/loss verdaderos.
+ *
+ * useMemo → solo recalcula cuando cambian las velas (no en cada render).
+ * Con 300 velas M5 tarda < 5ms. No bloquea el hilo principal.
+ */
+
+import { useMemo } from 'react'
+import type { BacktestResult } from '../backtest/types'
+import type { Candle } from '../backtest/types'
+import { runBacktest } from '../backtest/backtestEngine'
+
+// Configuración del backtest — ajustar según calibración real
+const BACKTEST_CONFIG = {
+  emaPeriod:      100,   // velas para calcular EMA (igual que el motor en tiempo real)
+  maxBarsToRevert: 20,   // máximo de velas que esperamos para reversión
+}
+
+export function useBacktest(candles: Candle[] | null): BacktestResult | null {
+  return useMemo(() => {
+    // Necesitamos al menos emaPeriod + algo de historial para que sea útil
+    if (!candles || candles.length < BACKTEST_CONFIG.emaPeriod + 10) {
+      return null
+    }
+
+    return runBacktest(candles, BACKTEST_CONFIG)
+  }, [candles])
+}import type { MarketState } from '@/types/market'
+
+/**
+ * Traduce estadística → decisión operativa
+ */
+export function resolveElasticityState(
+  elasticity: number,
+  percentile: number
+): MarketState {
+
+  // 🟢 Zona óptima para reversión
+  if (percentile >= 75 && elasticity <= 5.5) {
+    return 'GREEN'
+  }
+
+  // 🟡 Estirado pero aún posible
+  if (percentile >= 55) {
+    return 'YELLOW'
+  }
+
+  // 🔴 Ruido / ruptura / no tocar
+  return 'RED'
+}
+import type { MarketState } from '@/types/market'
+
+/**
+ * Traduce estadística → decisión operativa
+ */
+export function resolveElasticityState(
+  elasticity: number,
+  percentile: number
+): MarketState {
+
+  // 🟢 Zona óptima para reversión
+  if (percentile >= 75 && elasticity <= 5.5) {
+    return 'GREEN'
+  }
+
+  // 🟡 Estirado pero aún posible
+  if (percentile >= 55) {
+    return 'YELLOW'
+  }
+
+  // 🔴 Ruido / ruptura / no tocar
+  return 'RED'
+}
+export type PercentileEngine = {
+  push: (value: number) => number
+  getHistory: () => number[]
+  reset: () => void
+}
+
+export function createPercentileEngine(
+  windowSize: number = 300
+): PercentileEngine {
+  let buffer: number[] = []
+
+  function push(value: number): number {
+    buffer.push(value)
+
+    if (buffer.length > windowSize) {
+      buffer.shift()
+    }
+
+    if (buffer.length === 1) return 0
+
+    const sorted = [...buffer].sort((a, b) => a - b)
+    const index = sorted.findIndex(v => v >= value)
+
+    if (index === -1) return 100
+
+    return Math.round((index / (sorted.length - 1)) * 100)
+  }
+
+  function getHistory() {
+    return [...buffer]
+  }
+
+  function reset() {
+    buffer = []
+  }
+
+  return {
+    push,
+    getHistory,
+    reset,
+  }
+}
+export function calculatePercentile(
+  history: number[],
+  current: number
+): number {
+  if (history.length === 0) return 0
+
+  const sorted = [...history].sort((a, b) => a - b)
+  const index = sorted.findIndex(v => v >= current)
+
+  if (index === -1) return 100
+
+  return Math.round((index / sorted.length) * 100)
+}
+ import type { MarketSnapshot } from '@/types/market'
+
+export type MultiTFState = 'GREEN' | 'YELLOW' | 'RED'
+
+export function resolveMultiTimeframeState(
+  fast: MarketSnapshot,   // M5
+  slow: MarketSnapshot    // M15
+): MultiTFState {
+
+  // 🟢 Solo si AMBOS están verdes
+  if (fast.state === 'GREEN' && slow.state === 'GREEN') {
+    return 'GREEN'
+  }
+
+  // 🟡 Timing ok pero contexto dudoso
+  if (fast.state === 'GREEN' && slow.state === 'YELLOW') {
+    return 'YELLOW'
+  }
+
+  // 🔴 Todo lo demás
+  return 'RED'
+}
+import type { MarketSnapshot, MarketType } from '@/types/market'
+import { calculateElasticity } from './elasticityEngine'
+import { resolveElasticityState } from './stateEngine'
+import { getPercentileEngine } from './engineRegistry'
+
+export type MarketAssemblerInput = {
+  marketType: MarketType
+  pair: string
+  timeframe: string
+  price: number
+  ema100: number
+  atr: number
+}
+
+export function assembleMarketSnapshot(
+  input: MarketAssemblerInput
+): MarketSnapshot {
+
+  const { marketType, pair, timeframe, price, ema100, atr } = input
+
+  const elasticity = calculateElasticity({ price, ema100, atr })
+
+  const engineKey = `${marketType}:${pair}:${timeframe}`
+  const percentileEngine = getPercentileEngine(engineKey)
+
+  const percentile = percentileEngine.push(elasticity)
+  const state = resolveElasticityState(elasticity, percentile)
+
+  return {
+    marketType,
+    pair,
+    timeframe,
+    price,
+    ema100,
+    atr,
+    elasticity,
+    percentile,
+    state,
+    timestamp: Date.now(),
+  }
+}
+import { createPercentileEngine } from './percentileEngine'
+
+type EngineKey = string
+
+const registry = new Map<EngineKey, ReturnType<typeof createPercentileEngine>>()
+
+export function getPercentileEngine(key: EngineKey) {
+  if (!registry.has(key)) {
+    registry.set(key, createPercentileEngine(300))
+  }
+
+  return registry.get(key)!
+}
+// 🧠 Engine puro (sin React)
+
+export type ElasticityInput = {
+  price: number
+  ema100: number
+  atr: number
+}
+
+/**
+ * Elasticity = distancia a la EMA normalizada por ATR
+ * Es adimensional → comparable entre pares y timeframes
+ */
+export function calculateElasticity(
+  { price, ema100, atr }: ElasticityInput
+): number {
+  if (atr <= 0) return 0
+  return Math.abs(price - ema100) / atr
+}
+// 🧠 Engine puro (sin React)
+
+export type ElasticityInput = {
+  price: number
+  ema100: number
+  atr: number
+}
+
+/**
+ * Elasticity = distancia a la EMA normalizada por ATR
+ * Es adimensional → comparable entre pares y timeframes
+ */
+export function calculateElasticity(
+  { price, ema100, atr }: ElasticityInput
+): number {
+  if (atr <= 0) return 0
+  return Math.abs(price - ema100) / atr
+}
+/**
+ * Semaforo.tsx
+ *
+ * Señal de decisión principal. Responde a: "¿Qué hago ahora?"
+ *
+ * Incluye:
+ *   - Guard contra state inválido (evita crash si llega valor inesperado)
+ *   - Contador de estabilidad: cuántas actualizaciones consecutivas
+ *     lleva en el estado actual (clave para no operar en parpadeos)
+ *   - Bloqueo por vela: solo marca "listo para operar" si lleva
+ *     estable el tiempo equivalente a una vela M5 completa (~20 polls)
+ */
+
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
+
+export type SemaforoProps = {
+  state:  'GREEN' | 'YELLOW' | 'RED'
+  label?: string
+}
+
+type StateMeta = {
+  color:    string
+  bg:       string
+  label:    string
+  sublabel: string
+}
+
+const VALID_STATES = ['GREEN', 'YELLOW', 'RED'] as const
+type ValidState = typeof VALID_STATES[number]
+
+const STATE_META: Record<ValidState, StateMeta> = {
+  GREEN: {
+    color:    '#16a34a',
+    bg:       'rgba(22,163,74,0.08)',
+    label:    'SETUP VÁLIDO',
+    sublabel: 'Condiciones óptimas para operar',
+  },
+  YELLOW: {
+    color:    '#eab308',
+    bg:       'rgba(234,179,8,0.08)',
+    label:    'ESPERAR',
+    sublabel: 'Condiciones parciales — sin señal clara',
+  },
+  RED: {
+    color:    '#dc2626',
+    bg:       'rgba(220,38,38,0.08)',
+    label:    'NO OPERAR',
+    sublabel: 'Condiciones desfavorables',
+  },
+}
+
+// 20 polls × 15s = 300s = 1 vela M5 completa
+// Si el semáforo lleva 20 polls consecutivos en GREEN → señal estable
+const STABLE_THRESHOLD = 20   // polls para considerar señal confirmada
+const POLL_SECONDS     = 15   // segundos entre cada poll (debe coincidir con useMarketData)
+
+export function Semaforo({ state, label }: SemaforoProps) {
+  // Guard: si state es inválido, mostrar RED con aviso
+  const safeState: ValidState = VALID_STATES.includes(state as ValidState)
+    ? (state as ValidState)
+    : 'RED'
+
+  const meta = STATE_META[safeState]
+
+  // ── Contador de estabilidad ──────────────────────────────────────────────
+  const [count,    setCount]    = useState(0)
+  const [elapsed,  setElapsed]  = useState(0)   // segundos en estado actual
+  const prevStateRef            = useRef(safeState)
+  const elapsedRef              = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => {
+    if (safeState === prevStateRef.current) {
+      // Mismo estado → incrementar contador
+      setCount((c) => c + 1)
+    } else {
+      // Cambió → reiniciar
+      setCount(1)
+      setElapsed(0)
+      prevStateRef.current = safeState
+    }
+  }, [safeState])
+
+  // Segundos transcurridos en el estado actual (para barra de progreso)
+  useEffect(() => {
+    setElapsed(0)
+    if (elapsedRef.current) clearInterval(elapsedRef.current)
+    elapsedRef.current = setInterval(() => {
+      setElapsed((s) => s + 1)
+    }, 1000)
+    return () => {
+      if (elapsedRef.current) clearInterval(elapsedRef.current)
+    }
+  }, [safeState])
+
+  const isStable     = count >= STABLE_THRESHOLD && safeState === 'GREEN'
+  const totalSeconds = STABLE_THRESHOLD * POLL_SECONDS
+  const progressPct  = Math.min((elapsed / totalSeconds) * 100, 100)
+
+  return (
+    <div style={{
+      ...styles.card,
+      background: meta.bg,
+      border: `1px solid ${meta.color}22`,
+    }}>
+
+      {label && <p style={styles.contextLabel}>{label}</p>}
+
+      {/* Círculo con glow */}
+      <div style={styles.circleWrapper}>
+        <div style={{
+          ...styles.circle,
+          background:  meta.color,
+          boxShadow:   `0 0 32px ${meta.color}88, 0 0 8px ${meta.color}`,
+        }}/>
+      </div>
+
+      <h3 style={{ ...styles.mainLabel, color: meta.color }}>
+        {meta.label}
+      </h3>
+      <p style={styles.sublabel}>{meta.sublabel}</p>
+
+      {/* ── Sección de estabilidad ─────────────────────────────────────── */}
+      <div style={styles.stabilitySection}>
+
+        {/* Contador de polls consecutivos */}
+        <div style={styles.stabilityRow}>
+          <span style={styles.stabilityLabel}>Estabilidad</span>
+          <span style={{ ...styles.stabilityValue, color: meta.color }}>
+            {count} / {STABLE_THRESHOLD} polls consecutivos
+          </span>
+        </div>
+
+        {/* Barra de progreso hacia señal estable */}
+        <div style={styles.barTrack}>
+          <div style={{
+            ...styles.barFill,
+            width:      `${progressPct}%`,
+            background: meta.color,
+            boxShadow:  `0 0 6px ${meta.color}66`,
+          }}/>
+        </div>
+
+        {/* Tiempo en estado actual */}
+        <div style={styles.stabilityRow}>
+          <span style={styles.stabilityLabel}>Tiempo en este estado</span>
+          <span style={{ ...styles.stabilityValue, color: '#555' }}>
+            {Math.floor(elapsed / 60)}m {elapsed % 60}s
+          </span>
+        </div>
+
+        {/* Badge de confirmación — aparece solo cuando es estable */}
+        {isStable && (
+          <div style={{
+            ...styles.confirmedBadge,
+            background: 'rgba(22,163,74,0.15)',
+            border:     '1px solid #16a34a55',
+          }}>
+            <div style={{ width:6, height:6, borderRadius:'50%', background:'#16a34a', boxShadow:'0 0 6px #16a34a' }}/>
+            <span style={{ color:'#16a34a', fontSize:11, fontWeight:800, letterSpacing:'0.05em' }}>
+              SEÑAL ESTABLE — 1 VELA M5 CONFIRMADA
+            </span>
+          </div>
+        )}
+
+        {/* Guía de lectura */}
+        <p style={styles.guide}>
+          {safeState === 'GREEN'
+            ? isStable
+              ? '✓ El setup lleva estable el tiempo de una vela M5 completa.'
+              : `Espera ${STABLE_THRESHOLD - count} polls más (${((STABLE_THRESHOLD - count) * POLL_SECONDS / 60).toFixed(1)} min) para confirmar estabilidad.`
+            : 'El semáforo debe mantenerse verde antes de considerar operar.'}
+        </p>
+
+      </div>
+    </div>
+  )
+}
+
+// ─── estilos ──────────────────────────────────────────────────────────────────
+
+const styles: Record<string, CSSProperties> = {
+  card: {
+    marginTop:    16,
+    padding:      '20px 24px',
+    borderRadius: 10,
+    textAlign:    'center',
+    fontFamily:   'system-ui, sans-serif',
+    transition:   'background 0.4s, border 0.4s',
+  },
+  contextLabel: {
+    margin:        '0 0 12px',
+    fontSize:      11,
+    color:         '#555',
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.08em',
+  },
+  circleWrapper: {
+    display:        'flex',
+    justifyContent: 'center',
+    margin:         '0 auto 16px',
+  },
+  circle: {
+    width:        72,
+    height:       72,
+    borderRadius: '50%',
+    transition:   'background 0.4s, box-shadow 0.4s',
+  },
+  mainLabel: {
+    margin:        '0 0 6px',
+    fontSize:      18,
+    fontWeight:    800,
+    letterSpacing: '0.04em',
+    transition:    'color 0.4s',
+  },
+  sublabel: {
+    margin:   '0 0 16px',
+    fontSize: 12,
+    color:    '#555',
+  },
+  stabilitySection: {
+    marginTop:    12,
+    padding:      '12px 14px',
+    background:   '#0d0d0d',
+    borderRadius: 8,
+    border:       '1px solid #1a1a1a',
+    textAlign:    'left',
+  },
+  stabilityRow: {
+    display:        'flex',
+    justifyContent: 'space-between',
+    alignItems:     'center',
+    marginBottom:   6,
+  },
+  stabilityLabel: {
+    fontSize: 11,
+    color:    '#444',
+    fontFamily: 'monospace',
+  },
+  stabilityValue: {
+    fontSize:   11,
+    fontWeight: 700,
+    fontFamily: 'monospace',
+  },
+  barTrack: {
+    height:       5,
+    background:   '#1a1a1a',
+    borderRadius: 3,
+    overflow:     'hidden',
+    marginBottom: 8,
+  },
+  barFill: {
+    height:     '100%',
+    borderRadius: 3,
+    transition: 'width 1s linear',
+  },
+  confirmedBadge: {
+    display:       'flex',
+    alignItems:    'center',
+    gap:           7,
+    padding:       '8px 12px',
+    borderRadius:  6,
+    margin:        '10px 0 6px',
+    justifyContent: 'center',
+  },
+  guide: {
+    margin:   '8px 0 0',
+    fontSize: 11,
+    color:    '#444',
+    fontFamily: 'monospace',
+    lineHeight: 1.5,
+  },
+}/**
+ * ElasticityCard.tsx
+ *
+ * Muestra el estado de elasticidad de M5 y M15 de forma visual.
+ * Responde a: "¿Está el precio suficientemente estirado para operar?"
+ *
+ * Complementa al Semáforo:
+ *   - Semáforo  → "¿Opero o no?"       (decisión)
+ *   - Este card → "¿Por qué dice eso?" (contexto numérico + visual)
+ */
+
+import type { CSSProperties } from 'react'
+import type { MarketSnapshot } from '@/types/market'
+import type { MultiTFState } from '@/engine/multiTimeframeResolver'
+
+// ─── tipos ────────────────────────────────────────────────────────────────────
+
+export type ElasticityCardProps = {
+  m5: MarketSnapshot
+  m15: MarketSnapshot
+  fusedState: MultiTFState
+}
+
+type StateMeta = {
+  label: string
+  color: string
+  bg: string
+  bar: string
+}
+
+type ZoneItem = {
+  label: string
+  range: string
+  color: string
+}
+
+type TimeframeRowProps = {
+  label: string
+  snapshot: MarketSnapshot
+}
+
+// ─── constantes ───────────────────────────────────────────────────────────────
+
+const STATE_META: Record<'GREEN' | 'YELLOW' | 'RED', StateMeta> = {
+  GREEN:  { label: 'OPERAR',    color: '#16a34a', bg: 'rgba(22,163,74,0.12)',  bar: '#16a34a' },
+  YELLOW: { label: 'ESPERAR',   color: '#eab308', bg: 'rgba(234,179,8,0.12)',  bar: '#eab308' },
+  RED:    { label: 'NO OPERAR', color: '#dc2626', bg: 'rgba(220,38,38,0.12)', bar: '#dc2626' },
+}
+
+const ZONES: ZoneItem[] = [
+  { label: 'Equilibrio', range: '< 0.5',   color: '#444' },
+  { label: 'Bajo',       range: '0.5–1.0', color: '#666' },
+  { label: 'Moderado',   range: '1.0–1.5', color: '#eab308' },
+  { label: 'Alto',       range: '1.5–2.0', color: '#f97316' },
+  { label: 'Extremo',    range: '> 2.0',   color: '#16a34a' },
+]
+
+// ─── helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Convierte elasticidad a % para la barra visual.
+ * Techo en 3.0 → 100% (zona visualmente "llena" = extremo máximo).
+ */
+function elasticityToPercent(elasticity: number): number {
+  return Math.min((elasticity / 3) * 100, 100)
+}
+
+/**
+ * Etiqueta de zona para que el trader entienda el número
+ * sin necesidad de memorizar umbrales.
+ */
+function elasticityZoneLabel(elasticity: number): string {
+  if (elasticity >= 2.0) return 'Extremo'
+  if (elasticity >= 1.5) return 'Alto'
+  if (elasticity >= 1.0) return 'Moderado'
+  if (elasticity >= 0.5) return 'Bajo'
+  return 'Equilibrio'
+}
+
+// ─── subcomponente: fila de temporalidad ──────────────────────────────────────
+
+function TimeframeRow({ label, snapshot }: TimeframeRowProps) {
+  const meta = STATE_META[snapshot.state]
+  const pct  = elasticityToPercent(snapshot.elasticity)
+  const zone = elasticityZoneLabel(snapshot.elasticity)
+
+  return (
+    <div style={styles.row}>
+      <span style={styles.rowLabel}>{label}</span>
+
+      {/* Barra visual — cuánto se estiró respecto al máximo esperado */}
+      <div style={styles.barTrack}>
+        <div
+          style={{
+            ...styles.barFill,
+            width: `${pct}%`,
+            background: meta.bar,
+            boxShadow: `0 0 6px ${meta.bar}66`,
+          }}
+        />
+      </div>
+
+      {/* Número + etiqueta de zona */}
+      <div style={styles.rowMeta}>
+        <span style={{ color: meta.color, fontWeight: 700, fontFamily: 'monospace', fontSize: 15 }}>
+          {snapshot.elasticity.toFixed(2)}
+        </span>
+        <span style={{ color: '#555', fontSize: 11, marginLeft: 6 }}>
+          {zone}
+        </span>
+      </div>
+
+      {/* Chip de estado */}
+      <span
+        style={{
+          ...styles.chip,
+          color: meta.color,
+          background: meta.bg,
+          border: `1px solid ${meta.color}44`,
+        }}
+      >
+        {snapshot.state}
+      </span>
+    </div>
+  )
+}
+
+// ─── componente principal — export nombrado ───────────────────────────────────
+
+export function ElasticityCard({ m5, m15, fusedState }: ElasticityCardProps) {
+  const fused = STATE_META[fusedState]
+
+  return (
+    <div style={styles.card}>
+
+      {/* Header: par + badge de señal */}
+      <div style={styles.header}>
+        <div>
+          <p style={styles.pair}>EUR / USD</p>
+          <p style={styles.subtitle}>Elasticity System · M5 + M15</p>
+        </div>
+
+        <div
+          style={{
+            ...styles.summaryBadge,
+            background: fused.bg,
+            border: `1.5px solid ${fused.color}55`,
+          }}
+        >
+          <div
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: fused.color,
+              boxShadow: `0 0 8px ${fused.color}`,
+              flexShrink: 0,
+            }}
+          />
+          <span style={{ color: fused.color, fontWeight: 800, fontSize: 13, letterSpacing: '0.05em' }}>
+            {fused.label}
+          </span>
+        </div>
+      </div>
+
+      <div style={styles.divider} />
+
+      {/* Encabezado de columnas */}
+      <div style={styles.tableHeader}>
+        <span style={{ ...styles.colLabel, minWidth: 90 }}>Temporalidad</span>
+        <span style={{ ...styles.colLabel, flex: 1, paddingLeft: 4 }}>Elasticidad</span>
+        <span style={{ ...styles.colLabel, minWidth: 186, textAlign: 'right' }}>Estado</span>
+      </div>
+
+      <TimeframeRow label="M5  (señal)" snapshot={m5} />
+      <TimeframeRow label="M15 (filtro)" snapshot={m15} />
+
+      <div style={{ ...styles.divider, marginTop: 14 }} />
+
+      {/* Leyenda de zonas */}
+      <div>
+        <span style={styles.legendTitle}>Zonas de elasticidad</span>
+        <div style={styles.legendItems}>
+          {ZONES.map((z: ZoneItem) => (
+            <div key={z.label} style={styles.legendItem}>
+              <span style={{ color: z.color, fontSize: 10, fontWeight: 700 }}>{z.label}</span>
+              <span style={{ color: '#333', fontSize: 9, fontFamily: 'monospace' }}>{z.range}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+    </div>
+  )
+}
+
+// ─── estilos ──────────────────────────────────────────────────────────────────
+
+const styles: Record<string, CSSProperties> = {
+  card: {
+    background: '#0d0d0d',
+    border: '1px solid #1e1e1e',
+    borderRadius: 10,
+    padding: '18px 20px',
+    fontFamily: 'system-ui, sans-serif',
+    color: '#ccc',
+  },
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+  },
+  pair: {
+    margin: 0,
+    fontSize: 18,
+    fontWeight: 800,
+    color: '#e5e5e5',
+    letterSpacing: '-0.02em',
+  },
+  subtitle: {
+    margin: '3px 0 0',
+    fontSize: 11,
+    color: '#444',
+  },
+  summaryBadge: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 7,
+    padding: '7px 14px',
+    borderRadius: 20,
+  },
+  divider: {
+    height: 1,
+    background: '#1a1a1a',
+    marginBottom: 12,
+  },
+  tableHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
+  },
+  colLabel: {
+    fontSize: 9,
+    color: '#3a3a3a',
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.08em',
+  },
+  row: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '10px 0',
+    borderBottom: '1px solid #161616',
+  },
+  rowLabel: {
+    fontSize: 12,
+    color: '#777',
+    minWidth: 90,
+    fontFamily: 'monospace',
+  },
+  barTrack: {
+    flex: 1,
+    height: 6,
+    background: '#1a1a1a',
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  barFill: {
+    height: '100%',
+    borderRadius: 3,
+    transition: 'width 0.5s ease',
+  },
+  rowMeta: {
+    display: 'flex',
+    alignItems: 'baseline',
+    minWidth: 110,
+    justifyContent: 'flex-end',
+  },
+  chip: {
+    fontSize: 10,
+    fontWeight: 700,
+    padding: '3px 8px',
+    borderRadius: 4,
+    letterSpacing: '0.05em',
+    minWidth: 76,
+    textAlign: 'center' as const,
+  },
+  legendTitle: {
+    fontSize: 9,
+    color: '#333',
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.08em',
+  },
+  legendItems: {
+    display: 'flex',
+    gap: 14,
+    marginTop: 7,
+    flexWrap: 'wrap' as const,
+  },
+  legendItem: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+    alignItems: 'center',
+    gap: 2,
+  },
+}/**
+ * DataStatus.tsx
+ *
+ * Panel de verificación de conexión con datos reales.
+ * Muestra de dónde viene cada dato para confirmar que no es simulación.
+ *
+ * Úsalo temporalmente en App.tsx para verificar la conexión.
+ * Una vez confirmado, puedes quitarlo del dashboard.
+ */
+
+import type { FinalMarketView } from '../hooks/useMarketData'
+import type { Candle } from '../backtest/types'
+import type { BacktestResult } from '../backtest/types'
+
+type DataStatusProps = {
+  market: FinalMarketView | null
+  historical: Candle[] | null
+  backtest: BacktestResult | null
+}
+
+type StatusRowProps = {
+  label: string
+  ok: boolean
+  detail: string
+}
+
+function StatusRow({ label, ok, detail }: StatusRowProps) {
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10,
+      padding: '8px 0',
+      borderBottom: '1px solid #1a1a1a',
+    }}>
+      {/* Indicador */}
+      <div style={{
+        width: 8,
+        height: 8,
+        borderRadius: '50%',
+        flexShrink: 0,
+        background: ok ? '#16a34a' : '#dc2626',
+        boxShadow: ok ? '0 0 6px #16a34a' : '0 0 6px #dc2626',
+      }} />
+
+      {/* Label */}
+      <span style={{ fontSize: 12, color: '#888', minWidth: 160, fontFamily: 'monospace' }}>
+        {label}
+      </span>
+
+      {/* Detalle */}
+      <span style={{ fontSize: 12, color: ok ? '#16a34a' : '#dc2626' }}>
+        {detail}
+      </span>
+    </div>
+  )
+}
+
+export function DataStatus({ market, historical, backtest }: DataStatusProps) {
+
+  // ── Verificaciones ────────────────────────────────────────────────────────
+
+  // 1. WebSocket — precio real llega si market existe y cambia
+  const wsOk      = market !== null
+  const wsPrice   = market ? market.m5.price.toFixed(5) : '—'
+  const wsTs      = market ? new Date(market.m5.timestamp).toLocaleTimeString() : '—'
+
+  // 2. Velas históricas — si son reales, el primer datetime no es "ahora"
+  const histOk    = historical !== null && historical.length >= 100
+  const histCount = historical ? historical.length : 0
+  const histFirst = historical && historical.length > 0
+    ? new Date(historical[0].time).toLocaleTimeString()
+    : '—'
+  const histLast  = historical && historical.length > 0
+    ? new Date(historical[historical.length - 1].time).toLocaleTimeString()
+    : '—'
+
+  // 3. Backtest real — si está conectado al motor real, totalSignals no es
+  //    igual a wins (Math.random hacía wins === totalSignals siempre)
+  const btOk      = backtest !== null && backtest.totalSignals !== backtest.wins
+  const btSignals = backtest ? backtest.totalSignals : 0
+  const btWins    = backtest ? backtest.wins : 0
+  const btWR      = backtest ? backtest.winRate : 0
+
+  // 4. EMA real — si es real, ema100 es diferente al precio (no iguales)
+  const emaOk     = market
+    ? Math.abs(market.m5.price - market.m5.ema100) > 0.00001
+    : false
+  const emaVal    = market ? market.m5.ema100.toFixed(5) : '—'
+
+  // 5. ATR real — si es real, no es el fallback 0.0006 exacto
+  const atrOk     = market ? market.m5.atr !== 0.0006 : false
+  const atrVal    = market ? market.m5.atr.toFixed(6) : '—'
+
+  const allOk = wsOk && histOk && btOk && emaOk && atrOk
+
+  return (
+    <div style={{
+      background: '#0d0d0d',
+      border: `1px solid ${allOk ? '#16a34a44' : '#dc262644'}`,
+      borderRadius: 8,
+      padding: '14px 16px',
+      fontFamily: 'system-ui, sans-serif',
+    }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <span style={{ fontSize: 12, color: '#555', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+          Estado de conexión
+        </span>
+        <span style={{
+          fontSize: 11,
+          fontWeight: 700,
+          padding: '3px 10px',
+          borderRadius: 12,
+          color: allOk ? '#16a34a' : '#dc2626',
+          background: allOk ? 'rgba(22,163,74,0.1)' : 'rgba(220,38,38,0.1)',
+        }}>
+          {allOk ? '✓ DATOS REALES' : '⚠ VERIFICAR'}
+        </span>
+      </div>
+
+      {/* Filas de verificación */}
+      <StatusRow
+        label="WebSocket (precio vivo)"
+        ok={wsOk}
+        detail={wsOk ? `${wsPrice} · ${wsTs}` : 'Sin conexión'}
+      />
+      <StatusRow
+        label="EMA100 (velas cerradas)"
+        ok={emaOk}
+        detail={emaOk ? `${emaVal}` : 'Usando fallback o mock'}
+      />
+      <StatusRow
+        label="ATR14 (velas cerradas)"
+        ok={atrOk}
+        detail={atrOk ? `${atrVal}` : 'Usando fallback 0.0006'}
+      />
+      <StatusRow
+        label="Historial REST"
+        ok={histOk}
+        detail={histOk
+          ? `${histCount} velas · desde ${histFirst} hasta ${histLast}`
+          : `Solo ${histCount} velas (necesita ≥ 100)`}
+      />
+      <StatusRow
+        label="Backtest (motor real)"
+        ok={btOk}
+        detail={btOk
+          ? `${btSignals} señales · ${btWins} wins · WR ${btWR}%`
+          : backtest
+            ? `WR 100% con ${btSignals} señales = datos ficticios`
+            : 'Sin datos de backtest'}
+      />
+
+      {/* Nota */}
+      <p style={{ margin: '10px 0 0', fontSize: 10, color: '#333', fontFamily: 'monospace' }}>
+        * EMA/ATR se actualizan cada 5 min (M5) y cada 15 min (M15) con velas cerradas reales.
+      </p>
+    </div>
+  )
+} import type { BacktestResult } from '@/backtest/types'
+
+export function BacktestMetrics({ data }: { data: BacktestResult }) {
+  return (
+    <div style={{ marginTop: 24, padding: 16, border: '1px solid #333' }}>
+      <h3>📊 Backtesting (últimas horas)</h3>
+      <p>Señales: {data.totalSignals}</p>
+      <p>Win rate: {data.winRate}%</p>
+      <p>Velas promedio a reversión: {data.avgBarsToRevert}</p>
+    </div>
+  )
+}
+/**
+ * backtestEngine.ts
+ *
+ * Motor de backtesting histórico. Analiza velas pasadas para:
+ *   1. Detectar cuándo el sistema habría generado una señal GREEN
+ *   2. Medir si el precio revirtió a la EMA dentro del límite de velas
+ *   3. Guardar estado y elasticidad de cada evento → necesario para
+ *      compareSignalWithHistory (comparación contextual)
+ *
+ * Cada BacktestEvent guarda:
+ *   - entryIndex  → índice de la vela donde se detectó la señal
+ *   - exitIndex   → índice donde revirtió (-1 si no revirtió)
+ *   - barsToRevert → cuántas velas tardó en revertir
+ *   - state       → GREEN/YELLOW/RED en ese momento (siempre GREEN aquí)
+ *   - elasticity  → valor exacto de elasticidad en ese momento
+ *                   ↑ este campo es el que permite la comparación contextual
+ */
+
+import type {
+  Candle,
+  BacktestConfig,
+  BacktestEvent,
+  BacktestResult,
+} from './types'
+
+import { calculateElasticity } from '@/engine/elasticityEngine'
+import { resolveElasticityState } from '@/engine/stateEngine'
+import { createPercentileEngine } from '@/engine/percentileEngine'
+
+export function runBacktest(
+  candles: Candle[],
+  config: BacktestConfig
+): BacktestResult {
+  const percentileEngine = createPercentileEngine(200)
+
+  const events: BacktestEvent[] = []
+
+  for (let i = config.emaPeriod; i < candles.length; i++) {
+    const candle = candles[i]
+
+    // 1️⃣ EMA simple sobre las últimas `emaPeriod` velas
+    //    Para backtest es suficiente — no necesitamos EMA exponencial exacta
+    const slice = candles.slice(i - config.emaPeriod, i)
+    const ema   = slice.reduce((sum, c) => sum + c.close, 0) / config.emaPeriod
+
+    // 2️⃣ ATR de la vela actual (High - Low)
+    //    Fallback 0.0001 para evitar división por cero en velas planas
+    const atr = Math.abs(candle.high - candle.low) || 0.0001
+
+    // 3️⃣ Elasticidad = distancia a EMA normalizada por ATR
+    const elasticity = calculateElasticity({
+      price:  candle.close,
+      ema100: ema,
+      atr,
+    })
+
+    // 4️⃣ Percentil dentro de la ventana de 200 velas
+    const percentile = percentileEngine.push(elasticity)
+
+    // 5️⃣ Estado semáforo en este punto histórico
+    const state = resolveElasticityState(elasticity, percentile)
+
+    // Solo registramos eventos cuando habría habido señal GREEN
+    if (state !== 'GREEN') continue
+
+    // 6️⃣ Buscar reversión en las siguientes `maxBarsToRevert` velas
+    //    Reversión = precio toca la EMA desde el lado contrario
+    let reverted = false
+
+    for (
+      let j = 1;
+      j <= config.maxBarsToRevert && i + j < candles.length;
+      j++
+    ) {
+      const future = candles[i + j]
+
+      const revertedDown = candle.close > ema && future.low  <= ema
+      const revertedUp   = candle.close < ema && future.high >= ema
+
+      if (revertedDown || revertedUp) {
+        events.push({
+          entryIndex:   i,
+          exitIndex:    i + j,
+          barsToRevert: j,
+          state,        // ← siempre GREEN (solo entramos si state === 'GREEN')
+          elasticity,   // ← valor exacto para compareSignalWithHistory
+        })
+        reverted = true
+        break
+      }
+    }
+
+    // Si no revirtió dentro del límite → loss (exitIndex = -1)
+    if (!reverted) {
+      events.push({
+        entryIndex:   i,
+        exitIndex:    -1,
+        barsToRevert: config.maxBarsToRevert,
+        state,
+        elasticity,
+      })
+    }
+  }
+
+  // 📊 Métricas finales
+  const wins         = events.filter(e => e.exitIndex !== -1)
+  const totalSignals = events.length
+
+  return {
+    totalSignals,
+    wins:    wins.length,
+    winRate:
+      totalSignals === 0
+        ? 0
+        : Math.round((wins.length / totalSignals) * 100),
+    avgBarsToRevert:
+      wins.length === 0
+        ? 0
+        : Math.round(
+            wins.reduce((s, e) => s + e.barsToRevert, 0) / wins.length
+          ),
+    events,  // ← necesario para compareSignalWithHistory
+  }
+} import type { BacktestResult } from './types'
+import type { MarketState } from '../types/market'
+
+export type SignalComparisonResult = {
+  similarSignals: number
+  winRate: number
+  avgBarsToRevert: number
+}
+
+export function compareSignalWithHistory(
+  current: {
+    state: MarketState
+    elasticity: number
+  },
+  backtest: BacktestResult
+): SignalComparisonResult {
+  const similar = backtest.events.filter(
+    e =>
+      e.state === current.state &&
+      Math.abs(e.elasticity - current.elasticity) < 0.1
+  )
+
+  const wins = similar.length
+
+  return {
+    similarSignals: similar.length,
+    winRate:
+      similar.length > 0 ? (wins / similar.length) * 100 : 0,
+    avgBarsToRevert:
+      similar.reduce((a, e) => a + e.barsToRevert, 0) /
+      (similar.length || 1),
+  }
+} export type MarketBias = 'bullish' | 'bearish' | 'neutral'
+
+export function mapStateToBias(
+  state: 'GREEN' | 'YELLOW' | 'RED'
+): MarketBias {
+  if (state === 'GREEN') return 'bullish'
+  if (state === 'RED') return 'bearish'
+  return 'neutral'
+}
+export type MarketBias = 'bullish' | 'bearish' | 'neutral'
+
+export function mapStateToBias(
+  state: 'GREEN' | 'YELLOW' | 'RED'
+): MarketBias {
+  if (state === 'GREEN') return 'bullish'
+  if (state === 'RED') return 'bearish'
+  return 'neutral'
+}
+/**
+ * backtest/types.ts
+ *
+ * Tipos del módulo de backtesting.
+ * Todos los archivos de backtest importan desde aquí.
+ */
+
+// Una vela OHLC estándar
+export type Candle = {
+  time:  number
+  open:  number
+  high:  number
+  low:   number
+  close: number
+}
+
+export type HistoricalMarketData = {
+  candles: Candle[]
+}
+
+/**
+ * Configuración que recibe runBacktest.
+ * emaPeriod      → velas para calcular la EMA de referencia
+ * maxBarsToRevert → máximo de velas que esperamos para que el precio revierta
+ */
+export type BacktestConfig = {
+  emaPeriod:       number
+  maxBarsToRevert: number
+}
+
+/**
+ * Un evento registrado durante el backtest.
+ * Guarda estado y elasticidad para que compareSignalWithHistory
+ * pueda buscar situaciones similares a la señal actual.
+ */
+export type BacktestEvent = {
+  entryIndex:   number
+  exitIndex:    number   // -1 si no revirtió (loss)
+  barsToRevert: number
+  state:        'GREEN' | 'YELLOW' | 'RED'
+  elasticity:   number
+}
+
+/**
+ * Resultado completo del backtest.
+ * events es necesario para compareSignalWithHistory.
+ */
+export type BacktestResult = {
+  totalSignals:    number
+  wins:            number
+  winRate:         number
+  avgBarsToRevert: number
+  events:          BacktestEvent[]
+}
+
+export type CurrentSignal = {
+  elasticity: number
+  state:      'bullish' | 'bearish' | 'neutral'
+}
+
+export type SignalMatchResult = {
+  similarSignals:  number
+  winRate:         number
+  avgBarsToRevert: number
+}/**
+ * backtest/types.ts
+ *
+ * Tipos del módulo de backtesting.
+ * Todos los archivos de backtest importan desde aquí.
+ */
+
+// Una vela OHLC estándar
+export type Candle = {
+  time:  number
+  open:  number
+  high:  number
+  low:   number
+  close: number
+}
+
+export type HistoricalMarketData = {
+  candles: Candle[]
+}
+
+/**
+ * Configuración que recibe runBacktest.
+ * emaPeriod      → velas para calcular la EMA de referencia
+ * maxBarsToRevert → máximo de velas que esperamos para que el precio revierta
+ */
+export type BacktestConfig = {
+  emaPeriod:       number
+  maxBarsToRevert: number
+}
+
+/**
+ * Un evento registrado durante el backtest.
+ * Guarda estado y elasticidad para que compareSignalWithHistory
+ * pueda buscar situaciones similares a la señal actual.
+ */
+export type BacktestEvent = {
+  entryIndex:   number
+  exitIndex:    number   // -1 si no revirtió (loss)
+  barsToRevert: number
+  state:        'GREEN' | 'YELLOW' | 'RED'
+  elasticity:   number
+}
+
+/**
+ * Resultado completo del backtest.
+ * events es necesario para compareSignalWithHistory.
+ */
+export type BacktestResult = {
+  totalSignals:    number
+  wins:            number
+  winRate:         number
+  avgBarsToRevert: number
+  events:          BacktestEvent[]
+}
+
+export type CurrentSignal = {
+  elasticity: number
+  state:      'bullish' | 'bearish' | 'neutral'
+}
+
+export type SignalMatchResult = {
+  similarSignals:  number
+  winRate:         number
+  avgBarsToRevert: number
+}
+
+
+
+
+
+ tu consola:
+1. Refused to display 'https://cdn.ritekit.com/' in a frame...
+¿Qué es? RiteKit es una herramienta de redes sociales/SEO. Esto no es tu código. Es una extensión de tu navegador (probablemente RiteTag o similar) que está intentando inyectar un iframe en tu página local y el navegador la bloquea por seguridad.
+Solución: Ignóralo por completo, o deshabilita esa extensión para localhost.
+2. Failed to load resource: 404 ()
+¿Qué es? Suele ser el navegador buscando el archivo favicon.ico (el ícono de la pestaña) y no lo encuentra en tu carpeta public.
+Solución: Inofensivo. Si quieres que desaparezca, solo pon cualquier imagen llamada favicon.ico en la carpeta public de tu frontend.
+3. WebSocket connection to 'ws://localhost:8081/' failed (en refresh.js)
+¿Qué es? Ese puerto 8081 y el archivo refresh.js le pertenecen a Vite (tu entorno de desarrollo de React). Es el sistema de "Hot Reload" que refresca la página cuando guardas un archivo. A veces al recargar la página a mano, Vite pierde la conexión un segundo y tira ese error.
+Solución: Inofensivo. Desaparecerá solo cuando compiles el proyecto para producción (npm run build).
+4. EL ÚNICO ERROR TUYO: WebSocket is closed before the connection is established
+Esto es muy interesante. Notaste que en tu backend dice:
+[Server] Frontend conectado 
+→
+→
+ desconectado 
+→
+→
+ conectado
+¿Por qué pasa? Estás usando React 18 en modo estricto (<StrictMode>). En desarrollo, React renderiza los componentes dos veces seguidas intencionalmente (Monta 
+→
+→
+ Desmonta 
+→
+→
+ Monta) para asegurarse de que limpiaste bien tus efectos.
+¿Qué ocurre?
+React monta useMarketData y abre el WebSocket.
+Un milisegundo después, React lo desmonta (StrictMode). Tu código de limpieza hace ws.close().
+Como el WebSocket apenas se estaba abriendo (no había terminado de conectarse) y tú lo mandaste a cerrar, el navegador lanza esa advertencia roja: "Oye, lo cerraste antes de que se conectara".
+React lo vuelve a montar y esta vez sí se queda conectado (por eso funciona perfecto).
+Solución (Para dejar la consola limpiecita):
+Abre tu archivo useMarketData.ts y baja hasta el final del useEffect (donde está el return () => { ... }). Reemplaza ese pequeño bloque por este:
+code
+TypeScript
+return () => {
+      stoppedRef.current = true
+      const ws = wsRef.current
+      if (ws) {
+        // Limpiamos los eventos para que no disparen errores al desmontar
+        ws.onerror = null
+        ws.onclose = null
+        
+        // Si estaba a medio conectar, le decimos que se cierre apenas termine
+        if (ws.readyState === WebSocket.CONNECTING) {
+          ws.onopen = () => ws.close()
+        } else {
+          // Si ya estaba conectado o cerrado, lo cerramos normal
+          ws.close()
+        }
+      }
+    }
+Resumen
