@@ -1,0 +1,9 @@
+// src/styles/00-base/00-defaults/_02-breakpoints.scss
+
+$small:  425px;
+$medium: 768px;
+$large:  1280px;
+
+@mixin small  { @media (min-width: $small)  { @content; } }
+@mixin medium { @media (min-width: $medium) { @content; } }
+@mixin large  { @media (min-width: $large)  { @content; } }

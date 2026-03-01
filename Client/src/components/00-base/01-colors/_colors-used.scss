@@ -1,0 +1,5 @@
+@use './colors-vars' as cv;
+
+$color-pair-title:  cv.$green-primary;  // EUR/USD en verde
+$color-background:  cv.$black;
+$color-text:        cv.$white;

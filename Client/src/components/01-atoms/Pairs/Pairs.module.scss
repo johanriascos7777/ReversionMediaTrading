@@ -1,0 +1,27 @@
+// src/components/01-atoms/Pairs/Pairs.module.scss
+
+@use '../../00-base/00-defaults/01-variables' as vars;
+@use '../../00-base/01-colors/_colors-used' as colors;
+
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap');
+
+.pairs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 2rem;
+}
+
+.pairs__title {
+  font-family: vars.$font-display;
+  font-size: vars.$font-size-pair-title;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+  margin: 0;
+
+  // Variantes de color
+  &.green { color: colors.$color-pair-title; }  // #00FF88
+  &.white { color: colors.$color-text; }        // #ffffff
+}
