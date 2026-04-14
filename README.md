@@ -184,3 +184,12 @@ Sistema profesional de streaming financiero:
 
 ## 🧩 En una frase
 Este backend transforma **ticks crudos** en **inteligencia de mercado estructurada** y la distribuye en tiempo real a todos los clientes con **una sola conexión viva**.
+
+
+---
+
+## 🛠 Arquitectura del Sistema
+
+Encapsulamiento: Todo el sistema depende de TwelveDataClient.ts.
+Facilidad de Cambio: Para cambiar de fuente de datos, solo necesitamos crear un nuevo "Provider" que emita eventos del tipo tick y el resto del sistema (MarketEngine, CandleBuilder) seguirá funcionando igual.
+
