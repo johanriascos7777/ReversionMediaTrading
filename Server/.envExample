@@ -1,0 +1,7 @@
+# ─── Servidor ────────────────────────────────────────────────────────────────
+PORT=8080
+
+# ─── Twelve Data (Legacy / Fallback) ─────────────────────────────────────────
+TWELVE_DATA_API_KEY=
+TWELVE_DATA_SYMBOL=EUR/USD
+
