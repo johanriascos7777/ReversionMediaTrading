@@ -66,10 +66,15 @@ export class TwelveDataClient extends EventEmitter {
         return
       }
 
-      // Solo procesar mensajes de precio
-      if (msg.event !== 'price' || !msg.price) return
+      if (msg.event !== 'price') return
 
-      this.emit('tick', msg.price, Date.now())
+      // Validar que el mensaje tenga data y su timestamp oficial
+      if (!msg.price || !msg.timestamp) {
+        this.emit('dropped_tick', 'missing_data')
+        return
+      }
+
+      this.emit('tick', msg.price, msg.timestamp * 1000)
     })
 
     this.ws.on('error', (err) => {

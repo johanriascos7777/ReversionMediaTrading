@@ -53,7 +53,13 @@ export class CandleBuilder extends EventEmitter {
 
     const currentPeriodId = Math.floor(this.current.time / this.periodMs)
 
-    if (periodId !== currentPeriodId) {
+    // Ignorar ticks tardíos o desordenados que corromperían la secuencia histórica
+    if (periodId < currentPeriodId) {
+      this.emit('dropped_tick', 'out_of_order')
+      return
+    }
+
+    if (periodId > currentPeriodId) {
       // Cerrar vela actual
       const closedCandle: Candle = { ...this.current, closed: true }
       this.closed.push(closedCandle)

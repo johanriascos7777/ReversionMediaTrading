@@ -27,7 +27,7 @@ import WebSocket, { WebSocketServer } from 'ws'
 import https from 'https'
 import { TwelveDataClient } from './twelveDataClient'
 import { CandleBuilder } from './candleBuilder'
-import { calculateSnapshot, resolveMultiTF } from './marketEngine'
+import { calculateSnapshot, resolveMultiTF, calculateElasticityForCandles, pushPercentileHistory } from './marketEngine'
 import type { BackendMessage, Candle, MarketSnapshot } from './types'
 
 // ─── ⚙️ CONFIGURACIÓN ────────────────────────────────────────────────────────
@@ -48,6 +48,33 @@ let lastSnapshotM15: MarketSnapshot | null = null
 // Guardamos el historial en memoria para servirlo al frontend
 let historicalM5:  Candle[] = []
 let historicalM15: Candle[] = []
+
+// ─── 📊 METRICAS EN MEMORIA ──────────────────────────────────────────────────
+
+const serverMetrics = {
+  droppedTicksTotal: 0,
+  lastDroppedTickAt: null as number | null,
+  droppedTicksPerMinute: 0,
+  currentDelay: 0,
+  avgDelay: 0,
+  maxDelay: 0
+}
+
+let dropsInCurrentMinute = 0
+const delayHistory: number[] = []
+const DELAY_HISTORY_SIZE = 50
+
+setInterval(() => {
+  serverMetrics.droppedTicksPerMinute = dropsInCurrentMinute
+  serverMetrics.maxDelay = 0
+  dropsInCurrentMinute = 0
+}, 60000)
+
+function recordDroppedTick() {
+  serverMetrics.droppedTicksTotal++
+  dropsInCurrentMinute++
+  serverMetrics.lastDroppedTickAt = Date.now()
+}
 
 // ─── HTTP server (historial + CORS) ──────────────────────────────────────────
 
@@ -70,7 +97,12 @@ const httpServer = http.createServer((req, res) => {
   // Health check
   if (req.url === '/health') {
     res.writeHead(200)
-    res.end(JSON.stringify({ status: 'ok', candlesM5: historicalM5.length, candlesM15: historicalM15.length }))
+    res.end(JSON.stringify({ 
+      status: 'ok', 
+      candlesM5: historicalM5.length, 
+      candlesM15: historicalM15.length,
+      metrics: serverMetrics
+    }))
     return
   }
 
@@ -167,13 +199,31 @@ function fetchHistoricalCandles(
 }
 
 function warmUpBuilder(builder: CandleBuilder, candles: Candle[]): void {
-  candles.forEach((c) => builder.injectHistoricalCandle(c))
-  console.log(`[WarmUp] ${builder.getTimeframe()} precalentado con ${candles.length} velas`)
+  candles.forEach((c) => {
+    builder.injectHistoricalCandle(c)
+    // Se alimenta el percentil duro con cada vela del historial
+    const elasticity = calculateElasticityForCandles(builder.getCandles(), c.close)
+    if (elasticity !== null) {
+      pushPercentileHistory(builder.getTimeframe(), elasticity)
+    }
+  })
+  console.log(`[WarmUp] ${builder.getTimeframe()} precalentado con ${candles.length} velas (percentiles listos)`)
 }
 
 // ─── Procesamiento de ticks ───────────────────────────────────────────────────
 
 function processTick(price: number, timestamp: number): void {
+  const delay = Math.max(0, Date.now() - timestamp)
+  
+  serverMetrics.currentDelay = delay
+  serverMetrics.maxDelay = Math.max(serverMetrics.maxDelay, delay)
+  
+  delayHistory.push(delay)
+  if (delayHistory.length > DELAY_HISTORY_SIZE) {
+    delayHistory.shift()
+  }
+  serverMetrics.avgDelay = Math.round(delayHistory.reduce((a, b) => a + b, 0) / delayHistory.length)
+
   builderM5.tick(price, timestamp)
   builderM15.tick(price, timestamp)
 
@@ -248,14 +298,26 @@ async function main() {
   const twelveClient = new TwelveDataClient(API_KEY, SYMBOL)
 
   twelveClient.on('tick', processTick)
+  twelveClient.on('dropped_tick', recordDroppedTick)
   twelveClient.on('status', (status: string, message: string) => {
     broadcast({ type: 'status', status: status as 'connecting' | 'connected' | 'disconnected', message })
   })
 
   twelveClient.connect()
 
-  builderM5.on('candle:closed',  () => console.log(`[Server] Vela M5  cerrada — ${builderM5.getClosedCandles().length} velas`))
-  builderM15.on('candle:closed', () => console.log(`[Server] Vela M15 cerrada — ${builderM15.getClosedCandles().length} velas`))
+  builderM5.on('dropped_tick', recordDroppedTick)
+  builderM15.on('dropped_tick', recordDroppedTick)
+
+  builderM5.on('candle:closed',  (candle) => {
+    const el = calculateElasticityForCandles(builderM5.getCandles(), candle.close)
+    if (el !== null) pushPercentileHistory('M5', el)
+    console.log(`[Server] Vela M5  cerrada — ${builderM5.getClosedCandles().length} velas`)
+  })
+  builderM15.on('candle:closed', (candle) => {
+    const el = calculateElasticityForCandles(builderM15.getCandles(), candle.close)
+    if (el !== null) pushPercentileHistory('M15', el)
+    console.log(`[Server] Vela M15 cerrada — ${builderM15.getClosedCandles().length} velas`)
+  })
 }
 
 main().catch(console.error)

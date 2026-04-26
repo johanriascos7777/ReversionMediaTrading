@@ -70,10 +70,15 @@ class PercentileEngine {
     this.maxSize = maxSize
   }
 
-  push(value: number): number {
+  // 1. Agrega al historial duro (solo usado cuando cierra la vela)
+  push(value: number): void {
     this.window.push(value)
     if (this.window.length > this.maxSize) this.window.shift()
+  }
 
+  // 2. Consulta en memoria sin alterar el historial (para ticks en tiempo real)
+  rank(value: number): number {
+    if (this.window.length === 0) return 50 // Seguro por defecto
     const sorted = [...this.window].sort((a, b) => a - b)
     const rank   = sorted.filter(v => v <= value).length
     return (rank / this.window.length) * 100
@@ -100,6 +105,30 @@ function resolveState(elasticity: number, percentile: number): MarketState {
 // ─── Snapshot calculator ──────────────────────────────────────────────────────
 
 /**
+ * Extrae la misma lógica matemática exacta para usarla tanto
+ * en las velas cerradas como en los snapshots en tiempo real.
+ */
+export function calculateElasticityForCandles(candles: Candle[], price: number): number | null {
+  if (candles.length < EMA_PERIOD + 2) return null
+
+  const closes  = candles.map(c => c.close)
+  const ema100  = calculateEMA(closes, EMA_PERIOD)
+  const atr     = calculateATR(candles, ATR_PERIOD)
+
+  if (atr === 0) return null
+
+  return Math.abs(price - ema100) / atr
+}
+
+/**
+ * Alimentador exclusivo para el historial del percentil (se llama on candle:closed)
+ */
+export function pushPercentileHistory(timeframe: Timeframe, elasticity: number): void {
+  const percentileEngine = timeframe === 'M5' ? percentileM5 : percentileM15
+  percentileEngine.push(elasticity)
+}
+
+/**
  * Dado el array de velas de un timeframe, calcula el snapshot completo.
  * price = precio del último tick (puede ser intracandle)
  */
@@ -109,18 +138,16 @@ export function calculateSnapshot(
   timeframe: Timeframe,
   timestamp: number
 ): MarketSnapshot | null {
-  if (candles.length < EMA_PERIOD + 2) return null
+  const elasticity = calculateElasticityForCandles(candles, price)
+  if (elasticity === null) return null
 
+  // Re-calculamos params necesarios para el payload final
   const closes  = candles.map(c => c.close)
   const ema100  = calculateEMA(closes, EMA_PERIOD)
   const atr     = calculateATR(candles, ATR_PERIOD)
 
-  if (atr === 0) return null
-
-  const elasticity = Math.abs(price - ema100) / atr
-
   const percentileEngine = timeframe === 'M5' ? percentileM5 : percentileM15
-  const percentile       = percentileEngine.push(elasticity)
+  const percentile       = percentileEngine.rank(elasticity) // Solo lectura, no mutación!
 
   const state = resolveState(elasticity, percentile)
 

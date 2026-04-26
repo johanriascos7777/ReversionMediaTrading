@@ -7,6 +7,7 @@ import { useBacktest } from './hooks/useBacktest'
 import { Semaforo } from './components/Semaforo'
 import { BacktestMetrics } from './components/BacktestMetrics'
 import { ElasticityCard } from './components/ElasticityCard'
+import { SystemObservability } from './components/SystemObservability'
 
 import { compareSignalWithHistory } from './backtest/compareSignal'
 import { fuseMarketState } from './logic/fuseMarketState'
@@ -180,6 +181,11 @@ function App() {
         </p>
         <Semaforo state={fused.state} label="Confirmado" />
       </div>
+
+      {/* ============================= */}
+      {/* 🛠️ SECCIÓN 6 — OBSERVABILITY   */}
+      {/* ============================= */}
+      <SystemObservability />
     </div>
   )
 }
