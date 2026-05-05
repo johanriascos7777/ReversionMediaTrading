@@ -49,13 +49,26 @@ function App() {
   }
 
   // 🧠 4. Comparación señal actual vs histórico real
+  // FIX Bug#1: usar m5.state (no finalState) — backtest.events son M5 individual
   const comparison =
     backtest
       ? compareSignalWithHistory(
-          { state: market.finalState, elasticity: market.m5.elasticity },
+          { state: market.m5.state, elasticity: market.m5.elasticity },
           backtest
         )
       : null
+
+  // DEBUG — borrar cuando semáforo confirmado verde
+  if (comparison) {
+    console.log(
+      '[DEBUG]',
+      '\n  M5  → state:', market.m5.state,  '| elasticity:', market.m5.elasticity.toFixed(4),  '| percentile:', market.m5.percentile,
+      '\n  M15 → state:', market.m15.state, '| elasticity:', market.m15.elasticity.toFixed(4), '| percentile:', market.m15.percentile,
+      '\n  finalState (M5 AND M15):', market.finalState,
+      '\n  fuseMarketState receives current =', market.finalState, '← ESTE es el que necesita ser GREEN',
+      '\n  comparison → similarSignals:', comparison.similarSignals, '| winRate:', comparison.winRate.toFixed(1) + '%',
+    )
+  }
 
   // 🧠 5. Fusión final → { state, explanation }
   const fused = fuseMarketState(market.finalState, comparison)

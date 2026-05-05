@@ -21,7 +21,7 @@ let config = {
   percentileGreen:  80,
   percentileYellow: 60,
   elasticityMin:    1.0,
-  elasticityMax:    5.5,
+  elasticityMax:    10.0,  // era 5.5 — sin base estadística, bloqueaba señales extremas válidas
 }
 
 export function updateEngineConfig(c: Partial<typeof config>): void {

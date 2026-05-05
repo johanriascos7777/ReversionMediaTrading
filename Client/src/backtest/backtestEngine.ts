@@ -43,9 +43,21 @@ export function runBacktest(
     const slice = candles.slice(i - config.emaPeriod, i)
     const ema   = slice.reduce((sum, c) => sum + c.close, 0) / config.emaPeriod
 
-    // 2️⃣ ATR de la vela actual (High - Low)
-    //    Fallback 0.0001 para evitar división por cero en velas planas
-    const atr = Math.abs(candle.high - candle.low) || 0.0001
+    // 2️⃣ ATR14 rolling — idéntico al cálculo del servidor
+    //    Usa 14 velas anteriores con true range (High-Low + gaps)
+    //    FIX Bug#2: antes usaba |high-low| de 1 vela → elasticidades 3-5x mayores
+    const atrStart = Math.max(1, i - 13)
+    let atrSum = 0, atrCount = 0
+    for (let k = atrStart; k <= i; k++) {
+      const prev = candles[k - 1].close
+      const tr   = Math.max(
+        candles[k].high - candles[k].low,
+        Math.abs(candles[k].high - prev),
+        Math.abs(candles[k].low  - prev)
+      )
+      atrSum += tr; atrCount++
+    }
+    const atr = atrCount > 0 ? atrSum / atrCount : 0.0001
 
     // 3️⃣ Elasticidad = distancia a EMA normalizada por ATR
     const elasticity = calculateElasticity({
