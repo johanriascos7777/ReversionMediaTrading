@@ -32,9 +32,9 @@ import type { BackendMessage, Candle, MarketSnapshot } from './types'
 
 // ─── ⚙️ CONFIGURACIÓN ────────────────────────────────────────────────────────
 
-const API_KEY        = 'b584cd192ee6441a86f06373b685283b'
-const SYMBOL         = 'EUR/USD'
-const PORT           = 8080
+const API_KEY        = process.env.TWELVE_DATA_API_KEY ?? ''
+const SYMBOL         = process.env.TWELVE_DATA_SYMBOL   ?? 'EUR/USD'
+const PORT           = parseInt(process.env.PORT ?? '8080')
 const HISTORY_OUTPUT = 500
 
 // ─────────────────────────────────────────────────────────────────────────────
