@@ -1,5 +1,6 @@
+import { useEffect, useRef } from 'react'
 import './App.css'
-import { WS_URL } from '@/config/env'
+import { WS_URL, API_URL } from '@/config/env'
 
 import { useMarketData } from './hooks/useMarketData'
 import { useHistoricalData } from './hooks/useHistoricalData'
@@ -22,6 +23,36 @@ function App() {
 
   // 🧪 3. Backtest real — devuelve BacktestResult | null directamente
   const backtest = useBacktest(historical)
+
+  // 📡 Refs para Notificación de Telegram
+  const previousStateRef = useRef<string | null>(null)
+  const lastAlertTimeRef = useRef(0)
+
+  // 📡 Efecto de Telegram (siempre a nivel superior)
+  useEffect(() => {
+    if (!market) return
+    const comp = backtest
+      ? compareSignalWithHistory({ state: market.m5.state, elasticity: market.m5.elasticity }, backtest)
+      : null
+    const fusedStateRaw = fuseMarketState(market.finalState, comp)
+
+    const isNewGreen = previousStateRef.current !== 'GREEN' && fusedStateRaw.state === 'GREEN'
+    const now = Date.now()
+    const canAlert = now - lastAlertTimeRef.current > 300000
+
+    if (isNewGreen && canAlert) {
+      lastAlertTimeRef.current = now
+      fetch(`${API_URL}/notify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: `🟢 ALERTA: Señal Confirmada\n\n${fusedStateRaw.explanation}\n\nM5: ${market.m5.elasticity.toFixed(2)} | M15: ${market.m15.elasticity.toFixed(2)}`
+        })
+      }).catch(err => console.error('[Telegram] Error llamando al webhook:', err))
+    }
+
+    previousStateRef.current = fusedStateRaw.state
+  }, [market, backtest])
 
   // ── Pantalla de carga / conexión ──────────────────────────────────────────
  // ── Pantalla de carga / conexión ──────────────────────────────────────────
@@ -200,6 +231,18 @@ function App() {
       {/* 🛠️ SECCIÓN 6 — OBSERVABILITY   */}
       {/* ============================= */}
       <SystemObservability />
+
+      <button 
+        onClick={() => {
+          fetch(`${API_URL}/notify`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: "hola probando bot 7777" })
+          }).catch(console.error)
+        }}
+      >
+        Probar Bot Telegram
+      </button>
     </div>
   )
 }

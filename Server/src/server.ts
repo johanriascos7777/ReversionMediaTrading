@@ -84,8 +84,47 @@ function recordDroppedTick() {
 const httpServer = http.createServer((req, res) => {
   // CORS — permite que el frontend en localhost:5173 acceda
   res.setHeader('Access-Control-Allow-Origin', '*')
-  res.setHeader('Access-Control-Allow-Methods', 'GET')
-  res.setHeader('Content-Type', 'application/json')
+  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(200)
+    res.end()
+    return
+  }
+
+  // Notificaciones de Telegram
+  if (req.url === '/notify' && req.method === 'POST') {
+    let body = ''
+    req.on('data', chunk => body += chunk.toString())
+    req.on('end', async () => {
+      try {
+        const payload = JSON.parse(body)
+        const message = payload.message || '⚠️ Señal Confirmada en Verde'
+        
+        const token = process.env.TELEGRAM_BOT_TOKEN
+        const chatId = process.env.TELEGRAM_CHAT_ID
+        
+        if (token && chatId) {
+          const url = `https://api.telegram.org/bot${token}/sendMessage`
+          await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: chatId, text: message })
+          })
+          console.log('[Telegram] Notificación enviada con éxito')
+        }
+        res.writeHead(200)
+        res.end(JSON.stringify({ status: 'ok' }))
+      } catch (err) {
+        console.error('[Telegram] Error enviando notificación:', err)
+        res.writeHead(500)
+        res.end(JSON.stringify({ error: 'Internal Server Error' }))
+      }
+    })
+    return
+  }
 
   if (req.url?.startsWith('/history')) {
     const url        = new URL(req.url, `http://localhost:${PORT}`)
