@@ -4,7 +4,6 @@
     "module": "commonjs",
     "moduleResolution": "node",
     "ignoreDeprecations": "6.0",
-    "types": ["node"],
     "lib": ["ES2020"],
     "outDir": "./dist",
     "rootDir": "./src",
