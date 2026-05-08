@@ -77,7 +77,7 @@ export class TwelveDataClient extends EventEmitter {
       this.emit('tick', msg.price, msg.timestamp * 1000)
     })
 
-    this.ws.on('error', (err) => {
+    this.ws.on('error', (err: Error) => {
       console.error('[TwelveData] Error:', err.message)
       this.emit('status', 'disconnected', `Error: ${err.message}`)
     })

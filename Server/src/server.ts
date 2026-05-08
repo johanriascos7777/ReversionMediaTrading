@@ -158,7 +158,7 @@ function fetchHistoricalCandles(
       `/time_series?symbol=${encodeURIComponent(SYMBOL)}` +
       `&interval=${interval}&outputsize=${outputSize}&apikey=${API_KEY}`
 
-    const req = https.request({ hostname: 'api.twelvedata.com', path, method: 'GET' }, (res) => {
+    const req = https.request({ hostname: 'api.twelvedata.com', path, method: 'GET' }, (res: http.IncomingMessage) => {
       let raw = ''
       res.on('data', (chunk: Buffer) => { raw += chunk.toString() })
       res.on('end', () => {
@@ -188,7 +188,7 @@ function fetchHistoricalCandles(
       })
     })
     
-    req.on('error', (err) => {
+    req.on('error', (err: Error) => {
       // Error de red a nivel de Node.js
       console.error(`[History] Error de red en request:`, err.message)
       resolve([])
@@ -308,12 +308,12 @@ async function main() {
   builderM5.on('dropped_tick', recordDroppedTick)
   builderM15.on('dropped_tick', recordDroppedTick)
 
-  builderM5.on('candle:closed',  (candle) => {
+  builderM5.on('candle:closed',  (candle: Candle) => {
     const el = calculateElasticityForCandles(builderM5.getCandles(), candle.close)
     if (el !== null) pushPercentileHistory('M5', el)
     console.log(`[Server] Vela M5  cerrada — ${builderM5.getClosedCandles().length} velas`)
   })
-  builderM15.on('candle:closed', (candle) => {
+  builderM15.on('candle:closed', (candle: Candle) => {
     const el = calculateElasticityForCandles(builderM15.getCandles(), candle.close)
     if (el !== null) pushPercentileHistory('M15', el)
     console.log(`[Server] Vela M15 cerrada — ${builderM15.getClosedCandles().length} velas`)
