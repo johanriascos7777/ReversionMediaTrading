@@ -22,6 +22,9 @@
  *-No cree múltiples instancias
  */
 
+import dotenv from 'dotenv'
+dotenv.config()
+
 import http from 'http'
 import WebSocket, { WebSocketServer } from 'ws'
 import https from 'https'

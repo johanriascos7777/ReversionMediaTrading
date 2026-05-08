@@ -12,8 +12,9 @@
 
 import { useEffect, useState } from 'react'
 import type { Candle } from '../backtest/types'
+import { API_URL } from '@/config/env'
 
-const BACKEND_HTTP_URL = 'http://localhost:8080'
+const BACKEND_HTTP_URL = API_URL
 
 export function useHistoricalData(): Candle[] | null {
   const [candles, setCandles] = useState<Candle[] | null>(null)

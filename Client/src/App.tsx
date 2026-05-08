@@ -1,4 +1,5 @@
 import './App.css'
+import { WS_URL } from '@/config/env'
 
 import { useMarketData } from './hooks/useMarketData'
 import { useHistoricalData } from './hooks/useHistoricalData'
@@ -42,7 +43,7 @@ function App() {
           {wsStatus === 'connected' && 'Conectado ✓ Esperando suficientes velas históricas para calcular EMA100...'}
         </p>
         <p style={{ margin: 0, fontSize: 11, color: '#333' }}>
-          ws://localhost:8080
+          {WS_URL}
         </p>
       </div>
     )
@@ -88,7 +89,7 @@ function App() {
           background: '#16a34a', boxShadow: '0 0 6px #16a34a',
         }}/>
         <span style={{ fontSize: 11, color: '#16a34a', fontFamily: 'monospace' }}>
-          Backend conectado · ws://localhost:8080
+          Backend conectado · {WS_URL}
         </span>
       </div>
 

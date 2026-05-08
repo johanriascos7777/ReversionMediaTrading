@@ -14,10 +14,11 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { MarketSnapshot } from '@/types/market'
+import { WS_URL } from '@/config/env'
 
 // ─── ⚙️ CONFIGURACIÓN ────────────────────────────────────────────────────────
 
-const BACKEND_WS_URL  = 'ws://localhost:8080'
+const BACKEND_WS_URL  = WS_URL
 const RECONNECT_MS    = 3_000
 
 // ─────────────────────────────────────────────────────────────────────────────

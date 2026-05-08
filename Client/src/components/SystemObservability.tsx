@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { API_URL } from '@/config/env';
 
 type HealthMetrics = {
   droppedTicksTotal: number;
@@ -17,7 +18,7 @@ export function SystemObservability() {
   useEffect(() => {
     const fetchMetrics = async () => {
       try {
-        const res = await fetch('http://localhost:8080/health');
+        const res = await fetch(`${API_URL}/health`);
         if (!res.ok) return;
         const data = await res.json();
         setMetrics(data.metrics || null);
