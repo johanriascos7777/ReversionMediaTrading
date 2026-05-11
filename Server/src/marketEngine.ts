@@ -18,8 +18,8 @@ const ATR_PERIOD = 14
 
 // Umbrales del stateEngine — se actualizan con calibración
 let config = {
-  percentileGreen:  80,
-  percentileYellow: 60,
+  percentileGreen:  75,
+  percentileYellow: 55,
   elasticityMin:    1.0,
   elasticityMax:    10.0,  // era 5.5 — sin base estadística, bloqueaba señales extremas válidas
 }

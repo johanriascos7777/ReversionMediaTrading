@@ -9,7 +9,7 @@ export function resolveElasticityState(
 ): MarketState {
 
   // 🟢 Zona óptima para reversión
-  if (percentile >= 75 && elasticity <= 5.5) {
+  if (percentile >= 75 && elasticity <= 10.0) {
     return 'GREEN'
   }
 
