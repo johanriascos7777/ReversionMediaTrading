@@ -283,3 +283,42 @@ Aquí está la magia. Imagina estos dos escenarios:
 En el Escenario A, esos 10 pips son un movimiento **extremo** y deberías operar. En el Escenario B, esos mismos 10 pips son **insignificantes** y no deberías hacer nada.
 
 Al usar el ratio de **> 2.0**, tu sistema detecta automáticamente cuándo el movimiento es **anormal para ese momento específico**, sin que tú tengas que ajustar nada manualmente. Por eso decimos que es una regla objetiva: **mide el exceso de confianza del mercado.**
+
+---
+
+## ⚙️ Configuración de Sensibilidad (Percentiles)
+
+Si en el futuro deseas ajustar qué tan "exigente" es el semáforo para ponerse en **VERDE**, debes modificar los valores de **Percentil** en dos lugares para que el sistema esté sincronizado:
+
+### 1. En el Backend (Servidor)
+Este es el que manda para las notificaciones y el semáforo de tiempo real.
+*   **Archivo:** `Server/src/marketEngine.ts`
+*   **Línea ~21:**
+    ```typescript
+    let config = {
+      percentileGreen:  80, // <-- Cambia a 75 para más señales, o 80 para más precisión
+      percentileYellow: 60, // <-- Cambia a 55 si bajas el verde, o 60 si lo subes
+      // ...
+    }
+    ```
+
+### 2. En el Frontend (Dashboard)
+Este es el que manda para el Backtest y la "Señal Confirmada".
+*   **Archivo:** `Client/src/engine/stateEngine.ts`
+*   **Línea ~12:**
+    ```typescript
+    // Zona óptima (Verde)
+    if (percentile >= 80 && ... ) // <-- Pon el mismo número que en el backend
+    
+    // Zona media (Amarillo)
+    if (percentile >= 60)         // <-- Pon el mismo número que en el backend
+    ```
+
+### 💡 Guía Rápida de Valores
+| Valor | Tipo de Trading | Resultado |
+| :--- | :--- | :--- |
+| **80 / 60** | **Conservador** | Pocas señales, pero de muy alta probabilidad (puntos extremos). |
+| **75 / 55** | **Moderado** | Más señales, entradas un poco más tempranas. |
+
+> [!IMPORTANT]
+> **Regla de Oro:** Siempre mantén el mismo número en el Backend y en el Frontend. Si no están igual, el Dashboard podría decirte que una señal es válida pero el servidor no te enviará la alerta (o viceversa).
