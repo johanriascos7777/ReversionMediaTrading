@@ -25,6 +25,14 @@ export function fuseMarketState(
   comparison: SignalComparisonResult | null
 ): FusedStateResult {
 
+  // Si el mercado en tiempo real está tranquilo (RED), la señal confirmada debe ser RED
+  if (current === 'RED') {
+    return {
+      state: 'RED',
+      explanation: 'El mercado se encuentra en un rango normal y estable. Sin señales de sobreextensión.',
+    }
+  }
+
   // Sin datos históricos aún → precaución, pero no bloqueamos
   if (!comparison) {
     return {
