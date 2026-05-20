@@ -23,6 +23,7 @@ export type MarketSnapshot = {
   ema100:      number
   atr:         number
   elasticity:  number
+  percentile:  number
   state:       MarketState
   timestamp:   number
 }

@@ -157,6 +157,7 @@ export function calculateSnapshot(
     ema100,
     atr,
     elasticity,
+    percentile,
     state,
     timestamp,
   }
