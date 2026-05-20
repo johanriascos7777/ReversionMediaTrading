@@ -1,5 +1,18 @@
 # 📡 Market Streaming Engine
 
+# tip
+
+El Disparador por Agotamiento: Esperar a que la resortera empiece a ceder 🪃
+En lugar de abrir una operación en el instante exacto en que el semáforo se pone en GREEN (lo cual es como intentar atrapar un cuchillo cayendo), implementa la regla del Giro de Elasticidad:
+
+Espera a que el semáforo se ponga en GREEN (fase de alerta).
+No entres todavía. Observa el valor de la elasticidad de las velas que van cerrando.
+Si en la Vela A la elasticidad es 2.3 y en la Vela B sigue subiendo a 2.6, la resortera sigue estirándose.
+Entra al mercado únicamente cuando una vela cierre con una elasticidad MENOR a la de la vela anterior (por ejemplo, que baje de 2.6 a 2.4).
+Esto confirma que el impulso se ha agotado y que la resortera ya ha empezado a contraerse.
+
+---
+
 Backend matemático en tiempo real con WebSocket
 
 ---
@@ -291,34 +304,40 @@ Al usar el ratio de **> 2.0**, tu sistema detecta automáticamente cuándo el mo
 Si en el futuro deseas ajustar qué tan "exigente" es el semáforo para ponerse en **VERDE**, debes modificar los valores de **Percentil** en dos lugares para que el sistema esté sincronizado:
 
 ### 1. En el Backend (Servidor)
+
 Este es el que manda para las notificaciones y el semáforo de tiempo real.
-*   **Archivo:** `Server/src/marketEngine.ts`
-*   **Línea ~21:**
-    ```typescript
-    let config = {
-      percentileGreen:  80, // <-- Cambia a 75 para más señales, o 80 para más precisión
-      percentileYellow: 60, // <-- Cambia a 55 si bajas el verde, o 60 si lo subes
-      // ...
-    }
-    ```
+
+- **Archivo:** `Server/src/marketEngine.ts`
+- **Línea ~21:**
+  ```typescript
+  let config = {
+    percentileGreen: 80, // <-- Cambia a 75 para más señales, o 80 para más precisión
+    percentileYellow: 60, // <-- Cambia a 55 si bajas el verde, o 60 si lo subes
+    // ...
+  };
+  ```
 
 ### 2. En el Frontend (Dashboard)
+
 Este es el que manda para el Backtest y la "Señal Confirmada".
-*   **Archivo:** `Client/src/engine/stateEngine.ts`
-*   **Línea ~12:**
-    ```typescript
-    // Zona óptima (Verde)
-    if (percentile >= 80 && ... ) // <-- Pon el mismo número que en el backend
-    
-    // Zona media (Amarillo)
-    if (percentile >= 60)         // <-- Pon el mismo número que en el backend
-    ```
+
+- **Archivo:** `Client/src/engine/stateEngine.ts`
+- **Línea ~12:**
+
+  ```typescript
+  // Zona óptima (Verde)
+  if (percentile >= 80 && ... ) // <-- Pon el mismo número que en el backend
+
+  // Zona media (Amarillo)
+  if (percentile >= 60)         // <-- Pon el mismo número que en el backend
+  ```
 
 ### 💡 Guía Rápida de Valores
-| Valor | Tipo de Trading | Resultado |
-| :--- | :--- | :--- |
+
+| Valor       | Tipo de Trading | Resultado                                                       |
+| :---------- | :-------------- | :-------------------------------------------------------------- |
 | **80 / 60** | **Conservador** | Pocas señales, pero de muy alta probabilidad (puntos extremos). |
-| **75 / 55** | **Moderado** | Más señales, entradas un poco más tempranas. |
+| **75 / 55** | **Moderado**    | Más señales, entradas un poco más tempranas.                    |
 
 > [!IMPORTANT]
 > **Regla de Oro:** Siempre mantén el mismo número en el Backend y en el Frontend. Si no están igual, el Dashboard podría decirte que una señal es válida pero el servidor no te enviará la alerta (o viceversa).
