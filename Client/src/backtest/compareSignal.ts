@@ -20,7 +20,7 @@ export function compareSignalWithHistory(
       Math.abs(e.elasticity - current.elasticity) < 0.1
   )
 
-  const wins = similar.length
+  const wins = similar.filter(e => e.exitIndex !== -1).length
 
   return {
     similarSignals: similar.length,
