@@ -24,34 +24,60 @@ function App() {
   // 🧪 3. Backtest real — devuelve BacktestResult | null directamente
   const backtest = useBacktest(historical)
 
-  // 📡 Refs para Notificación de Telegram
-  const previousStateRef = useRef<string | null>(null)
-  const lastAlertTimeRef = useRef(0)
+  // 📡 Refs para Notificación de Telegram — Frontend (espejo del backend)
+  const prevFusedStateRef  = useRef<string | null>(null)   // para Tipo A
+  const prevFinalStateRef  = useRef<string | null>(null)   // para Tipo B
+  const lastAlertTimeARef  = useRef(0)                     // cooldown Tipo A
+  const lastAlertTimeBRef  = useRef(0)                     // cooldown Tipo B
 
-  // 📡 Efecto de Telegram (siempre a nivel superior)
+  // 📡 Efecto de Telegram — lógica idéntica a checkAndSendTelegramAlert() del backend
   useEffect(() => {
     if (!market) return
+
     const comp = backtest
       ? compareSignalWithHistory({ state: market.m5.state, elasticity: market.m5.elasticity }, backtest)
       : null
     const fusedStateRaw = fuseMarketState(market.finalState, comp)
-
-    const isNewGreen = previousStateRef.current !== 'GREEN' && fusedStateRaw.state === 'GREEN'
     const now = Date.now()
-    const canAlert = now - lastAlertTimeRef.current > 300000
 
-    if (isNewGreen && canAlert) {
-      lastAlertTimeRef.current = now
+    // ─── Tipo A: Señal Confirmada (fused === GREEN) ───────────────────────────
+    const isNewFusedGreen = prevFusedStateRef.current !== 'GREEN' && fusedStateRaw.state === 'GREEN'
+    const canAlertA = now - lastAlertTimeARef.current > 300000 // 5 min
+
+    if (isNewFusedGreen && canAlertA) {
+      lastAlertTimeARef.current = now
       fetch(`${API_URL}/notify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: `🟢 ALERTA: Señal Confirmada\n\n${fusedStateRaw.explanation}\n\nM5: ${market.m5.elasticity.toFixed(2)} | M15: ${market.m15.elasticity.toFixed(2)}`
+          message:
+            `[📱 FRONTEND - Calculado en Cliente] 🟢 ALERTA CONFIRMADA (Tipo A - Alta Probabilidad)` +
+            `\n\n${fusedStateRaw.explanation}` +
+            `\n\nM5: ${market.m5.elasticity.toFixed(2)} | M15: ${market.m15.elasticity.toFixed(2)}`
         })
-      }).catch(err => console.error('[Telegram] Error llamando al webhook:', err))
+      }).catch(err => console.error('[Telegram-Frontend] Error Tipo A:', err))
     }
 
-    previousStateRef.current = fusedStateRaw.state
+    // ─── Tipo B: Señal Tiempo Real sin confirmación histórica ─────────────────
+    const isNewFinalGreen = prevFinalStateRef.current !== 'GREEN' && market.finalState === 'GREEN'
+    const canAlertB = now - lastAlertTimeBRef.current > 300000 // 5 min
+
+    if (isNewFinalGreen && fusedStateRaw.state !== 'GREEN' && canAlertB) {
+      lastAlertTimeBRef.current = now
+      fetch(`${API_URL}/notify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message:
+            `[📱 FRONTEND - Calculado en Cliente] 🟡 ALERTA TIEMPO REAL (Tipo B - Moderada Probabilidad)` +
+            `\n\nEl precio se encuentra sobre-estirado en el corto plazo (finalState: GREEN), pero no superó el porcentaje mínimo del backtest histórico.` +
+            `\n\nM5: ${market.m5.elasticity.toFixed(2)} | M15: ${market.m15.elasticity.toFixed(2)}`
+        })
+      }).catch(err => console.error('[Telegram-Frontend] Error Tipo B:', err))
+    }
+
+    prevFusedStateRef.current = fusedStateRaw.state
+    prevFinalStateRef.current = market.finalState
   }, [market, backtest])
 
   // ── Pantalla de carga / conexión ──────────────────────────────────────────

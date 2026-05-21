@@ -336,7 +336,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
 
     if (isNewFusedGreen && canAlertA) {
       this.lastTelegramAlertTimeA = now;
-      const message = `🟢 ALERTA CONFIRMADA (Tipo A - Alta Probabilidad)\n\n${fused.explanation}\n\nM5: ${m5.elasticity.toFixed(2)} | M15: ${m15.elasticity.toFixed(2)}`;
+      const message = `[⚙️ BACKEND - Autónomo] 🟢 ALERTA CONFIRMADA (Tipo A - Alta Probabilidad)\n\n${fused.explanation}\n\nM5: ${m5.elasticity.toFixed(2)} | M15: ${m15.elasticity.toFixed(2)}`;
       const url = `https://api.telegram.org/bot${token}/sendMessage`;
 
       try {
@@ -357,7 +357,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
 
     if (isNewFinalGreen && fused.state !== 'GREEN' && canAlertB) {
       this.lastTelegramAlertTimeB = now;
-      const message = `🟡 ALERTA TIEMPO REAL (Tipo B - Moderada Probabilidad)\n\nEl precio se encuentra sobre-estirado en el corto plazo (finalState: GREEN), pero no superó el porcentaje mínimo del backtest histórico.\n\nM5: ${m5.elasticity.toFixed(2)} | M15: ${m15.elasticity.toFixed(2)}`;
+      const message = `[⚙️ BACKEND - Autónomo] 🟡 ALERTA TIEMPO REAL (Tipo B - Moderada Probabilidad)\n\nEl precio se encuentra sobre-estirado en el corto plazo (finalState: GREEN), pero no superó el porcentaje mínimo del backtest histórico.\n\nM5: ${m5.elasticity.toFixed(2)} | M15: ${m15.elasticity.toFixed(2)}`;
       const url = `https://api.telegram.org/bot${token}/sendMessage`;
 
       try {
