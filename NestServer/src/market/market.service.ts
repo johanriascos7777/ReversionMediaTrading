@@ -43,11 +43,12 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
   private readonly apiKey = process.env.TWELVE_DATA_API_KEY ?? '';
   private readonly symbol = process.env.TWELVE_DATA_SYMBOL ?? 'EUR/USD,GBP/USD,USD/JPY';
   private readonly symbolList: string[] = [];
+  private readonly apiKeyList: string[] = [];
 
   // Mapa de estados de símbolos
   private readonly symbolStates = new Map<string, SymbolState>();
 
-  private twelveClient: TwelveDataClient | null = null;
+  private readonly twelveClients: TwelveDataClient[] = [];
 
   // Métricas
   public readonly serverMetrics = {
@@ -66,6 +67,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
 
   constructor() {
     this.symbolList = this.symbol.split(',').map((s) => s.trim());
+    this.apiKeyList = this.apiKey.split(',').map((k) => k.trim());
 
     // Iniciar intervalo de métricas
     this.metricsInterval = setInterval(() => {
@@ -163,30 +165,38 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       await new Promise((r) => setTimeout(r, 2000));
     }
 
-    // 2. Conectar Twelve Data WebSocket pasándole todos los símbolos
-    this.twelveClient = new TwelveDataClient(this.apiKey, this.symbolList);
+    // 2. Conectar cada par a su respectiva API Key por WebSocket separado
+    for (let i = 0; i < this.symbolList.length; i++) {
+      const sym = this.symbolList[i];
+      const key = this.apiKeyList[i] ?? this.apiKeyList[0] ?? '';
 
-    this.twelveClient.on('tick', (symbol: string, price: number, timestamp: number) =>
-      this.processTick(symbol, price, timestamp)
-    );
-    this.twelveClient.on('dropped_tick', (reason: string) => this.recordDroppedTick(reason));
-    this.twelveClient.on('status', (status: string, message: string) => {
-      this.events.emit('broadcast', {
-        type: 'status',
-        status: status as 'connecting' | 'connected' | 'disconnected',
-        message,
-      } satisfies BackendMessage);
-    });
+      console.log(`[MarketService] Iniciando cliente WebSocket para ${sym} usando clave: ...${key.slice(-6)}`);
+      const client = new TwelveDataClient(key, sym);
 
-    this.twelveClient.connect();
+      client.on('tick', (symbol: string, price: number, timestamp: number) =>
+        this.processTick(symbol, price, timestamp)
+      );
+      client.on('dropped_tick', (reason: string) => this.recordDroppedTick(reason));
+      client.on('status', (status: string, message: string) => {
+        this.events.emit('broadcast', {
+          type: 'status',
+          status: status as 'connecting' | 'connected' | 'disconnected',
+          message: `[${sym}] ${message}`,
+        } satisfies BackendMessage);
+      });
+
+      client.connect();
+      this.twelveClients.push(client);
+    }
   }
 
   onModuleDestroy() {
     console.log('[MarketService] Deteniendo servicio...');
     if (this.metricsInterval) clearInterval(this.metricsInterval);
-    if (this.twelveClient) {
-      this.twelveClient.disconnect();
+    for (const client of this.twelveClients) {
+      client.disconnect();
     }
+    this.twelveClients.length = 0;
   }
 
   // Retorna todos los últimos snapshots del sistema
@@ -268,9 +278,12 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
     outputSize: number
   ): Promise<Candle[]> {
     return new Promise((resolve) => {
+      const idx = this.symbolList.indexOf(symbol);
+      const key = idx !== -1 && this.apiKeyList[idx] ? this.apiKeyList[idx] : (this.apiKeyList[0] ?? '');
+
       const path =
         `/time_series?symbol=${encodeURIComponent(symbol)}` +
-        `&interval=${interval}&outputsize=${outputSize}&apikey=${this.apiKey}`;
+        `&interval=${interval}&outputsize=${outputSize}&apikey=${key}`;
 
       const req = https.request(
         { hostname: 'api.twelvedata.com', path, method: 'GET' },
