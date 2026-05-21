@@ -35,7 +35,9 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
   // Backtesting y Fusión de Señal (Fase 2)
   private lastBacktestM5: BacktestResult | null = null;
   private previousFusedState: MarketState | null = null;
-  private lastTelegramAlertTime = 0;
+  private previousFinalState: MarketState | null = null;
+  private lastTelegramAlertTimeA = 0;
+  private lastTelegramAlertTimeB = 0;
 
   // Métricas
   public readonly serverMetrics = {
@@ -298,7 +300,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
     } satisfies BackendMessage);
 
     // Alerta de Telegram autónoma
-    this.checkAndSendTelegramAlert(fusedStateResult, snapshotM5, snapshotM15);
+    this.checkAndSendTelegramAlert(fusedStateResult, finalState, snapshotM5, snapshotM15);
 
     if (Math.random() < 0.05) {
       console.log(
@@ -313,38 +315,65 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
 
   private async checkAndSendTelegramAlert(
     fused: FusedStateResult,
+    finalState: MarketState,
     m5: MarketSnapshot,
     m15: MarketSnapshot
   ): Promise<void> {
-    const isNewGreen = this.previousFusedState !== 'GREEN' && fused.state === 'GREEN';
     const now = Date.now();
-    const canAlert = now - this.lastTelegramAlertTime > 300000; // 5 minutos de cooldown
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    const chatId = process.env.TELEGRAM_CHAT_ID;
 
-    if (isNewGreen && canAlert) {
-      this.lastTelegramAlertTime = now;
-      const token = process.env.TELEGRAM_BOT_TOKEN;
-      const chatId = process.env.TELEGRAM_CHAT_ID;
+    if (!token || !chatId) {
+      console.warn('[Telegram-Service] No se pudo enviar alerta autónoma: Faltan credenciales en el .env');
+      this.previousFusedState = fused.state;
+      this.previousFinalState = finalState;
+      return;
+    }
 
-      if (token && chatId) {
-        const message = `🟢 ALERTA: Señal Confirmada\n\n${fused.explanation}\n\nM5: ${m5.elasticity.toFixed(2)} | M15: ${m15.elasticity.toFixed(2)}`;
-        const url = `https://api.telegram.org/bot${token}/sendMessage`;
+    // 🟢 Caso 1: Alerta Tipo A (Señal Confirmada e Históricamente Sólida)
+    const isNewFusedGreen = this.previousFusedState !== 'GREEN' && fused.state === 'GREEN';
+    const canAlertA = now - this.lastTelegramAlertTimeA > 300000; // 5 min cooldown
 
-        try {
-          await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chat_id: chatId, text: message }),
-          });
-          console.log('[Telegram-Service] Alerta autónoma enviada con éxito');
-        } catch (err) {
-          console.error('[Telegram-Service] Error enviando alerta autónoma:', err);
-        }
-      } else {
-        console.warn('[Telegram-Service] No se pudo enviar alerta autónoma: Faltan credenciales en el .env');
+    if (isNewFusedGreen && canAlertA) {
+      this.lastTelegramAlertTimeA = now;
+      const message = `🟢 ALERTA CONFIRMADA (Tipo A - Alta Probabilidad)\n\n${fused.explanation}\n\nM5: ${m5.elasticity.toFixed(2)} | M15: ${m15.elasticity.toFixed(2)}`;
+      const url = `https://api.telegram.org/bot${token}/sendMessage`;
+
+      try {
+        await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: chatId, text: message }),
+        });
+        console.log('[Telegram-Service] Alerta Tipo A (Confirmada) enviada con éxito');
+      } catch (err) {
+        console.error('[Telegram-Service] Error enviando alerta Tipo A:', err);
+      }
+    }
+
+    // 🟡 Caso 2: Alerta Tipo B (Señal en Tiempo Real, pero sin confirmación del backtest)
+    const isNewFinalGreen = this.previousFinalState !== 'GREEN' && finalState === 'GREEN';
+    const canAlertB = now - this.lastTelegramAlertTimeB > 300000; // 5 min cooldown
+
+    if (isNewFinalGreen && fused.state !== 'GREEN' && canAlertB) {
+      this.lastTelegramAlertTimeB = now;
+      const message = `🟡 ALERTA TIEMPO REAL (Tipo B - Moderada Probabilidad)\n\nEl precio se encuentra sobre-estirado en el corto plazo (finalState: GREEN), pero no superó el porcentaje mínimo del backtest histórico.\n\nM5: ${m5.elasticity.toFixed(2)} | M15: ${m15.elasticity.toFixed(2)}`;
+      const url = `https://api.telegram.org/bot${token}/sendMessage`;
+
+      try {
+        await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: chatId, text: message }),
+        });
+        console.log('[Telegram-Service] Alerta Tipo B (Tiempo Real) enviada con éxito');
+      } catch (err) {
+        console.error('[Telegram-Service] Error enviando alerta Tipo B:', err);
       }
     }
 
     this.previousFusedState = fused.state;
+    this.previousFinalState = finalState;
   }
 
   private recordDroppedTick(reason: string) {
