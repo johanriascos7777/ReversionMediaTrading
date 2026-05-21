@@ -24,23 +24,42 @@ const RECONNECT_MS    = 3_000
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type FinalMarketView = {
-  m5:         MarketSnapshot
-  m15:        MarketSnapshot
-  finalState: 'GREEN' | 'YELLOW' | 'RED'
+  symbol:           string
+  m5:               MarketSnapshot
+  m15:              MarketSnapshot
+  finalState:       'GREEN' | 'YELLOW' | 'RED'
+  fusedState:       'GREEN' | 'YELLOW' | 'RED'
+  fusedExplanation: string
+  fusedComparison:  any
+  backtest:         any
+}
+
+export type MultiSymbolMarketData = {
+  [symbol: string]: FinalMarketView
 }
 
 type BackendMessage =
-  | { type: 'snapshot'; m5: MarketSnapshot; m15: MarketSnapshot; finalState: 'GREEN' | 'YELLOW' | 'RED' }
+  | {
+      type:             'snapshot'
+      symbol:           string
+      m5:               MarketSnapshot
+      m15:              MarketSnapshot
+      finalState:       'GREEN' | 'YELLOW' | 'RED'
+      fusedState:       'GREEN' | 'YELLOW' | 'RED'
+      fusedExplanation: string
+      fusedComparison:  any
+      backtest:         any
+    }
   | { type: 'status';   status: string; message: string }
   | { type: 'error';    message: string }
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected'
 
 export function useMarketData(): {
-  data:   FinalMarketView | null
+  data:   MultiSymbolMarketData | null
   status: ConnectionStatus
 } {
-  const [data,   setData]   = useState<FinalMarketView | null>(null)
+  const [data,   setData]   = useState<MultiSymbolMarketData | null>(null)
   const [status, setStatus] = useState<ConnectionStatus>('connecting')
   const wsRef               = useRef<WebSocket | null>(null)
   const stoppedRef          = useRef(false)
@@ -71,11 +90,19 @@ export function useMarketData(): {
         }
 
         if (msg.type === 'snapshot') {
-          setData({
-            m5:         msg.m5,
-            m15:        msg.m15,
-            finalState: msg.finalState,
-          })
+          setData(prev => ({
+            ...prev,
+            [msg.symbol]: {
+              symbol:           msg.symbol,
+              m5:               msg.m5,
+              m15:              msg.m15,
+              finalState:       msg.finalState,
+              fusedState:       msg.fusedState,
+              fusedExplanation: msg.fusedExplanation,
+              fusedComparison:  msg.fusedComparison,
+              backtest:         msg.backtest,
+            }
+          }))
         }
 
         if (msg.type === 'status') {

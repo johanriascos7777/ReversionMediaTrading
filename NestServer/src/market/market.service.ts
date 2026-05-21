@@ -12,32 +12,42 @@ import { fuseMarketState } from './fuseMarketState';
 
 const HISTORY_OUTPUT = 500;
 
+export class SymbolState {
+  public readonly symbol: string;
+  public readonly builderM5 = new CandleBuilder('M5');
+  public readonly builderM15 = new CandleBuilder('M15');
+
+  public lastSnapshotM5: MarketSnapshot | null = null;
+  public lastSnapshotM15: MarketSnapshot | null = null;
+
+  public historicalM5: Candle[] = [];
+  public historicalM15: Candle[] = [];
+
+  // Backtesting y Fusión de Señal (Fase 2)
+  public lastBacktestM5: BacktestResult | null = null;
+  public previousFusedState: MarketState | null = null;
+  public previousFinalState: MarketState | null = null;
+  public lastTelegramAlertTimeA = 0;
+  public lastTelegramAlertTimeB = 0;
+
+  constructor(symbol: string) {
+    this.symbol = symbol;
+  }
+}
+
 @Injectable()
 export class MarketService implements OnModuleInit, OnModuleDestroy {
   public readonly events = new EventEmitter();
 
   // Configuración
   private readonly apiKey = process.env.TWELVE_DATA_API_KEY ?? '';
-  private readonly symbol = process.env.TWELVE_DATA_SYMBOL ?? 'EUR/USD';
+  private readonly symbol = process.env.TWELVE_DATA_SYMBOL ?? 'EUR/USD,GBP/USD,USD/JPY';
+  private readonly symbolList: string[] = [];
 
-  // Builders y estado
-  private readonly builderM5 = new CandleBuilder('M5');
-  private readonly builderM15 = new CandleBuilder('M15');
-
-  private lastSnapshotM5: MarketSnapshot | null = null;
-  private lastSnapshotM15: MarketSnapshot | null = null;
-
-  private historicalM5: Candle[] = [];
-  private historicalM15: Candle[] = [];
+  // Mapa de estados de símbolos
+  private readonly symbolStates = new Map<string, SymbolState>();
 
   private twelveClient: TwelveDataClient | null = null;
-
-  // Backtesting y Fusión de Señal (Fase 2)
-  private lastBacktestM5: BacktestResult | null = null;
-  private previousFusedState: MarketState | null = null;
-  private previousFinalState: MarketState | null = null;
-  private lastTelegramAlertTimeA = 0;
-  private lastTelegramAlertTimeB = 0;
 
   // Métricas
   public readonly serverMetrics = {
@@ -55,6 +65,8 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
   private metricsInterval: NodeJS.Timeout | null = null;
 
   constructor() {
+    this.symbolList = this.symbol.split(',').map((s) => s.trim());
+
     // Iniciar intervalo de métricas
     this.metricsInterval = setInterval(() => {
       this.serverMetrics.droppedTicksPerMinute = this.dropsInCurrentMinute;
@@ -67,49 +79,96 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
     console.log('[MarketService] Inicializando...');
     console.log('╔════════════════════════════════════╗');
     console.log('║   Elasticity System — NestJS       ║');
-    console.log(`║   Symbol: ${this.symbol}                    ║`);
+    console.log(`║   Symbols: ${this.symbolList.join(', ')}`);
     console.log('╚════════════════════════════════════╝');
 
-    // 1. Cargar historial para pre-calentar
-    console.log('[MarketService] Cargando historial M5 (500 velas)...');
-    this.historicalM5 = await this.fetchHistoricalCandles('5min', HISTORY_OUTPUT);
+    // 1. Cargar historial y pre-calentar cada par
+    for (const sym of this.symbolList) {
+      console.log(`[MarketService] Inicializando par: ${sym}`);
+      const state = new SymbolState(sym);
+      this.symbolStates.set(sym, state);
 
-    await new Promise((r) => setTimeout(r, 2000)); // pausa entre llamadas REST
+      console.log(`[MarketService] [${sym}] Cargando historial M5 (500 velas)...`);
+      state.historicalM5 = await this.fetchHistoricalCandles(sym, '5min', HISTORY_OUTPUT);
 
-    console.log('[MarketService] Cargando historial M15 (500 velas)...');
-    this.historicalM15 = await this.fetchHistoricalCandles('15min', HISTORY_OUTPUT);
+      await new Promise((r) => setTimeout(r, 2000)); // pausa entre llamadas REST para evitar rate limit (8/min)
 
-    if (this.historicalM5.length > 0) this.warmUpBuilder(this.builderM5, this.historicalM5);
-    if (this.historicalM15.length > 0) this.warmUpBuilder(this.builderM15, this.historicalM15);
+      console.log(`[MarketService] [${sym}] Cargando historial M15 (500 velas)...`);
+      state.historicalM15 = await this.fetchHistoricalCandles(sym, '15min', HISTORY_OUTPUT);
 
-    // Calcular backtest inicial
-    if (this.historicalM5.length > 0) {
-      this.lastBacktestM5 = runBacktest(this.historicalM5, { emaPeriod: 100, maxBarsToRevert: 20 });
-      console.log(`[MarketService] Backtest M5 inicial calculado: WinRate: ${this.lastBacktestM5.winRate}% · Señales: ${this.lastBacktestM5.totalSignals}`);
-    }
+      if (state.historicalM5.length > 0) this.warmUpBuilder(sym, state.builderM5, state.historicalM5);
+      if (state.historicalM15.length > 0) this.warmUpBuilder(sym, state.builderM15, state.historicalM15);
 
-    // Calcular snapshot inicial con último precio del historial
-    if (this.historicalM5.length > 0 && this.historicalM15.length > 0) {
-      const lastPrice = this.historicalM5[this.historicalM5.length - 1].close;
-      const ts = this.historicalM5[this.historicalM5.length - 1].time;
-      const snap5 = calculateSnapshot(this.builderM5.getCandles(), lastPrice, 'M5', ts);
-      const snap15 = calculateSnapshot(this.builderM15.getCandles(), lastPrice, 'M15', ts);
-
-      if (snap5 && snap15) {
-        this.lastSnapshotM5 = snap5;
-        this.lastSnapshotM15 = snap15;
+      // Calcular backtest inicial
+      if (state.historicalM5.length > 0) {
+        state.lastBacktestM5 = runBacktest(state.historicalM5, { emaPeriod: 100, maxBarsToRevert: 20 });
         console.log(
-          '[MarketService] Snapshot inicial:',
-          `M5: ${snap5.elasticity.toFixed(3)} ${snap5.state}`,
-          `· M15: ${snap15.elasticity.toFixed(3)} ${snap15.state}`
+          `[MarketService] [${sym}] Backtest M5 inicial calculado: WinRate: ${state.lastBacktestM5.winRate}% · Señales: ${state.lastBacktestM5.totalSignals}`
         );
       }
+
+      // Calcular snapshot inicial con último precio del historial
+      if (state.historicalM5.length > 0 && state.historicalM15.length > 0) {
+        const lastPrice = state.historicalM5[state.historicalM5.length - 1].close;
+        const ts = state.historicalM5[state.historicalM5.length - 1].time;
+        const snap5 = calculateSnapshot(sym, state.builderM5.getCandles(), lastPrice, 'M5', ts);
+        const snap15 = calculateSnapshot(sym, state.builderM15.getCandles(), lastPrice, 'M15', ts);
+
+        if (snap5 && snap15) {
+          state.lastSnapshotM5 = snap5;
+          state.lastSnapshotM15 = snap15;
+          console.log(
+            `[MarketService] [${sym}] Snapshot inicial:`,
+            `M5: ${snap5.elasticity.toFixed(3)} ${snap5.state}`,
+            `· M15: ${snap15.elasticity.toFixed(3)} ${snap15.state}`
+          );
+        }
+      }
+
+      // Configurar manejadores de eventos para el constructor de velas de este símbolo
+      state.builderM5.on('dropped_tick', (reason: string) => this.recordDroppedTick(reason));
+      state.builderM15.on('dropped_tick', (reason: string) => this.recordDroppedTick(reason));
+
+      state.builderM5.on('candle:closed', (candle: Candle) => {
+        state.historicalM5.push(candle);
+        if (state.historicalM5.length > HISTORY_OUTPUT) {
+          state.historicalM5.shift();
+        }
+
+        const el = calculateElasticityForCandles(state.builderM5.getCandles(), candle.close);
+        if (el !== null) pushPercentileHistory(sym, 'M5', el);
+
+        // Recalcular backtest M5 con la nueva vela
+        state.lastBacktestM5 = runBacktest(state.historicalM5, { emaPeriod: 100, maxBarsToRevert: 20 });
+        console.log(
+          `[MarketService] [${sym}] Vela M5 cerrada. Backtest M5 recalculado (Historial: ${state.historicalM5.length}):`,
+          `WinRate: ${state.lastBacktestM5.winRate}% · Señales: ${state.lastBacktestM5.totalSignals}`
+        );
+      });
+
+      state.builderM15.on('candle:closed', (candle: Candle) => {
+        state.historicalM15.push(candle);
+        if (state.historicalM15.length > HISTORY_OUTPUT) {
+          state.historicalM15.shift();
+        }
+
+        const el = calculateElasticityForCandles(state.builderM15.getCandles(), candle.close);
+        if (el !== null) pushPercentileHistory(sym, 'M15', el);
+        console.log(
+          `[MarketService] [${sym}] Vela M15 cerrada — ${state.builderM15.getClosedCandles().length} velas (Historial: ${state.historicalM15.length})`
+        );
+      });
+
+      // Breve pausa para evitar saturar peticiones API
+      await new Promise((r) => setTimeout(r, 2000));
     }
 
-    // 2. Conectar Twelve Data WebSocket
-    this.twelveClient = new TwelveDataClient(this.apiKey, this.symbol);
+    // 2. Conectar Twelve Data WebSocket pasándole todos los símbolos
+    this.twelveClient = new TwelveDataClient(this.apiKey, this.symbolList);
 
-    this.twelveClient.on('tick', (price: number, timestamp: number) => this.processTick(price, timestamp));
+    this.twelveClient.on('tick', (symbol: string, price: number, timestamp: number) =>
+      this.processTick(symbol, price, timestamp)
+    );
     this.twelveClient.on('dropped_tick', (reason: string) => this.recordDroppedTick(reason));
     this.twelveClient.on('status', (status: string, message: string) => {
       this.events.emit('broadcast', {
@@ -120,37 +179,6 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
     });
 
     this.twelveClient.connect();
-
-    this.builderM5.on('dropped_tick', (reason: string) => this.recordDroppedTick(reason));
-    this.builderM15.on('dropped_tick', (reason: string) => this.recordDroppedTick(reason));
-
-    this.builderM5.on('candle:closed', (candle: Candle) => {
-      this.historicalM5.push(candle);
-      if (this.historicalM5.length > HISTORY_OUTPUT) {
-        this.historicalM5.shift();
-      }
-
-      const el = calculateElasticityForCandles(this.builderM5.getCandles(), candle.close);
-      if (el !== null) pushPercentileHistory('M5', el);
-
-      // Recalcular backtest M5 con la nueva vela
-      this.lastBacktestM5 = runBacktest(this.historicalM5, { emaPeriod: 100, maxBarsToRevert: 20 });
-      console.log(
-        `[MarketService] Vela M5 cerrada. Backtest M5 recalculado (Historial: ${this.historicalM5.length}):`,
-        `WinRate: ${this.lastBacktestM5.winRate}% · Señales: ${this.lastBacktestM5.totalSignals}`
-      );
-    });
-
-    this.builderM15.on('candle:closed', (candle: Candle) => {
-      this.historicalM15.push(candle);
-      if (this.historicalM15.length > HISTORY_OUTPUT) {
-        this.historicalM15.shift();
-      }
-
-      const el = calculateElasticityForCandles(this.builderM15.getCandles(), candle.close);
-      if (el !== null) pushPercentileHistory('M15', el);
-      console.log(`[MarketService] Vela M15 cerrada — ${this.builderM15.getClosedCandles().length} velas (Historial: ${this.historicalM15.length})`);
-    });
   }
 
   onModuleDestroy() {
@@ -161,42 +189,87 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  // Retorna el último snapshot disponible
-  public getLastSnapshotMessage(): BackendMessage | null {
-    if (this.lastSnapshotM5 && this.lastSnapshotM15) {
-      const finalState = resolveMultiTF(this.lastSnapshotM5, this.lastSnapshotM15);
-      const comparison = this.lastBacktestM5
-        ? compareSignalWithHistory({ state: this.lastSnapshotM5.state, elasticity: this.lastSnapshotM5.elasticity }, this.lastBacktestM5)
+  // Retorna todos los últimos snapshots del sistema
+  public getAllLastSnapshots(): BackendMessage[] {
+    const list: BackendMessage[] = [];
+    for (const state of this.symbolStates.values()) {
+      if (state.lastSnapshotM5 && state.lastSnapshotM15) {
+        const finalState = resolveMultiTF(state.lastSnapshotM5, state.lastSnapshotM15);
+        const comparison = state.lastBacktestM5
+          ? compareSignalWithHistory(
+              { state: state.lastSnapshotM5.state, elasticity: state.lastSnapshotM5.elasticity },
+              state.lastBacktestM5
+            )
+          : null;
+        const fusedStateResult = fuseMarketState(finalState, comparison);
+
+        list.push({
+          type: 'snapshot',
+          symbol: state.symbol,
+          m5: state.lastSnapshotM5,
+          m15: state.lastSnapshotM15,
+          finalState,
+          fusedState: fusedStateResult.state,
+          fusedExplanation: fusedStateResult.explanation,
+          fusedComparison: comparison,
+          backtest: state.lastBacktestM5,
+        });
+      }
+    }
+    return list;
+  }
+
+  // Retorna el último snapshot para un símbolo en particular
+  public getLastSnapshotMessage(symbol?: string): BackendMessage | null {
+    const sym = symbol ?? this.symbolList[0] ?? 'EUR/USD';
+    const state = this.symbolStates.get(sym);
+    if (!state) return null;
+
+    if (state.lastSnapshotM5 && state.lastSnapshotM15) {
+      const finalState = resolveMultiTF(state.lastSnapshotM5, state.lastSnapshotM15);
+      const comparison = state.lastBacktestM5
+        ? compareSignalWithHistory(
+            { state: state.lastSnapshotM5.state, elasticity: state.lastSnapshotM5.elasticity },
+            state.lastBacktestM5
+          )
         : null;
       const fusedStateResult = fuseMarketState(finalState, comparison);
 
       return {
         type: 'snapshot',
-        m5: this.lastSnapshotM5,
-        m15: this.lastSnapshotM15,
+        symbol: state.symbol,
+        m5: state.lastSnapshotM5,
+        m15: state.lastSnapshotM15,
         finalState,
         fusedState: fusedStateResult.state,
         fusedExplanation: fusedStateResult.explanation,
         fusedComparison: comparison,
-        backtest: this.lastBacktestM5,
+        backtest: state.lastBacktestM5,
       };
     }
     return null;
   }
 
   // Retorna el historial de velas en memoria
-  public getHistory(timeframe: '5min' | '15min'): Candle[] {
-    return timeframe === '15min' ? this.historicalM15 : this.historicalM5;
+  public getHistory(symbol: string, timeframe: '5min' | '15min'): Candle[] {
+    let state = this.symbolStates.get(symbol);
+    if (!state) {
+      const fallbackSym = this.symbolList[0] ?? 'EUR/USD';
+      state = this.symbolStates.get(fallbackSym);
+    }
+    if (!state) return [];
+    return timeframe === '15min' ? state.historicalM15 : state.historicalM5;
   }
 
   // --- Fetch historial via REST ---
   private fetchHistoricalCandles(
+    symbol: string,
     interval: '5min' | '15min',
     outputSize: number
   ): Promise<Candle[]> {
     return new Promise((resolve) => {
       const path =
-        `/time_series?symbol=${encodeURIComponent(this.symbol)}` +
+        `/time_series?symbol=${encodeURIComponent(symbol)}` +
         `&interval=${interval}&outputsize=${outputSize}&apikey=${this.apiKey}`;
 
       const req = https.request(
@@ -210,7 +283,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
             try {
               const data = JSON.parse(raw);
               if (data.status !== 'ok' || !data.values) {
-                console.error(`[History] Error ${interval} de TwelveData:`, data.message || data);
+                console.error(`[History] [${symbol}] Error ${interval} de TwelveData:`, data.message || data);
                 resolve([]);
                 return;
               }
@@ -224,8 +297,8 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
               }));
               resolve(candles);
             } catch (e) {
-              console.error(`[History] Error parseando JSON en ${interval}:`, e);
-              console.error(`[History] Respuesta cruda:`, raw.substring(0, 300));
+              console.error(`[History] [${symbol}] Error parseando JSON en ${interval}:`, e);
+              console.error(`[History] [${symbol}] Respuesta cruda:`, raw.substring(0, 300));
               resolve([]);
             }
           });
@@ -233,7 +306,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       );
 
       req.on('error', (err: Error) => {
-        console.error(`[History] Error de red en request:`, err.message);
+        console.error(`[History] [${symbol}] Error de red en request:`, err.message);
         resolve([]);
       });
 
@@ -241,21 +314,24 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  private warmUpBuilder(builder: CandleBuilder, candles: Candle[]): void {
+  private warmUpBuilder(symbol: string, builder: CandleBuilder, candles: Candle[]): void {
     candles.forEach((c) => {
       builder.injectHistoricalCandle(c);
       const elasticity = calculateElasticityForCandles(builder.getCandles(), c.close);
       if (elasticity !== null) {
-        pushPercentileHistory(builder.getTimeframe(), elasticity);
+        pushPercentileHistory(symbol, builder.getTimeframe(), elasticity);
       }
     });
     console.log(
-      `[WarmUp] ${builder.getTimeframe()} precalentado con ${candles.length} velas (percentiles listos)`
+      `[WarmUp] [${symbol}] ${builder.getTimeframe()} precalentado con ${candles.length} velas (percentiles listos)`
     );
   }
 
   // --- Procesamiento de ticks ---
-  private processTick(price: number, timestamp: number): void {
+  private processTick(symbol: string, price: number, timestamp: number): void {
+    const state = this.symbolStates.get(symbol);
+    if (!state) return;
+
     const delay = Math.max(0, Date.now() - timestamp);
 
     this.serverMetrics.currentDelay = delay;
@@ -269,42 +345,46 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       this.delayHistory.reduce((a, b) => a + b, 0) / this.delayHistory.length
     );
 
-    this.builderM5.tick(price, timestamp);
-    this.builderM15.tick(price, timestamp);
+    state.builderM5.tick(price, timestamp);
+    state.builderM15.tick(price, timestamp);
 
-    const snapshotM5 = calculateSnapshot(this.builderM5.getCandles(), price, 'M5', timestamp);
-    const snapshotM15 = calculateSnapshot(this.builderM15.getCandles(), price, 'M15', timestamp);
+    const snapshotM5 = calculateSnapshot(symbol, state.builderM5.getCandles(), price, 'M5', timestamp);
+    const snapshotM15 = calculateSnapshot(symbol, state.builderM15.getCandles(), price, 'M15', timestamp);
 
     if (!snapshotM5 || !snapshotM15) return;
 
-    this.lastSnapshotM5 = snapshotM5;
-    this.lastSnapshotM15 = snapshotM15;
+    state.lastSnapshotM5 = snapshotM5;
+    state.lastSnapshotM15 = snapshotM15;
 
     const finalState = resolveMultiTF(snapshotM5, snapshotM15);
 
-    const comparison = this.lastBacktestM5
-      ? compareSignalWithHistory({ state: snapshotM5.state, elasticity: snapshotM5.elasticity }, this.lastBacktestM5)
+    const comparison = state.lastBacktestM5
+      ? compareSignalWithHistory(
+          { state: snapshotM5.state, elasticity: snapshotM5.elasticity },
+          state.lastBacktestM5
+        )
       : null;
     const fusedStateResult = fuseMarketState(finalState, comparison);
-    
+
     // Broadcast a través de eventos
     this.events.emit('broadcast', {
       type: 'snapshot',
+      symbol,
       m5: snapshotM5,
       m15: snapshotM15,
       finalState,
       fusedState: fusedStateResult.state,
       fusedExplanation: fusedStateResult.explanation,
       fusedComparison: comparison,
-      backtest: this.lastBacktestM5,
+      backtest: state.lastBacktestM5,
     } satisfies BackendMessage);
 
     // Alerta de Telegram autónoma
-    this.checkAndSendTelegramAlert(fusedStateResult, finalState, snapshotM5, snapshotM15);
+    this.checkAndSendTelegramAlert(state, fusedStateResult, finalState, snapshotM5, snapshotM15);
 
     if (Math.random() < 0.05) {
       console.log(
-        `[Engine] ${new Date(timestamp).toLocaleTimeString()}`,
+        `[Engine] [${symbol}] ${new Date(timestamp).toLocaleTimeString()}`,
         `· ${price.toFixed(5)}`,
         `· M5: ${snapshotM5.elasticity.toFixed(3)} ${snapshotM5.state}`,
         `· M15: ${snapshotM15.elasticity.toFixed(3)} ${snapshotM15.state}`,
@@ -314,6 +394,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async checkAndSendTelegramAlert(
+    state: SymbolState,
     fused: FusedStateResult,
     finalState: MarketState,
     m5: MarketSnapshot,
@@ -325,18 +406,18 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
 
     if (!token || !chatId) {
       console.warn('[Telegram-Service] No se pudo enviar alerta autónoma: Faltan credenciales en el .env');
-      this.previousFusedState = fused.state;
-      this.previousFinalState = finalState;
+      state.previousFusedState = fused.state;
+      state.previousFinalState = finalState;
       return;
     }
 
     // 🟢 Caso 1: Alerta Tipo A (Señal Confirmada e Históricamente Sólida)
-    const isNewFusedGreen = this.previousFusedState !== 'GREEN' && fused.state === 'GREEN';
-    const canAlertA = now - this.lastTelegramAlertTimeA > 300000; // 5 min cooldown
+    const isNewFusedGreen = state.previousFusedState !== 'GREEN' && fused.state === 'GREEN';
+    const canAlertA = now - state.lastTelegramAlertTimeA > 300000; // 5 min cooldown
 
     if (isNewFusedGreen && canAlertA) {
-      this.lastTelegramAlertTimeA = now;
-      const message = `[⚙️ BACKEND - Autónomo] 🟢 ALERTA CONFIRMADA (Tipo A - Alta Probabilidad)\n\n${fused.explanation}\n\nM5: ${m5.elasticity.toFixed(2)} | M15: ${m15.elasticity.toFixed(2)}`;
+      state.lastTelegramAlertTimeA = now;
+      const message = `[⚙️ BACKEND - Autónomo] ${state.symbol}: 🟢 ALERTA CONFIRMADA (Tipo A - Alta Probabilidad)\n\n${fused.explanation}\n\nM5: ${m5.elasticity.toFixed(2)} | M15: ${m15.elasticity.toFixed(2)}`;
       const url = `https://api.telegram.org/bot${token}/sendMessage`;
 
       try {
@@ -345,19 +426,19 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ chat_id: chatId, text: message }),
         });
-        console.log('[Telegram-Service] Alerta Tipo A (Confirmada) enviada con éxito');
+        console.log(`[Telegram-Service] [${state.symbol}] Alerta Tipo A (Confirmada) enviada con éxito`);
       } catch (err) {
-        console.error('[Telegram-Service] Error enviando alerta Tipo A:', err);
+        console.error(`[Telegram-Service] [${state.symbol}] Error enviando alerta Tipo A:`, err);
       }
     }
 
     // 🟡 Caso 2: Alerta Tipo B (Señal en Tiempo Real, pero sin confirmación del backtest)
-    const isNewFinalGreen = this.previousFinalState !== 'GREEN' && finalState === 'GREEN';
-    const canAlertB = now - this.lastTelegramAlertTimeB > 300000; // 5 min cooldown
+    const isNewFinalGreen = state.previousFinalState !== 'GREEN' && finalState === 'GREEN';
+    const canAlertB = now - state.lastTelegramAlertTimeB > 300000; // 5 min cooldown
 
     if (isNewFinalGreen && fused.state !== 'GREEN' && canAlertB) {
-      this.lastTelegramAlertTimeB = now;
-      const message = `[⚙️ BACKEND - Autónomo] 🟡 ALERTA TIEMPO REAL (Tipo B - Moderada Probabilidad)\n\nEl precio se encuentra sobre-estirado en el corto plazo (finalState: GREEN), pero no superó el porcentaje mínimo del backtest histórico.\n\nM5: ${m5.elasticity.toFixed(2)} | M15: ${m15.elasticity.toFixed(2)}`;
+      state.lastTelegramAlertTimeB = now;
+      const message = `[⚙️ BACKEND - Autónomo] ${state.symbol}: 🟡 ALERTA TIEMPO REAL (Tipo B - Moderada Probabilidad)\n\nEl precio se encuentra sobre-estirado en el corto plazo (finalState: GREEN), pero no superó el porcentaje mínimo del backtest histórico.\n\nM5: ${m5.elasticity.toFixed(2)} | M15: ${m15.elasticity.toFixed(2)}`;
       const url = `https://api.telegram.org/bot${token}/sendMessage`;
 
       try {
@@ -366,14 +447,14 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ chat_id: chatId, text: message }),
         });
-        console.log('[Telegram-Service] Alerta Tipo B (Tiempo Real) enviada con éxito');
+        console.log(`[Telegram-Service] [${state.symbol}] Alerta Tipo B (Tiempo Real) enviada con éxito`);
       } catch (err) {
-        console.error('[Telegram-Service] Error enviando alerta Tipo B:', err);
+        console.error(`[Telegram-Service] [${state.symbol}] Error enviando alerta Tipo B:`, err);
       }
     }
 
-    this.previousFusedState = fused.state;
-    this.previousFinalState = finalState;
+    state.previousFusedState = fused.state;
+    state.previousFinalState = finalState;
   }
 
   private recordDroppedTick(reason: string) {

@@ -17,15 +17,15 @@ import { EventEmitter } from 'events'
 const RECONNECT_DELAY_MS = 5_000
 
 export class TwelveDataClient extends EventEmitter {
-  private apiKey:  string
-  private symbol:  string
-  private ws:      WebSocket | null = null
+  private apiKey: string
+  private symbol: string
+  private ws: WebSocket | null = null
   private stopped: boolean = false
 
-  constructor(apiKey: string, symbol: string) {
+  constructor(apiKey: string, symbol: string | string[]) {
     super()
     this.apiKey = apiKey
-    this.symbol = symbol
+    this.symbol = Array.isArray(symbol) ? symbol.join(',') : symbol
   }
 
   connect(): void {
@@ -69,12 +69,12 @@ export class TwelveDataClient extends EventEmitter {
       if (msg.event !== 'price') return
 
       // Validar que el mensaje tenga data y su timestamp oficial
-      if (!msg.price || !msg.timestamp) {
+      if (!msg.price || !msg.timestamp || !msg.symbol) {
         this.emit('dropped_tick', 'missing_data')
         return
       }
 
-      this.emit('tick', msg.price, msg.timestamp * 1000)
+      this.emit('tick', msg.symbol, msg.price, msg.timestamp * 1000)
     })
 
     this.ws.on('error', (err: Error) => {

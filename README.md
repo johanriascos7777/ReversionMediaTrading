@@ -377,3 +377,47 @@ El flujo de procesamiento opera de la siguiente manera:
 ```
 
 Esta arquitectura robusta garantiza que el monitoreo sea ininterrumpido (24/7) y libre de dependencias del navegador web (client-side). El frontend es ahora puramente una interfaz de visualización limpia.
+
+---
+
+## 🚀 Escalabilidad Futura: ¿Cómo agregar Criptomonedas en NestJS?
+
+NestJS está diseñado bajo una **arquitectura modular (`@Module`)** que funciona de manera muy similar al concepto de **"Apps" independientes en Django** (como `python manage.py startapp`). 
+
+Si en el futuro deseas implementar este mismo sistema de elasticidad y backtesting para Criptomonedas (como `BTC/USD` o `ETH/USD`), puedes hacerlo de forma 100% independiente y en paralelo, sin alterar ni poner en riesgo la lógica actual de Forex (`EUR/USD`):
+
+### 1. El equivalente a las "Apps" de Django
+Para iniciar un nuevo módulo de cripto, solo debes ejecutar en la CLI de NestJS:
+```bash
+nest generate module crypto
+nest generate service crypto
+nest generate controller crypto
+```
+Esto creará una nueva carpeta independiente `src/crypto/` en tu backend con su propio controlador y servicio.
+
+### 2. Aislamiento y Paralelismo Total
+* **Rutas Aisladas:** Tu controlador de criptomonedas responderá a rutas HTTP dedicadas como `/crypto/history` o `/crypto/health`, sin interferir con las rutas `/history` de Forex.
+* **Múltiples Conexiones WebSocket:** El servicio de cripto (`CryptoService`) levantará su propia conexión WebSocket con Twelve Data apuntando a `BTC/USD` u otras criptos. Ambas conexiones WebSocket (Forex y Cripto) funcionarán de forma simultánea.
+* **Tokens y Configuración Propia:** Puedes definir variables separadas en tu entorno (ej. `TELEGRAM_CHAT_ID_CRYPTO` o `TWELVE_DATA_API_KEY_CRYPTO`) para que las alertas de cripto se envíen a canales de Telegram totalmente diferentes y usen límites independientes de consumo.
+* **Seguridad en Caliente:** Si cometes un error de código al modificar el módulo de criptomonedas, el módulo de Forex seguirá operando sin caídas en producción.
+
+### 3. Reutilización de Código Inteligente (DRY)
+No tendrás que copiar ni volver a programar la matemática de la elasticidad, el cálculo de ATR, el backtesting o el sistema de fusión. Como son funciones puras escritas en TypeScript, puedes exportarlas e importarlas en ambos módulos:
+* `marketEngine.ts` y `backtestEngine.ts` se convierten en librerías compartidas.
+* Ambos módulos se benefician de la misma fiabilidad matemática optimizada.
+
+---
+
+## 📊 Límites Oficiales de la Cuenta Free (Basic Plan) de Twelve Data
+
+Tras revisar minuciosamente la documentación y especificaciones del plan gratuito de Twelve Data, estos son los límites y cómo los gestiona tu sistema actual:
+
+| Característica | Límite del Plan Free | Cómo lo maneja tu aplicación |
+| :--- | :--- | :--- |
+| **Suscripción WebSocket** | Hasta 8 símbolos simultáneos (dentro de 1 sola conexión) | Enviamos todos los símbolos del `.env` agrupados en una sola suscripción WebSocket por conexión única, por lo que puedes recibir datos de varios pares a la vez sin problemas. |
+| **Tasa REST API (Historial)** | 8 peticiones por minuto | Al arrancar, el backend pide el historial M5 y M15 de cada par para "precalentar" las bandas de elasticidad y el backtest. Para evitar que bloqueen tu API Key, el código del backend introduce una pausa automática de 2 segundos entre cada petición histórica. |
+| **Límite Diario REST** | 800 peticiones al día | Como el precalentamiento solo se hace una vez al iniciar el servidor (2 llamadas REST por par) y luego todo corre por WebSocket, el consumo diario es extremadamente bajo. |
+
+> [!NOTE]
+> **Nota de rendimiento y estabilidad:** Si configuras hasta 4 símbolos simultáneos (8 llamadas REST en total), la pausa inteligente de 2 segundos garantiza que la inicialización demore unos 16 segundos, pero nunca superará el límite de tasa de 8 req/min de tu cuenta Free.
+

@@ -32,6 +32,7 @@ export type MarketSnapshot = {
 export type BackendMessage =
   | {
       type: 'snapshot';
+      symbol: string;
       m5: MarketSnapshot;
       m15: MarketSnapshot;
       finalState: MarketState;

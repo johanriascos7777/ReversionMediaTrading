@@ -85,8 +85,18 @@ class PercentileEngine {
   }
 }
 
-const percentileM5  = new PercentileEngine(200)
-const percentileM15 = new PercentileEngine(200)
+const percentileM5Map  = new Map<string, PercentileEngine>()
+const percentileM15Map = new Map<string, PercentileEngine>()
+
+function getPercentileEngine(symbol: string, timeframe: Timeframe): PercentileEngine {
+  const map = timeframe === 'M5' ? percentileM5Map : percentileM15Map
+  let engine = map.get(symbol)
+  if (!engine) {
+    engine = new PercentileEngine(200)
+    map.set(symbol, engine)
+  }
+  return engine;
+}
 
 // ─── State resolution ─────────────────────────────────────────────────────────
 
@@ -123,8 +133,8 @@ export function calculateElasticityForCandles(candles: Candle[], price: number):
 /**
  * Alimentador exclusivo para el historial del percentil (se llama on candle:closed)
  */
-export function pushPercentileHistory(timeframe: Timeframe, elasticity: number): void {
-  const percentileEngine = timeframe === 'M5' ? percentileM5 : percentileM15
+export function pushPercentileHistory(symbol: string, timeframe: Timeframe, elasticity: number): void {
+  const percentileEngine = getPercentileEngine(symbol, timeframe)
   percentileEngine.push(elasticity)
 }
 
@@ -133,6 +143,7 @@ export function pushPercentileHistory(timeframe: Timeframe, elasticity: number):
  * price = precio del último tick (puede ser intracandle)
  */
 export function calculateSnapshot(
+  symbol:    string,
   candles:   Candle[],
   price:     number,
   timeframe: Timeframe,
@@ -146,7 +157,7 @@ export function calculateSnapshot(
   const ema100  = calculateEMA(closes, EMA_PERIOD)
   const atr     = calculateATR(candles, ATR_PERIOD)
 
-  const percentileEngine = timeframe === 'M5' ? percentileM5 : percentileM15
+  const percentileEngine = getPercentileEngine(symbol, timeframe)
   const percentile       = percentileEngine.rank(elasticity) // Solo lectura, no mutación!
 
   const state = resolveState(elasticity, percentile)

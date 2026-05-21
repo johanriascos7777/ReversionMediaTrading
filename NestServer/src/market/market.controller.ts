@@ -7,16 +7,20 @@ export class MarketController {
   constructor(private readonly marketService: MarketService) {}
 
   @Get('history')
-  getHistory(@Query('timeframe') timeframe: string = '5min', @Res() res: express.Response) {
+  getHistory(
+    @Query('timeframe') timeframe: string = '5min',
+    @Query('symbol') symbol: string = 'EUR/USD',
+    @Res() res: express.Response
+  ) {
     const tf = timeframe === '15min' ? '15min' : '5min';
-    const candles = this.marketService.getHistory(tf);
+    const candles = this.marketService.getHistory(symbol, tf);
     return res.status(HttpStatus.OK).json(candles);
   }
 
   @Get('health')
   getHealth(@Res() res: express.Response) {
-    const m5Length = this.marketService.getHistory('5min').length;
-    const m15Length = this.marketService.getHistory('15min').length;
+    const m5Length = this.marketService.getHistory('EUR/USD', '5min').length;
+    const m15Length = this.marketService.getHistory('EUR/USD', '15min').length;
     const metrics = this.marketService.serverMetrics;
 
     return res.status(HttpStatus.OK).json({

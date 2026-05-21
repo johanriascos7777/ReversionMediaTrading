@@ -16,6 +16,7 @@ import type { MultiTFState } from '@/engine/multiTimeframeResolver'
 // ─── tipos ────────────────────────────────────────────────────────────────────
 
 export type ElasticityCardProps = {
+  symbol: string
   m5: MarketSnapshot
   m15: MarketSnapshot
   fusedState: MultiTFState
@@ -127,7 +128,7 @@ function TimeframeRow({ label, snapshot }: TimeframeRowProps) {
 
 // ─── componente principal — export nombrado ───────────────────────────────────
 
-export function ElasticityCard({ m5, m15, fusedState }: ElasticityCardProps) {
+export function ElasticityCard({ symbol, m5, m15, fusedState }: ElasticityCardProps) {
   const fused = STATE_META[fusedState]
 
   return (
@@ -136,7 +137,7 @@ export function ElasticityCard({ m5, m15, fusedState }: ElasticityCardProps) {
       {/* Header: par + badge de señal */}
       <div style={styles.header}>
         <div>
-          <p style={styles.pair}>EUR / USD</p>
+          <p style={styles.pair}>{symbol}</p>
           <p style={styles.subtitle}>Elasticity System · M5 + M15</p>
         </div>
 

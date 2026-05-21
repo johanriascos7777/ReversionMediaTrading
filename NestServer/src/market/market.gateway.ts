@@ -23,11 +23,11 @@ export class MarketGateway implements OnGatewayConnection, OnGatewayDisconnect {
   handleConnection(client: WebSocket) {
     console.log('[Server] Frontend conectado');
 
-    // Enviar el snapshot inicial si está disponible
-    const initialSnapshot = this.marketService.getLastSnapshotMessage();
-    if (initialSnapshot) {
-      client.send(JSON.stringify(initialSnapshot));
-    }
+    // Enviar snapshots iniciales de todos los símbolos activos si están disponibles
+    const snapshots = this.marketService.getAllLastSnapshots();
+    snapshots.forEach((snap) => {
+      client.send(JSON.stringify(snap));
+    });
   }
 
   handleDisconnect(client: WebSocket) {
