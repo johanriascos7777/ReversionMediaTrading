@@ -341,3 +341,39 @@ Este es el que manda para el Backtest y la "Señal Confirmada".
 
 > [!IMPORTANT]
 > **Regla de Oro:** Siempre mantén el mismo número en el Backend y en el Frontend. Si no están igual, el Dashboard podría decirte que una señal es válida pero el servidor no te enviará la alerta (o viceversa).
+
+---
+
+## 🔄 Flujo de Ejecución y Alertas Autónomas 24/7 (Fase 2)
+
+Con la migración de toda la lógica matemática al servidor NestJS en la **Fase 2**, los cálculos de backtesting, la comparación de señales y la fusión de estados ocurren en el backend de forma centralizada.
+
+El flujo de procesamiento opera de la siguiente manera:
+
+```
+                  ┌───────────────────────┐
+                  │ Twelve Data (WS Tick) │
+                  └───────────┬───────────┘
+                              │
+                              ▼
+                  ┌───────────────────────┐
+                  │  Calcula Todo el      │
+                  │  Backtest/Fusión      │
+                  └───────────┬───────────┘
+                              │
+             ┌────────────────┴────────────────┐
+             ▼                                 ▼
+┌───────────────────────────┐     ┌───────────────────────────┐
+│     ¿Cambio a VERDE?      │     │  Transmite estado vía     │
+│   (Sí + 5m cooldown)      │     │  WebSocket a los clientes │
+└────────────┬──────────────┘     └────────────┬──────────────┘
+             │                                 │
+             ▼                                 ▼
+┌───────────────────────────┐     ┌───────────────────────────┐
+│ Envía alerta directamente │     │ Tu Frontend se entera y   │
+│ a la API de Telegram      │     │ actualiza el Semáforo     │
+│ (fetch desde Node.js)     │     │ (si está abierto)         │
+└───────────────────────────┘     └───────────────────────────┘
+```
+
+Esta arquitectura robusta garantiza que el monitoreo sea ininterrumpido (24/7) y libre de dependencias del navegador web (client-side). El frontend es ahora puramente una interfaz de visualización limpia.
