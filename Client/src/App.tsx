@@ -3,6 +3,7 @@ import './App.css'
 import { WS_URL, API_URL } from '@/config/env'
 
 import { useMarketData } from './hooks/useMarketData'
+import type { WsFallbackMap } from './hooks/useMarketData'
 import { useHistoricalData } from './hooks/useHistoricalData'
 import { useBacktest } from './hooks/useBacktest'
 
@@ -44,9 +45,10 @@ const LED = ({ state, size = 8 }: { state: 'GREEN' | 'YELLOW' | 'RED'; size?: nu
 function App() {
   const [activeSymbol, setActiveSymbol] = useState('EUR/USD')
   const [toasts, setToasts] = useState<Toast[]>([])
+  const [dismissedFallbacks, setDismissedFallbacks] = useState<Set<string>>(new Set())
 
   // 🟢 1. Mercado en tiempo real — via backend WebSocket local (Multi-símbolo)
-  const { data: market, status: wsStatus } = useMarketData()
+  const { data: market, status: wsStatus, wsFallbacks } = useMarketData()
 
   // Símbolo activo resuelto (con fallback si el activo no se ha recibido o es vacío)
   const activeKey = market && market[activeSymbol] ? activeSymbol : (market ? Object.keys(market)[0] : 'EUR/USD')
@@ -256,6 +258,95 @@ function App() {
           </span>
         </div>
       </div>
+
+      {/* ==================================================== */}
+      {/* ⚠️ REST FALLBACK ALERT BANNER                        */}
+      {/* ==================================================== */}
+      {Object.keys(wsFallbacks).filter(sym => !dismissedFallbacks.has(sym)).length > 0 && (
+        <div style={{
+          marginBottom: 20,
+          borderRadius: 12,
+          border: '1px solid rgba(245,158,11,0.35)',
+          background: 'linear-gradient(135deg, rgba(245,158,11,0.08) 0%, rgba(217,119,6,0.06) 100%)',
+          backdropFilter: 'blur(10px)',
+          overflow: 'hidden',
+        }}>
+          {/* Banner header */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '10px 16px',
+            borderBottom: '1px solid rgba(245,158,11,0.15)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{
+                width: 8, height: 8, borderRadius: '50%',
+                background: '#f59e0b',
+                boxShadow: '0 0 8px #f59e0b, 0 0 16px rgba(245,158,11,0.4)',
+                animation: 'pulse 2s infinite',
+              }} />
+              <span style={{ fontSize: 12, fontWeight: 700, color: '#f59e0b', fontFamily: 'monospace', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                ⚡ REST Poller Activo — WebSocket Restringido (Plan Free)
+              </span>
+            </div>
+            <button
+              onClick={() => setDismissedFallbacks(new Set(Object.keys(wsFallbacks)))}
+              style={{
+                background: 'transparent', border: 'none', cursor: 'pointer',
+                color: '#6b7280', fontSize: 16, lineHeight: 1, padding: '2px 6px',
+                borderRadius: 4, transition: 'color 0.2s',
+              }}
+              title="Descartar alerta"
+            >✕</button>
+          </div>
+
+          {/* Per-symbol rows */}
+          {Object.keys(wsFallbacks)
+            .filter(sym => !dismissedFallbacks.has(sym))
+            .map(sym => (
+              <div key={sym} style={{
+                display: 'flex', alignItems: 'center', gap: 12,
+                padding: '8px 16px',
+                borderBottom: '1px solid rgba(245,158,11,0.08)',
+              }}>
+                {/* Symbol badge */}
+                <span style={{
+                  fontFamily: 'monospace', fontWeight: 700, fontSize: 12,
+                  padding: '3px 10px', borderRadius: 8,
+                  background: 'rgba(245,158,11,0.12)',
+                  border: '1px solid rgba(245,158,11,0.25)',
+                  color: '#fbbf24',
+                  minWidth: 90, textAlign: 'center',
+                }}>
+                  {sym}
+                </span>
+                {/* Status icon */}
+                <span style={{ fontSize: 11, color: '#92400e', fontFamily: 'monospace' }}>
+                  WS: <span style={{ color: '#ef4444', fontWeight: 700 }}>✗ Rechazado</span>
+                </span>
+                <span style={{ fontSize: 11, color: '#92400e', fontFamily: 'monospace' }}>
+                  REST: <span style={{ color: '#10b981', fontWeight: 700 }}>✓ Activo (cada 10s)</span>
+                </span>
+                {/* Dismiss individual */}
+                <button
+                  onClick={() => setDismissedFallbacks(prev => new Set([...prev, sym]))}
+                  style={{
+                    marginLeft: 'auto', background: 'transparent', border: 'none',
+                    cursor: 'pointer', color: '#4b5563', fontSize: 13, padding: '2px 6px',
+                    borderRadius: 4,
+                  }}
+                  title={`Ocultar alerta de ${sym}`}
+                >✕</button>
+              </div>
+            ))}
+
+          {/* Footer note */}
+          <div style={{ padding: '7px 16px' }}>
+            <span style={{ fontSize: 10, color: '#78350f', fontFamily: 'monospace' }}>
+              ℹ️ Twelve Data Plan Free permite WebSocket solo para EUR/USD. Los símbolos anteriores reciben datos vía REST API. Los datos son correctos, solo llegan cada 10s en vez de en tiempo real.
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* ==================================================== */}
       {/* 🎛️ COCKPIT / TORRE DE CONTROL (GRID MULTISÍMBOLO)   */}

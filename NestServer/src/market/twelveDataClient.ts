@@ -8,6 +8,10 @@
  *   Si la conexión se cae (internet, reinicio de Twelve Data),
  *   reintenta cada 5 segundos hasta reconectar.
  *   Esto garantiza que el backend nunca quede sin datos silenciosamente.
+ *
+ * ⚠️  Si Twelve Data rechaza la suscripción (plan free, símbolo no permitido),
+ *   se activa el REST Poller como fallback y NO se reintenta el WebSocket
+ *   para evitar un bucle infinito de reconexiones.
  */
 
 import WebSocket from 'ws'
@@ -24,6 +28,12 @@ export class TwelveDataClient extends EventEmitter {
   private stopped: boolean = false
   private pollInterval: NodeJS.Timeout | null = null
 
+  /**
+   * true cuando Twelve Data rechazó la suscripción WS (ej: símbolo no incluido en el plan).
+   * En ese caso, el REST Poller se activa y NO se reintenta el WebSocket.
+   */
+  private wsRejected: boolean = false
+
   constructor(apiKey: string, symbol: string | string[]) {
     super()
     this.apiKey = apiKey
@@ -32,6 +42,7 @@ export class TwelveDataClient extends EventEmitter {
 
   connect(): void {
     this.stopped = false
+    this.wsRejected = false
     this.stopRestPoller()
     this._connect()
   }
@@ -44,7 +55,15 @@ export class TwelveDataClient extends EventEmitter {
 
   private startRestPoller(): void {
     if (this.pollInterval) return
-    console.log(`[TwelveData] [${this.symbol}] Activando REST Poller híbrido (intervalo: 10s) por restricción de WebSocket gratis`)
+    console.log(
+      `\n╔═══════════════════════════════════════════════════════════╗\n` +
+      `║   ⚡ FALLBACK ACTIVADO — REST Poller                      ║\n` +
+      `╠═══════════════════════════════════════════════════════════╣\n` +
+      `║   Símbolo  : ${this.symbol.padEnd(45)}║\n` +
+      `║   Razón    : Plan Free — WebSocket restringido a EUR/USD  ║\n` +
+      `║   Modo     : REST API cada 10s (sin pérdida de datos)     ║\n` +
+      `╚═══════════════════════════════════════════════════════════╝\n`
+    )
 
     const poll = () => {
       if (this.stopped) return
@@ -93,13 +112,13 @@ export class TwelveDataClient extends EventEmitter {
   private _connect(): void {
     const url = `wss://ws.twelvedata.com/v1/quotes/price?apikey=${this.apiKey}`
 
-    console.log('[TwelveData] Conectando WebSocket...')
+    console.log(`[TwelveData] [${this.symbol}] Conectando WebSocket...`)
     this.emit('status', 'connecting', 'Conectando con Twelve Data...')
 
     this.ws = new WebSocket(url)
 
     this.ws.on('open', () => {
-      console.log('[TwelveData] Conectado ✓')
+      console.log(`[TwelveData] [${this.symbol}] WebSocket conectado ✓ — suscribiendo símbolo...`)
       this.emit('status', 'connected', 'WebSocket conectado')
 
       // Suscribirse al símbolo
@@ -119,18 +138,42 @@ export class TwelveDataClient extends EventEmitter {
       }
 
       if (msg.event === 'subscribe-status') {
-        console.log(`[TwelveData] [${this.symbol}] Subscription Status:`, JSON.stringify(msg))
         if (msg.status === 'error') {
-          // Activar REST Poller si falla la suscripción
+          // ─── Twelve Data rechazó la suscripción ──────────────────────────────
+          // Marcar como rechazado para evitar reconexión infinita
+          this.wsRejected = true
+
+          console.error(
+            `\n┌─────────────────────────────────────────────────────────────┐\n` +
+            `│  🚫 WebSocket RECHAZADO por Twelve Data                     │\n` +
+            `├─────────────────────────────────────────────────────────────┤\n` +
+            `│  Símbolo : ${this.symbol.padEnd(50)}│\n` +
+            `│  Motivo  : Símbolo no incluido en el plan Basic (Free)      │\n` +
+            `│  Acción  : Cerrando WS · Activando REST Poller como backup  │\n` +
+            `└─────────────────────────────────────────────────────────────┘\n`
+          )
+
+          // Notificar al frontend que este símbolo usa REST fallback
+          this.emit('ws-fallback', this.symbol, 'El plan Free de Twelve Data no permite este símbolo en WebSocket. Usando REST Poller (cada 10s).')
+          this.emit('status', 'disconnected', `[REST Poller] ${this.symbol} no disponible en WS — usando REST`)
+
+          // Activar REST Poller y cerrar WS limpiamente
           this.startRestPoller()
+          this.ws?.close()
+
         } else if (msg.status === 'ok') {
+          console.log(
+            `\n  ✅ [TwelveData] [${this.symbol}] Suscripción WebSocket ACEPTADA — datos en tiempo real activos\n`
+          )
           this.stopRestPoller()
+        } else {
+          console.log(`[TwelveData] [${this.symbol}] Subscription Status:`, JSON.stringify(msg))
         }
         return
       }
 
       if (msg.event === 'heartbeat') {
-        // Silencioso o log opcional
+        // Silencioso
         return
       }
 
@@ -161,6 +204,16 @@ export class TwelveDataClient extends EventEmitter {
 
     this.ws.on('close', (code: number, reason: Buffer) => {
       const reasonStr = reason ? reason.toString() : 'sin razón'
+
+      // ─── Si fue rechazado por el plan, NO reconectar ──────────────────────
+      if (this.wsRejected) {
+        console.log(
+          `[TwelveData] [${this.symbol}] WS cerrado tras rechazo (${code}) — REST Poller activo, sin reconexión`
+        )
+        return
+      }
+
+      // ─── Cierre normal (no por rechazo) — reconectar si aplica ───────────
       console.log(`[TwelveData] [${this.symbol}] Conexión cerrada. Código: ${code} · Razón: ${reasonStr}`)
       this.emit('status', 'disconnected', `Conexión cerrada (${code})`)
 

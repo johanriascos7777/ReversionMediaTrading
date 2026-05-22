@@ -41,8 +41,9 @@ export type BackendMessage =
       fusedComparison: SignalComparisonResult | null;
       backtest: BacktestResult | null;
     }
-  | { type: 'status';   status: 'connecting' | 'connected' | 'disconnected'; message: string }
-  | { type: 'error';    message: string }
+  | { type: 'status';     status: 'connecting' | 'connected' | 'disconnected'; message: string }
+  | { type: 'error';      message: string }
+  | { type: 'ws-fallback'; symbol: string; reason: string }
 
 // Mensaje que llega de Twelve Data WebSocket
 export type TwelveTickMessage = {

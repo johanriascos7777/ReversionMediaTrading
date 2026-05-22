@@ -50,19 +50,28 @@ type BackendMessage =
       fusedComparison:  any
       backtest:         any
     }
-  | { type: 'status';   status: string; message: string }
-  | { type: 'error';    message: string }
+  | { type: 'status';    status: string; message: string }
+  | { type: 'error';     message: string }
+  | { type: 'ws-fallback'; symbol: string; reason: string }
+
+/**
+ * Registro de símbolos que fallaron el WS y usan REST Poller.
+ * { [symbol]: reason }
+ */
+export type WsFallbackMap = { [symbol: string]: string }
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected'
 
 export function useMarketData(): {
-  data:   MultiSymbolMarketData | null
-  status: ConnectionStatus
+  data:        MultiSymbolMarketData | null
+  status:      ConnectionStatus
+  wsFallbacks: WsFallbackMap
 } {
-  const [data,   setData]   = useState<MultiSymbolMarketData | null>(null)
-  const [status, setStatus] = useState<ConnectionStatus>('connecting')
-  const wsRef               = useRef<WebSocket | null>(null)
-  const stoppedRef          = useRef(false)
+  const [data,        setData]        = useState<MultiSymbolMarketData | null>(null)
+  const [status,      setStatus]      = useState<ConnectionStatus>('connecting')
+  const [wsFallbacks, setWsFallbacks] = useState<WsFallbackMap>({})
+  const wsRef                         = useRef<WebSocket | null>(null)
+  const stoppedRef                    = useRef(false)
 
   useEffect(() => {
     stoppedRef.current = false
@@ -110,6 +119,11 @@ export function useMarketData(): {
           if (msg.status === 'disconnected') setStatus('disconnected')
           if (msg.status === 'connected')    setStatus('connected')
         }
+
+        if (msg.type === 'ws-fallback') {
+          console.warn(`[useMarketData] ⚡ WS Fallback activado para ${msg.symbol}: ${msg.reason}`)
+          setWsFallbacks(prev => ({ ...prev, [msg.symbol]: msg.reason }))
+        }
       }
 
       ws.onerror = () => {
@@ -134,5 +148,5 @@ export function useMarketData(): {
     }
   }, [])
 
-  return { data, status }
+  return { data, status, wsFallbacks }
 }

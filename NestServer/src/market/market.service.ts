@@ -185,6 +185,15 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
         } satisfies BackendMessage);
       });
 
+      client.on('ws-fallback', (symbol: string, reason: string) => {
+        console.log(`[MarketService] 📡 [${symbol}] WS Fallback activo — notificando al frontend`)
+        this.events.emit('broadcast', {
+          type: 'ws-fallback',
+          symbol,
+          reason,
+        })
+      });
+
       client.connect();
       this.twelveClients.push(client);
     }
