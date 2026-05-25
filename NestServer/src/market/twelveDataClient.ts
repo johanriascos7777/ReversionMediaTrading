@@ -110,10 +110,13 @@ export class TwelveDataClient extends EventEmitter {
                 message.toLowerCase().includes('exhausted')
 
               if (isExhausted) {
-                console.error(`[TwelveData] [${this.symbol}] ⚠️ Créditos agotados en llave ...${this.apiKey.slice(-6)}. Emitiendo 'key-exhausted'.`)
-                this.emit('key-exhausted', this.apiKey)
-                // Detener poller temporalmente — se reanudará cuando llegue la nueva key
+                console.error(`[TwelveData] [${this.symbol}] ⚠️ Créditos agotados en llave ...${this.apiKey.slice(-6)}. Deteniendo poller y rotando key...`)
+                // ─── Fix timing: detener ANTES de emitir para que updateApiKey
+                // reciba pollInterval=null y pueda reiniciar el poller limpiamente.
+                // Si se emitía primero, un ciclo pendiente del setInterval apagaba
+                // el poller que updateApiKey acababa de arrancar con la nueva llave.
                 this.stopRestPoller()
+                this.emit('key-exhausted', this.apiKey)
               } else {
                 console.error(`[TwelveData] [${this.symbol}] Error REST Poller:`, message || raw)
               }
