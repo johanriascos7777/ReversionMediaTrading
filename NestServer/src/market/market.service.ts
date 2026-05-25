@@ -119,11 +119,17 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
   // Lun–Jue  : 7:00 AM – 10:00 PM COT (07:00 – 22:00)
   // Viernes  : 7:00 AM – 12:00 PM COT (07:00 – 12:00)
   // Sábado   : Siempre cerrado
+  // NOTA: Usamos COT (UTC-5) explícitamente para que funcione igual en
+  //       servidores en la nube (Render/UTC) y en máquina local.
   private isOperationalTime(): boolean {
-    const ahora = new Date();
-    const dia = ahora.getDay();     // 0=Dom, 1=Lun, ..., 6=Sáb
-    const hora = ahora.getHours();
-    const min = ahora.getMinutes();
+    // Calcular hora actual en COT (UTC-5) de forma explícita y portable
+    const ahoraUTC = Date.now();
+    const COT_OFFSET_MS = -5 * 60 * 60 * 1000; // UTC-5
+    const ahoraCOT = new Date(ahoraUTC + COT_OFFSET_MS);
+
+    const dia  = ahoraCOT.getUTCDay();     // 0=Dom, 1=Lun, ..., 6=Sáb en COT
+    const hora = ahoraCOT.getUTCHours();   // Hora en COT
+    const min  = ahoraCOT.getUTCMinutes(); // Minutos en COT
 
     // Domingo: sesión apertura de mercado
     if (dia === 0) {
