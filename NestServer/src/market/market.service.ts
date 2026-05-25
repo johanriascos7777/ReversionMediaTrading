@@ -4,7 +4,7 @@ import https from 'https';
 import http from 'http';
 import { TwelveDataClient } from './twelveDataClient';
 import { CandleBuilder } from './candleBuilder';
-import { calculateSnapshot, resolveMultiTF, calculateElasticityForCandles, pushPercentileHistory } from './marketEngine';
+import { calculateSnapshot, resolveMultiTF, calculateElasticityForCandles, pushPercentileHistory, clearPercentileHistory } from './marketEngine';
 import type { BackendMessage, Candle, MarketSnapshot, MarketState, FusedStateResult, BacktestResult } from './types';
 import { runBacktest } from './backtestEngine';
 import { compareSignalWithHistory } from './compareSignal';
@@ -29,6 +29,11 @@ export class SymbolState {
   public previousFinalState: MarketState | null = null;
   public lastTelegramAlertTimeA = 0;
   public lastTelegramAlertTimeB = 0;
+
+  // Tracking de historial individual
+  public historyLoaded = false;
+  public isHistoryLoading = false;
+  public lastHistoryAttemptTime = 0;
 
   constructor(symbol: string) {
     this.symbol = symbol;
@@ -173,42 +178,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
           // Asignar key exclusiva inicial para este símbolo
           this.getAvailableApiKey(sym);
 
-          console.log(`[MarketService] [${sym}] Cargando historial M5 (500 velas)...`);
-          state.historicalM5 = await this.fetchHistoricalCandles(sym, '5min', HISTORY_OUTPUT);
-
-          await new Promise((r) => setTimeout(r, 2000));
-
-          console.log(`[MarketService] [${sym}] Cargando historial M15 (500 velas)...`);
-          state.historicalM15 = await this.fetchHistoricalCandles(sym, '15min', HISTORY_OUTPUT);
-
-          if (state.historicalM5.length > 0) this.warmUpBuilder(sym, state.builderM5, state.historicalM5);
-          if (state.historicalM15.length > 0) this.warmUpBuilder(sym, state.builderM15, state.historicalM15);
-
-          // Calcular backtest inicial
-          if (state.historicalM5.length > 0) {
-            state.lastBacktestM5 = runBacktest(state.historicalM5, { emaPeriod: 100, maxBarsToRevert: 20 });
-            console.log(
-              `[MarketService] [${sym}] Backtest M5 inicial calculado: WinRate: ${state.lastBacktestM5.winRate}% · Señales: ${state.lastBacktestM5.totalSignals}`
-            );
-          }
-
-          // Calcular snapshot inicial con último precio del historial
-          if (state.historicalM5.length > 0 && state.historicalM15.length > 0) {
-            const lastPrice = state.historicalM5[state.historicalM5.length - 1].close;
-            const ts = state.historicalM5[state.historicalM5.length - 1].time;
-            const snap5 = calculateSnapshot(sym, state.builderM5.getCandles(), lastPrice, 'M5', ts);
-            const snap15 = calculateSnapshot(sym, state.builderM15.getCandles(), lastPrice, 'M15', ts);
-
-            if (snap5 && snap15) {
-              state.lastSnapshotM5 = snap5;
-              state.lastSnapshotM15 = snap15;
-              console.log(
-                `[MarketService] [${sym}] Snapshot inicial: M5: ${snap5.elasticity.toFixed(3)} ${snap5.state} · M15: ${snap15.elasticity.toFixed(3)} ${snap15.state}`
-              );
-            }
-          }
-
-          // Configurar manejadores de eventos de velas
+          // Configurar manejadores de eventos de velas (se configuran una sola vez)
           state.builderM5.on('dropped_tick', (reason: string) => this.recordDroppedTick(reason));
           state.builderM15.on('dropped_tick', (reason: string) => this.recordDroppedTick(reason));
 
@@ -233,6 +203,9 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
             const el = calculateElasticityForCandles(state.builderM15.getCandles(), candle.close);
             if (el !== null) pushPercentileHistory(sym, 'M15', el);
           });
+
+          // Intentar cargar el historial inicial de forma asíncrona pero secuencial durante el startup
+          await this.loadSymbolHistory(state);
 
           // Breve pausa para no saturar la API
           await new Promise((r) => setTimeout(r, 2000));
@@ -279,6 +252,13 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
           console.warn(`[MarketService] [${sym}] Llave agotada: ...${exhaustedKey.slice(-6)}. Rotando...`);
           const newKey = this.getAvailableApiKey(sym, exhaustedKey);
           client.updateApiKey(newKey);
+
+          // Forzar la recarga de historial en el próximo tick del poller REST
+          const state = this.symbolStates.get(sym);
+          if (state && !state.historyLoaded) {
+            state.lastHistoryAttemptTime = 0;
+            console.log(`[MarketService] [${sym}] Llave rotada. Se forzará la recarga de historial en el próximo tick.`);
+          }
         });
 
         client.connect();
@@ -597,10 +577,84 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
+  private async loadSymbolHistory(state: SymbolState): Promise<boolean> {
+    const sym = state.symbol;
+    if (state.isHistoryLoading) return false;
+    state.isHistoryLoading = true;
+    state.lastHistoryAttemptTime = Date.now();
+
+    try {
+      console.log(`[MarketService] [${sym}] Intentando cargar historial...`);
+      const histM5 = await this.fetchHistoricalCandles(sym, '5min', HISTORY_OUTPUT);
+      
+      // Breve pausa para no saturar la API
+      await new Promise((r) => setTimeout(r, 2000));
+      
+      const histM15 = await this.fetchHistoricalCandles(sym, '15min', HISTORY_OUTPUT);
+
+      if (histM5.length === 0 || histM15.length === 0) {
+        console.warn(`[MarketService] [${sym}] Carga de historial fallida (velas vacías). Se reintentará después.`);
+        return false;
+      }
+
+      // Si todo está bien, limpiar constructores actuales e inyectar el historial completo
+      state.builderM5.clear();
+      state.builderM15.clear();
+
+      // Limpiar también el percentil en el motor
+      clearPercentileHistory(sym, 'M5');
+      clearPercentileHistory(sym, 'M15');
+
+      state.historicalM5 = histM5;
+      state.historicalM15 = histM15;
+
+      this.warmUpBuilder(sym, state.builderM5, state.historicalM5);
+      this.warmUpBuilder(sym, state.builderM15, state.historicalM15);
+
+      state.lastBacktestM5 = runBacktest(state.historicalM5, { emaPeriod: 100, maxBarsToRevert: 20 });
+      console.log(
+        `[MarketService] [${sym}] Historial cargado con éxito en segundo plano. Backtest M5 recalculado: WinRate: ${state.lastBacktestM5.winRate}% · Señales: ${state.lastBacktestM5.totalSignals}`
+      );
+
+      // Calcular snapshot inicial con el último precio del historial cargado
+      const lastPrice = state.historicalM5[state.historicalM5.length - 1].close;
+      const ts = state.historicalM5[state.historicalM5.length - 1].time;
+      const snap5 = calculateSnapshot(sym, state.builderM5.getCandles(), lastPrice, 'M5', ts);
+      const snap15 = calculateSnapshot(sym, state.builderM15.getCandles(), lastPrice, 'M15', ts);
+
+      if (snap5 && snap15) {
+        state.lastSnapshotM5 = snap5;
+        state.lastSnapshotM15 = snap15;
+        console.log(
+          `[MarketService] [${sym}] Snapshot inicial recalculado: M5: ${snap5.elasticity.toFixed(3)} ${snap5.state} · M15: ${snap15.elasticity.toFixed(3)} ${snap15.state}`
+        );
+      }
+
+      state.historyLoaded = true;
+      return true;
+    } catch (err) {
+      console.error(`[MarketService] [${sym}] Error inesperado cargando historial:`, err);
+      return false;
+    } finally {
+      state.isHistoryLoading = false;
+    }
+  }
+
   // ─── Procesamiento de ticks ───────────────────────────────────────────────────
   private processTick(symbol: string, price: number, timestamp: number): void {
     const state = this.symbolStates.get(symbol);
     if (!state) return;
+
+    // Si el historial de este símbolo no ha cargado con éxito, intentar cargarlo de forma asíncrona
+    if (!state.historyLoaded && !state.isHistoryLoading) {
+      const now = Date.now();
+      if (now - state.lastHistoryAttemptTime > 30000) {
+        console.log(`[MarketService] [${symbol}] Historial ausente/incompleto. Iniciando carga asíncrona en segundo plano...`);
+        this.loadSymbolHistory(state).catch((e) =>
+          console.error(`[MarketService] [${symbol}] Error cargando historial en segundo plano:`, e)
+        );
+      }
+    }
 
     const delay = Math.max(0, Date.now() - timestamp);
 

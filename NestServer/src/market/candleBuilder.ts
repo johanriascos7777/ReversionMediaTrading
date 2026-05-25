@@ -113,4 +113,9 @@ export class CandleBuilder extends EventEmitter {
   getTimeframe(): Timeframe {
     return this.timeframe
   }
+
+  clear(): void {
+    this.closed = []
+    this.current = null
+  }
 }

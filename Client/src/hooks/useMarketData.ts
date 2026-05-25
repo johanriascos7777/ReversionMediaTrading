@@ -131,6 +131,7 @@ export function useMarketData(): {
         }
 
         if (msg.type === 'snapshot') {
+          console.log(`[DEBUG] Snapshot recibido → ${msg.symbol} | M5: ${msg.m5?.state} | M15: ${msg.m15?.state} | Fused: ${msg.fusedState}`)
           setData(prev => ({
             ...prev,
             [msg.symbol]: {

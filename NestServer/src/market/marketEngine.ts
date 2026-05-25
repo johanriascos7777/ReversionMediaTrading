@@ -83,6 +83,10 @@ class PercentileEngine {
     const rank   = sorted.filter(v => v <= value).length
     return (rank / this.window.length) * 100
   }
+
+  clear(): void {
+    this.window = []
+  }
 }
 
 const percentileM5Map  = new Map<string, PercentileEngine>()
@@ -128,6 +132,14 @@ export function calculateElasticityForCandles(candles: Candle[], price: number):
   if (atr === 0) return null
 
   return Math.abs(price - ema100) / atr
+}
+
+/**
+ * Limpia el historial acumulado del percentil para un par y timeframe específicos.
+ */
+export function clearPercentileHistory(symbol: string, timeframe: Timeframe): void {
+  const percentileEngine = getPercentileEngine(symbol, timeframe)
+  percentileEngine.clear()
 }
 
 /**
