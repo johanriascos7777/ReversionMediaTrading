@@ -50,6 +50,13 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
 
   private readonly twelveClients: TwelveDataClient[] = [];
 
+  // ─── Control Horario y Pool de Llaves ────────────────────────────────────────
+  private engineRunning = false;
+  private historyLoaded = false;
+  private schedulerInterval: NodeJS.Timeout | null = null;
+  private readonly exhaustedKeys = new Set<string>();
+  private readonly activeAssignments = new Map<string, string>();
+
   // Métricas
   public readonly serverMetrics = {
     droppedTicksTotal: 0,
@@ -81,131 +88,245 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
     console.log('[MarketService] Inicializando...');
     console.log('╔════════════════════════════════════╗');
     console.log('║   Elasticity System — NestJS       ║');
-    console.log(`║   Symbols: ${this.symbolList.join(', ')}`);
+    console.log(`║   Symbols : ${this.symbolList.join(', ')}`);
+    console.log(`║   API Keys: ${this.apiKeyList.length} llaves cargadas en el pool`);
     console.log('╚════════════════════════════════════╝');
 
-    // 1. Cargar historial y pre-calentar cada par
-    for (const sym of this.symbolList) {
-      console.log(`[MarketService] Inicializando par: ${sym}`);
-      const state = new SymbolState(sym);
-      this.symbolStates.set(sym, state);
+    // Iniciar el programador horario (verifica cada 60 segundos)
+    this.schedulerInterval = setInterval(() => this.checkOperationalScheduler(), 60_000);
 
-      console.log(`[MarketService] [${sym}] Cargando historial M5 (500 velas)...`);
-      state.historicalM5 = await this.fetchHistoricalCandles(sym, '5min', HISTORY_OUTPUT);
-
-      await new Promise((r) => setTimeout(r, 2000)); // pausa entre llamadas REST para evitar rate limit (8/min)
-
-      console.log(`[MarketService] [${sym}] Cargando historial M15 (500 velas)...`);
-      state.historicalM15 = await this.fetchHistoricalCandles(sym, '15min', HISTORY_OUTPUT);
-
-      if (state.historicalM5.length > 0) this.warmUpBuilder(sym, state.builderM5, state.historicalM5);
-      if (state.historicalM15.length > 0) this.warmUpBuilder(sym, state.builderM15, state.historicalM15);
-
-      // Calcular backtest inicial
-      if (state.historicalM5.length > 0) {
-        state.lastBacktestM5 = runBacktest(state.historicalM5, { emaPeriod: 100, maxBarsToRevert: 20 });
-        console.log(
-          `[MarketService] [${sym}] Backtest M5 inicial calculado: WinRate: ${state.lastBacktestM5.winRate}% · Señales: ${state.lastBacktestM5.totalSignals}`
-        );
-      }
-
-      // Calcular snapshot inicial con último precio del historial
-      if (state.historicalM5.length > 0 && state.historicalM15.length > 0) {
-        const lastPrice = state.historicalM5[state.historicalM5.length - 1].close;
-        const ts = state.historicalM5[state.historicalM5.length - 1].time;
-        const snap5 = calculateSnapshot(sym, state.builderM5.getCandles(), lastPrice, 'M5', ts);
-        const snap15 = calculateSnapshot(sym, state.builderM15.getCandles(), lastPrice, 'M15', ts);
-
-        if (snap5 && snap15) {
-          state.lastSnapshotM5 = snap5;
-          state.lastSnapshotM15 = snap15;
-          console.log(
-            `[MarketService] [${sym}] Snapshot inicial:`,
-            `M5: ${snap5.elasticity.toFixed(3)} ${snap5.state}`,
-            `· M15: ${snap15.elasticity.toFixed(3)} ${snap15.state}`
-          );
-        }
-      }
-
-      // Configurar manejadores de eventos para el constructor de velas de este símbolo
-      state.builderM5.on('dropped_tick', (reason: string) => this.recordDroppedTick(reason));
-      state.builderM15.on('dropped_tick', (reason: string) => this.recordDroppedTick(reason));
-
-      state.builderM5.on('candle:closed', (candle: Candle) => {
-        state.historicalM5.push(candle);
-        if (state.historicalM5.length > HISTORY_OUTPUT) {
-          state.historicalM5.shift();
-        }
-
-        const el = calculateElasticityForCandles(state.builderM5.getCandles(), candle.close);
-        if (el !== null) pushPercentileHistory(sym, 'M5', el);
-
-        // Recalcular backtest M5 con la nueva vela
-        state.lastBacktestM5 = runBacktest(state.historicalM5, { emaPeriod: 100, maxBarsToRevert: 20 });
-        console.log(
-          `[MarketService] [${sym}] Vela M5 cerrada. Backtest M5 recalculado (Historial: ${state.historicalM5.length}):`,
-          `WinRate: ${state.lastBacktestM5.winRate}% · Señales: ${state.lastBacktestM5.totalSignals}`
-        );
-      });
-
-      state.builderM15.on('candle:closed', (candle: Candle) => {
-        state.historicalM15.push(candle);
-        if (state.historicalM15.length > HISTORY_OUTPUT) {
-          state.historicalM15.shift();
-        }
-
-        const el = calculateElasticityForCandles(state.builderM15.getCandles(), candle.close);
-        if (el !== null) pushPercentileHistory(sym, 'M15', el);
-        console.log(
-          `[MarketService] [${sym}] Vela M15 cerrada — ${state.builderM15.getClosedCandles().length} velas (Historial: ${state.historicalM15.length})`
-        );
-      });
-
-      // Breve pausa para evitar saturar peticiones API
-      await new Promise((r) => setTimeout(r, 2000));
-    }
-
-    // 2. Conectar cada par a su respectiva API Key por WebSocket separado
-    for (let i = 0; i < this.symbolList.length; i++) {
-      const sym = this.symbolList[i];
-      const key = this.apiKeyList[i] ?? this.apiKeyList[0] ?? '';
-
-      console.log(`[MarketService] Iniciando cliente WebSocket para ${sym} usando clave: ...${key.slice(-6)}`);
-      const client = new TwelveDataClient(key, sym);
-
-      client.on('tick', (symbol: string, price: number, timestamp: number) =>
-        this.processTick(symbol, price, timestamp)
-      );
-      client.on('dropped_tick', (reason: string) => this.recordDroppedTick(reason));
-      client.on('status', (status: string, message: string) => {
-        this.events.emit('broadcast', {
-          type: 'status',
-          status: status as 'connecting' | 'connected' | 'disconnected',
-          message: `[${sym}] ${message}`,
-        } satisfies BackendMessage);
-      });
-
-      client.on('ws-fallback', (symbol: string, reason: string) => {
-        console.log(`[MarketService] 📡 [${symbol}] WS Fallback activo — notificando al frontend`)
-        this.events.emit('broadcast', {
-          type: 'ws-fallback',
-          symbol,
-          reason,
-        })
-      });
-
-      client.connect();
-      this.twelveClients.push(client);
-    }
+    // Comprobación inmediata al arrancar
+    await this.checkOperationalScheduler();
   }
 
   onModuleDestroy() {
     console.log('[MarketService] Deteniendo servicio...');
     if (this.metricsInterval) clearInterval(this.metricsInterval);
+    if (this.schedulerInterval) clearInterval(this.schedulerInterval);
     for (const client of this.twelveClients) {
       client.disconnect();
     }
     this.twelveClients.length = 0;
+  }
+
+  // ─── Programador de Horario Operativo ────────────────────────────────────────
+  // Domingo  : 7:30 PM – 11:30 PM COT (19:30 – 23:30)
+  // Lun–Jue  : 7:00 AM – 10:00 PM COT (07:00 – 22:00)
+  // Viernes  : 7:00 AM – 12:00 PM COT (07:00 – 12:00)
+  // Sábado   : Siempre cerrado
+  private isOperationalTime(): boolean {
+    const ahora = new Date();
+    const dia = ahora.getDay();     // 0=Dom, 1=Lun, ..., 6=Sáb
+    const hora = ahora.getHours();
+    const min = ahora.getMinutes();
+
+    // Domingo: sesión apertura de mercado
+    if (dia === 0) {
+      const inicio = hora > 19 || (hora === 19 && min >= 30);
+      const fin   = hora < 23 || (hora === 23 && min < 30);
+      return inicio && fin;
+    }
+
+    // Lunes a Jueves: 7:00 AM – 10:00 PM
+    if (dia >= 1 && dia <= 4) {
+      return hora >= 7 && hora < 22;
+    }
+
+    // Viernes: 7:00 AM – 12:00 PM
+    if (dia === 5) {
+      return hora >= 7 && hora < 12;
+    }
+
+    // Sábado: siempre cerrado
+    return false;
+  }
+
+  private async checkOperationalScheduler(): Promise<void> {
+    const operational = this.isOperationalTime();
+
+    if (operational && !this.engineRunning) {
+      console.log(
+        `\n╔═══════════════════════════════════════════════════════════╗\n` +
+        `║   ⚡ INICIO DE HORARIO OPERATIVO — Activando Motor       ║\n` +
+        `╚═══════════════════════════════════════════════════════════╝\n`
+      );
+      this.engineRunning = true;
+
+      // 1. Cargar historial si no se ha cargado antes
+      if (!this.historyLoaded) {
+        for (const sym of this.symbolList) {
+          console.log(`[MarketService] Inicializando par: ${sym}`);
+          const state = new SymbolState(sym);
+          this.symbolStates.set(sym, state);
+
+          // Asignar key exclusiva inicial para este símbolo
+          this.getAvailableApiKey(sym);
+
+          console.log(`[MarketService] [${sym}] Cargando historial M5 (500 velas)...`);
+          state.historicalM5 = await this.fetchHistoricalCandles(sym, '5min', HISTORY_OUTPUT);
+
+          await new Promise((r) => setTimeout(r, 2000));
+
+          console.log(`[MarketService] [${sym}] Cargando historial M15 (500 velas)...`);
+          state.historicalM15 = await this.fetchHistoricalCandles(sym, '15min', HISTORY_OUTPUT);
+
+          if (state.historicalM5.length > 0) this.warmUpBuilder(sym, state.builderM5, state.historicalM5);
+          if (state.historicalM15.length > 0) this.warmUpBuilder(sym, state.builderM15, state.historicalM15);
+
+          // Calcular backtest inicial
+          if (state.historicalM5.length > 0) {
+            state.lastBacktestM5 = runBacktest(state.historicalM5, { emaPeriod: 100, maxBarsToRevert: 20 });
+            console.log(
+              `[MarketService] [${sym}] Backtest M5 inicial calculado: WinRate: ${state.lastBacktestM5.winRate}% · Señales: ${state.lastBacktestM5.totalSignals}`
+            );
+          }
+
+          // Calcular snapshot inicial con último precio del historial
+          if (state.historicalM5.length > 0 && state.historicalM15.length > 0) {
+            const lastPrice = state.historicalM5[state.historicalM5.length - 1].close;
+            const ts = state.historicalM5[state.historicalM5.length - 1].time;
+            const snap5 = calculateSnapshot(sym, state.builderM5.getCandles(), lastPrice, 'M5', ts);
+            const snap15 = calculateSnapshot(sym, state.builderM15.getCandles(), lastPrice, 'M15', ts);
+
+            if (snap5 && snap15) {
+              state.lastSnapshotM5 = snap5;
+              state.lastSnapshotM15 = snap15;
+              console.log(
+                `[MarketService] [${sym}] Snapshot inicial: M5: ${snap5.elasticity.toFixed(3)} ${snap5.state} · M15: ${snap15.elasticity.toFixed(3)} ${snap15.state}`
+              );
+            }
+          }
+
+          // Configurar manejadores de eventos de velas
+          state.builderM5.on('dropped_tick', (reason: string) => this.recordDroppedTick(reason));
+          state.builderM15.on('dropped_tick', (reason: string) => this.recordDroppedTick(reason));
+
+          state.builderM5.on('candle:closed', (candle: Candle) => {
+            state.historicalM5.push(candle);
+            if (state.historicalM5.length > HISTORY_OUTPUT) state.historicalM5.shift();
+
+            const el = calculateElasticityForCandles(state.builderM5.getCandles(), candle.close);
+            if (el !== null) pushPercentileHistory(sym, 'M5', el);
+
+            // Recalcular backtest M5 con la nueva vela
+            state.lastBacktestM5 = runBacktest(state.historicalM5, { emaPeriod: 100, maxBarsToRevert: 20 });
+            console.log(
+              `[MarketService] [${sym}] Vela M5 cerrada. Backtest M5 recalculado: WinRate: ${state.lastBacktestM5.winRate}%`
+            );
+          });
+
+          state.builderM15.on('candle:closed', (candle: Candle) => {
+            state.historicalM15.push(candle);
+            if (state.historicalM15.length > HISTORY_OUTPUT) state.historicalM15.shift();
+
+            const el = calculateElasticityForCandles(state.builderM15.getCandles(), candle.close);
+            if (el !== null) pushPercentileHistory(sym, 'M15', el);
+          });
+
+          // Breve pausa para no saturar la API
+          await new Promise((r) => setTimeout(r, 2000));
+        }
+        this.historyLoaded = true;
+      }
+
+      // 2. Conectar cada par a su key exclusiva del pool
+      this.twelveClients.length = 0;
+      for (const sym of this.symbolList) {
+        const key = this.getAvailableApiKey(sym);
+
+        console.log(`[MarketService] Iniciando cliente para ${sym} usando clave: ...${key.slice(-6)}`);
+        const client = new TwelveDataClient(key, sym);
+
+        client.on('tick', (symbol: string, price: number, timestamp: number) =>
+          this.processTick(symbol, price, timestamp)
+        );
+        client.on('dropped_tick', (reason: string) => this.recordDroppedTick(reason));
+        client.on('status', (status: string, message: string) => {
+          this.events.emit('broadcast', {
+            type: 'status',
+            status: status as 'connecting' | 'connected' | 'disconnected',
+            message: `[${sym}] ${message}`,
+          } satisfies BackendMessage);
+        });
+
+        client.on('ws-fallback', (symbol: string, reason: string) => {
+          console.log(`[MarketService] 📡 [${symbol}] WS Fallback activo — notificando al frontend`);
+          this.events.emit('broadcast', {
+            type: 'ws-fallback',
+            symbol,
+            reason,
+          });
+        });
+
+        // Rotar key automáticamente si se agotan los créditos
+        client.on('key-exhausted', (exhaustedKey: string) => {
+          console.warn(`[MarketService] [${sym}] Llave agotada: ...${exhaustedKey.slice(-6)}. Rotando...`);
+          const newKey = this.getAvailableApiKey(sym, exhaustedKey);
+          client.updateApiKey(newKey);
+        });
+
+        client.connect();
+        this.twelveClients.push(client);
+      }
+
+    } else if (!operational && this.engineRunning) {
+      console.log(
+        `\n╔═══════════════════════════════════════════════════════════╗\n` +
+        `║   🛑 CIERRE DE HORARIO OPERATIVO — Apagando Clientes     ║\n` +
+        `╚═══════════════════════════════════════════════════════════╝\n`
+      );
+      this.engineRunning = false;
+      for (const client of this.twelveClients) {
+        client.disconnect();
+      }
+      this.twelveClients.length = 0;
+
+      this.events.emit('broadcast', {
+        type: 'status',
+        status: 'disconnected',
+        message: 'Sistema dormido fuera de horario operativo (Dom 7:30PM–11:30PM · Lun–Jue 7AM–10PM · Vie 7AM–12PM COT)',
+      } satisfies BackendMessage);
+
+    } else if (!operational && !this.engineRunning) {
+      if (Math.random() < 0.05) {
+        console.log('[MarketService] Sistema dormido fuera de horario operativo...');
+      }
+    }
+  }
+
+  // ─── Gestión Dinámica de API Keys (Pool de 32 llaves) ────────────────────────
+  private getAvailableApiKey(symbol: string, currentExhaustedKey?: string): string {
+    if (currentExhaustedKey) {
+      this.exhaustedKeys.add(currentExhaustedKey);
+      console.log(`[MarketService] Llave ...${currentExhaustedKey.slice(-6)} marcada como agotada.`);
+    }
+
+    // Llaves ya asignadas a otros símbolos (excluir la del símbolo actual)
+    const assignedToOthers = new Set(this.activeAssignments.values());
+    const myCurrentKey = this.activeAssignments.get(symbol);
+    if (myCurrentKey) assignedToOthers.delete(myCurrentKey);
+
+    // 1. Buscar primera llave libre (no agotada, no asignada a otro símbolo)
+    for (const key of this.apiKeyList) {
+      if (!this.exhaustedKeys.has(key) && !assignedToOthers.has(key)) {
+        this.activeAssignments.set(symbol, key);
+        console.log(`[MarketService] [${symbol}] Llave activa asignada: ...${key.slice(-6)}`);
+        return key;
+      }
+    }
+
+    // 2. Fallback: llave no agotada aunque compartida temporalmente
+    for (const key of this.apiKeyList) {
+      if (!this.exhaustedKeys.has(key)) {
+        this.activeAssignments.set(symbol, key);
+        console.warn(`[MarketService] [${symbol}] ⚠️ Llave compartida ...${key.slice(-6)} (escasez temporal)`);
+        return key;
+      }
+    }
+
+    // 3. Fallback absoluto (todas agotadas — situación crítica)
+    console.error(`[MarketService] [${symbol}] ❌ CRÍTICO: Todas las ${this.apiKeyList.length} llaves están agotadas.`);
+    return this.apiKeyList[0] || '';
   }
 
   // Retorna todos los últimos snapshots del sistema
@@ -280,15 +401,15 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
     return timeframe === '15min' ? state.historicalM15 : state.historicalM5;
   }
 
-  // --- Fetch historial via REST ---
+  // ─── Fetch historial via REST ─────────────────────────────────────────────────
   private fetchHistoricalCandles(
     symbol: string,
     interval: '5min' | '15min',
     outputSize: number
   ): Promise<Candle[]> {
     return new Promise((resolve) => {
-      const idx = this.symbolList.indexOf(symbol);
-      const key = idx !== -1 && this.apiKeyList[idx] ? this.apiKeyList[idx] : (this.apiKeyList[0] ?? '');
+      // Usar la key asignada dinámicamente al símbolo (pool de rotación)
+      const key = this.activeAssignments.get(symbol) ?? this.apiKeyList[0] ?? '';
 
       const path =
         `/time_series?symbol=${encodeURIComponent(symbol)}` +
@@ -349,7 +470,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  // --- Procesamiento de ticks ---
+  // ─── Procesamiento de ticks ───────────────────────────────────────────────────
   private processTick(symbol: string, price: number, timestamp: number): void {
     const state = this.symbolStates.get(symbol);
     if (!state) return;

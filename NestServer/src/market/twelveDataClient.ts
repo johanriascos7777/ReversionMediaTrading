@@ -40,6 +40,20 @@ export class TwelveDataClient extends EventEmitter {
     this.symbol = Array.isArray(symbol) ? symbol.join(',') : symbol
   }
 
+  /**
+   * Actualiza la API Key en caliente (rotación dinámica del pool).
+   * Si el poller estaba detenido por agotamiento de créditos, lo reanuda automáticamente.
+   */
+  updateApiKey(newKey: string): void {
+    this.apiKey = newKey
+    console.log(`[TwelveData] [${this.symbol}] API Key rotada a: ...${newKey.slice(-6)}`)
+    // Si el poller estaba detenido por agotamiento, reanudarlo con la nueva llave
+    if (this.wsRejected && !this.stopped && !this.pollInterval) {
+      console.log(`[TwelveData] [${this.symbol}] Reanudando REST Poller con la nueva API Key...`)
+      this.startRestPoller()
+    }
+  }
+
   connect(): void {
     this.stopped = false
     this.wsRejected = false
@@ -84,8 +98,25 @@ export class TwelveDataClient extends EventEmitter {
                 // Emitir tick como si viniera del websocket
                 this.emit('tick', this.symbol, price, Date.now())
               }
+            } else if (data.status === 'error') {
+              const code = data.code
+              const message: string = data.message || ''
+              const isExhausted =
+                code === 429 ||
+                message.toLowerCase().includes('limit') ||
+                message.toLowerCase().includes('credit') ||
+                message.toLowerCase().includes('exhausted')
+
+              if (isExhausted) {
+                console.error(`[TwelveData] [${this.symbol}] ⚠️ Créditos agotados en llave ...${this.apiKey.slice(-6)}. Emitiendo 'key-exhausted'.`)
+                this.emit('key-exhausted', this.apiKey)
+                // Detener poller temporalmente — se reanudará cuando llegue la nueva key
+                this.stopRestPoller()
+              } else {
+                console.error(`[TwelveData] [${this.symbol}] Error REST Poller:`, message || raw)
+              }
             } else {
-              console.error(`[TwelveData] [${this.symbol}] Error de REST Poller (Respuesta):`, raw)
+              console.error(`[TwelveData] [${this.symbol}] Respuesta inesperada del REST Poller:`, raw)
             }
           } catch (e: any) {
             console.error(`[TwelveData] [${this.symbol}] Error parseando JSON en REST Poller:`, e.message)
