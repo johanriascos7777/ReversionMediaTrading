@@ -11,6 +11,7 @@ import { Semaforo } from './components/Semaforo'
 import { BacktestMetrics } from './components/BacktestMetrics'
 import { ElasticityCard } from './components/ElasticityCard'
 import { SystemObservability } from './components/SystemObservability'
+import { ApiKeysStatus } from './components/ApiKeysStatus'
 
 import { compareSignalWithHistory } from './backtest/compareSignal'
 import { fuseMarketState } from './logic/fuseMarketState'
@@ -48,7 +49,7 @@ function App() {
   const [dismissedFallbacks, setDismissedFallbacks] = useState<Set<string>>(new Set())
 
   // 🟢 1. Mercado en tiempo real — via backend WebSocket local (Multi-símbolo)
-  const { data: market, status: wsStatus, wsFallbacks } = useMarketData()
+  const { data: market, status: wsStatus, wsFallbacks, keysStatus, exhaustAlert } = useMarketData()
 
   // Símbolo activo resuelto (con fallback si el activo no se ha recibido o es vacío)
   const activeKey = market && market[activeSymbol] ? activeSymbol : (market ? Object.keys(market)[0] : 'EUR/USD')
@@ -194,8 +195,28 @@ function App() {
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         height: '100vh', flexDirection: 'column', gap: 12,
-        color: '#555', fontFamily: 'monospace', textAlign: 'center'
+        color: '#555', fontFamily: 'monospace', textAlign: 'center',
+        padding: 24, boxSizing: 'border-box'
       }}>
+        {exhaustAlert && (
+          <div style={{
+            maxWidth: 500,
+            marginBottom: 24,
+            borderRadius: 12,
+            border: '1px solid rgba(239,68,68,0.4)',
+            background: 'linear-gradient(135deg, rgba(239,68,68,0.15) 0%, rgba(185,28,28,0.1) 100%)',
+            boxShadow: '0 0 20px rgba(239,68,68,0.15)',
+            padding: '16px 20px',
+            textAlign: 'left'
+          }}>
+            <h4 style={{ margin: 0, fontSize: 14, fontWeight: 800, color: '#ef4444', textTransform: 'uppercase' }}>
+              ⚠️ Critical API Keys Exhausted
+            </h4>
+            <p style={{ margin: '4px 0 0', fontSize: 12, color: '#fca5a5', lineHeight: 1.4 }}>
+              {exhaustAlert}
+            </p>
+          </div>
+        )}
         <div style={{
           width: 10, height: 10, borderRadius: '50%',
           background: wsStatus === 'connected' ? '#10b981' : (wsStatus === 'connecting' ? '#eab308' : '#dc2626'),
@@ -227,6 +248,38 @@ function App() {
 
   return (
     <div style={{ padding: '24px 0', maxWidth: 1200, margin: '0 auto' }}>
+
+      {/* ==================================================== */}
+      {/* 🔴 ALERTA CRÍTICA: AGOTAMIENTO DE LLAVES             */}
+      {/* ==================================================== */}
+      {exhaustAlert && (
+        <div style={{
+          marginBottom: 24,
+          borderRadius: 12,
+          border: '1px solid rgba(239,68,68,0.4)',
+          background: 'linear-gradient(135deg, rgba(239,68,68,0.15) 0%, rgba(185,28,28,0.1) 100%)',
+          boxShadow: '0 0 20px rgba(239,68,68,0.15)',
+          backdropFilter: 'blur(10px)',
+          padding: '16px 20px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 16,
+        }}>
+          <div style={{
+            width: 10, height: 10, borderRadius: '50%',
+            background: '#ef4444',
+            boxShadow: '0 0 12px #ef4444, 0 0 24px #ef4444',
+          }} />
+          <div style={{ flex: 1, textAlign: 'left' }}>
+            <h4 style={{ margin: 0, fontSize: 14, fontWeight: 800, color: '#ef4444', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              ⚠️ Critical API Keys Exhausted
+            </h4>
+            <p style={{ margin: '4px 0 0', fontSize: 13, color: '#fca5a5', lineHeight: 1.4, fontFamily: 'monospace' }}>
+              {exhaustAlert}
+            </p>
+          </div>
+        </div>
+      )}
       
       {/* HEADER PRINCIPAL */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32, gap: 16, flexWrap: 'wrap' }}>
@@ -258,6 +311,11 @@ function App() {
           </span>
         </div>
       </div>
+
+      {/* ==================================================== */}
+      {/* 🔑 PANEL DE API KEYS Y CRÉDITOS                       */}
+      {/* ==================================================== */}
+      <ApiKeysStatus keysStatus={keysStatus} />
 
       {/* ==================================================== */}
       {/* ⚠️ REST FALLBACK ALERT BANNER                        */}

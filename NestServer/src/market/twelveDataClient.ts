@@ -84,6 +84,8 @@ export class TwelveDataClient extends EventEmitter {
 
       const url = `https://api.twelvedata.com/price?symbol=${encodeURIComponent(this.symbol)}&apikey=${this.apiKey}`
 
+      this.emit('api-request', this.apiKey)
+
       https.get(url, (res) => {
         let raw = ''
         res.on('data', (chunk) => {

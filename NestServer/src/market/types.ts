@@ -28,6 +28,27 @@ export type MarketSnapshot = {
   timestamp:   number
 }
 
+export type ApiKeysPoolStatusMessage = {
+  type: 'keys-status';
+  totalKeys: number;
+  exhaustedKeysCount: number;
+  allExhausted: boolean;
+  assignments: {
+    symbol: string;
+    activeKeyMasked: string;
+    status: 'active' | 'shared' | 'exhausted';
+    requestsCount: number;
+    minutelyRate: number;
+    minutelyMax: number;
+  }[];
+}
+
+export type KeysExhaustedAlertMessage = {
+  type: 'keys-exhausted-alert';
+  symbol: string;
+  message: string;
+}
+
 // Mensaje que el backend emite al frontend via WebSocket propio
 export type BackendMessage =
   | {
@@ -44,6 +65,8 @@ export type BackendMessage =
   | { type: 'status';     status: 'connecting' | 'connected' | 'disconnected'; message: string }
   | { type: 'error';      message: string }
   | { type: 'ws-fallback'; symbol: string; reason: string }
+  | ApiKeysPoolStatusMessage
+  | KeysExhaustedAlertMessage
 
 // Mensaje que llega de Twelve Data WebSocket
 export type TwelveTickMessage = {

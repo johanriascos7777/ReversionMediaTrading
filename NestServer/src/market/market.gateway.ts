@@ -28,6 +28,10 @@ export class MarketGateway implements OnGatewayConnection, OnGatewayDisconnect {
     snapshots.forEach((snap) => {
       client.send(JSON.stringify(snap));
     });
+
+    // Enviar estado de las llaves API al conectar
+    const keysStatus = this.marketService.getKeysPoolStatus();
+    client.send(JSON.stringify(keysStatus));
   }
 
   handleDisconnect(client: WebSocket) {

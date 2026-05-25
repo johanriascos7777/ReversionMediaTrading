@@ -38,6 +38,22 @@ export type MultiSymbolMarketData = {
   [symbol: string]: FinalMarketView
 }
 
+export type ApiKeyAssignment = {
+  symbol: string
+  activeKeyMasked: string
+  status: 'active' | 'shared' | 'exhausted'
+  requestsCount: number
+  minutelyRate: number
+  minutelyMax: number
+}
+
+export type ApiKeysPoolStatus = {
+  totalKeys: number
+  exhaustedKeysCount: number
+  allExhausted: boolean
+  assignments: ApiKeyAssignment[]
+}
+
 type BackendMessage =
   | {
       type:             'snapshot'
@@ -53,6 +69,18 @@ type BackendMessage =
   | { type: 'status';    status: string; message: string }
   | { type: 'error';     message: string }
   | { type: 'ws-fallback'; symbol: string; reason: string }
+  | {
+      type: 'keys-status';
+      totalKeys: number;
+      exhaustedKeysCount: number;
+      allExhausted: boolean;
+      assignments: ApiKeyAssignment[];
+    }
+  | {
+      type: 'keys-exhausted-alert';
+      symbol: string;
+      message: string;
+    }
 
 /**
  * Registro de símbolos que fallaron el WS y usan REST Poller.
@@ -66,10 +94,14 @@ export function useMarketData(): {
   data:        MultiSymbolMarketData | null
   status:      ConnectionStatus
   wsFallbacks: WsFallbackMap
+  keysStatus:  ApiKeysPoolStatus | null
+  exhaustAlert: string | null
 } {
   const [data,        setData]        = useState<MultiSymbolMarketData | null>(null)
   const [status,      setStatus]      = useState<ConnectionStatus>('connecting')
   const [wsFallbacks, setWsFallbacks] = useState<WsFallbackMap>({})
+  const [keysStatus,  setKeysStatus]  = useState<ApiKeysPoolStatus | null>(null)
+  const [exhaustAlert, setExhaustAlert] = useState<string | null>(null)
   const wsRef                         = useRef<WebSocket | null>(null)
   const stoppedRef                    = useRef(false)
 
@@ -124,6 +156,22 @@ export function useMarketData(): {
           console.warn(`[useMarketData] ⚡ WS Fallback activado para ${msg.symbol}: ${msg.reason}`)
           setWsFallbacks(prev => ({ ...prev, [msg.symbol]: msg.reason }))
         }
+
+        if (msg.type === 'keys-status') {
+          setKeysStatus({
+            totalKeys: msg.totalKeys,
+            exhaustedKeysCount: msg.exhaustedKeysCount,
+            allExhausted: msg.allExhausted,
+            assignments: msg.assignments
+          })
+          if (!msg.allExhausted) {
+            setExhaustAlert(null)
+          }
+        }
+
+        if (msg.type === 'keys-exhausted-alert') {
+          setExhaustAlert(msg.message)
+        }
       }
 
       ws.onerror = () => {
@@ -148,5 +196,5 @@ export function useMarketData(): {
     }
   }, [])
 
-  return { data, status, wsFallbacks }
+  return { data, status, wsFallbacks, keysStatus, exhaustAlert }
 }

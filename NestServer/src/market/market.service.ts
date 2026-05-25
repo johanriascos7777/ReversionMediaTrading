@@ -56,6 +56,11 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
   private schedulerInterval: NodeJS.Timeout | null = null;
   private readonly exhaustedKeys = new Set<string>();
   private readonly activeAssignments = new Map<string, string>();
+  private readonly keyStats = new Map<string, {
+    totalRequests: number;
+    requestTimestamps: number[];
+    minutelyMax: number;
+  }>();
 
   // Métricas
   public readonly serverMetrics = {
@@ -258,6 +263,11 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
           });
         });
 
+        // Escuchar solicitudes API para conteo de créditos
+        client.on('api-request', (reqKey: string) => {
+          this.incrementKeyRequest(reqKey);
+        });
+
         // Rotar key automáticamente si se agotan los créditos
         client.on('key-exhausted', (exhaustedKey: string) => {
           console.warn(`[MarketService] [${sym}] Llave agotada: ...${exhaustedKey.slice(-6)}. Rotando...`);
@@ -299,6 +309,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
     if (currentExhaustedKey) {
       this.exhaustedKeys.add(currentExhaustedKey);
       console.log(`[MarketService] Llave ...${currentExhaustedKey.slice(-6)} marcada como agotada.`);
+      this.broadcastKeysStatus();
     }
 
     // Llaves ya asignadas a otros símbolos (excluir la del símbolo actual)
@@ -311,6 +322,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       if (!this.exhaustedKeys.has(key) && !assignedToOthers.has(key)) {
         this.activeAssignments.set(symbol, key);
         console.log(`[MarketService] [${symbol}] Llave activa asignada: ...${key.slice(-6)}`);
+        this.broadcastKeysStatus();
         return key;
       }
     }
@@ -320,13 +332,119 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       if (!this.exhaustedKeys.has(key)) {
         this.activeAssignments.set(symbol, key);
         console.warn(`[MarketService] [${symbol}] ⚠️ Llave compartida ...${key.slice(-6)} (escasez temporal)`);
+        this.broadcastKeysStatus();
         return key;
       }
     }
 
     // 3. Fallback absoluto (todas agotadas — situación crítica)
     console.error(`[MarketService] [${symbol}] ❌ CRÍTICO: Todas las ${this.apiKeyList.length} llaves están agotadas.`);
+    
+    // Alerta de agotamiento absoluto para el frontend
+    this.events.emit('broadcast', {
+      type: 'keys-exhausted-alert',
+      symbol,
+      message: `❌ ¡ALERTA CRÍTICA! Se han agotado todas las ${this.apiKeyList.length} llaves API para el símbolo ${symbol}. No es posible obtener más datos.`
+    } satisfies BackendMessage);
+
+    this.broadcastKeysStatus();
     return this.apiKeyList[0] || '';
+  }
+
+  /**
+   * Obtiene el estado actual detallado de todas las llaves API y sus estadísticas de uso.
+   */
+  public getKeysPoolStatus(): BackendMessage {
+    const now = Date.now();
+    const assignmentsList = this.symbolList.map(sym => {
+      const activeKey = this.activeAssignments.get(sym);
+      const activeKeyMasked = activeKey ? `...${activeKey.slice(-6)}` : 'Ninguna';
+      
+      let status: 'active' | 'shared' | 'exhausted' = 'active';
+      if (this.exhaustedKeys.size === this.apiKeyList.length) {
+        status = 'exhausted';
+      } else if (activeKey) {
+        if (this.exhaustedKeys.has(activeKey)) {
+          status = 'exhausted';
+        } else {
+          // Compartida
+          const sharingSymbolsCount = Array.from(this.activeAssignments.values()).filter(k => k === activeKey).length;
+          if (sharingSymbolsCount > 1) {
+            status = 'shared';
+          }
+        }
+      }
+
+      // Obtener estadísticas de la llave
+      let totalRequests = 0;
+      let minutelyRate = 0;
+      let minutelyMax = 0;
+
+      if (activeKey && this.keyStats.has(activeKey)) {
+        const stats = this.keyStats.get(activeKey)!;
+        // Limpiar expirados al consultar
+        stats.requestTimestamps = stats.requestTimestamps.filter(ts => now - ts <= 60000);
+        
+        totalRequests = stats.totalRequests;
+        minutelyRate = stats.requestTimestamps.length;
+        minutelyMax = stats.minutelyMax;
+      }
+
+      return {
+        symbol: sym,
+        activeKeyMasked,
+        status,
+        requestsCount: totalRequests,
+        minutelyRate,
+        minutelyMax
+      };
+    });
+
+    return {
+      type: 'keys-status',
+      totalKeys: this.apiKeyList.length,
+      exhaustedKeysCount: this.exhaustedKeys.size,
+      allExhausted: this.exhaustedKeys.size === this.apiKeyList.length,
+      assignments: assignmentsList
+    } satisfies BackendMessage;
+  }
+
+  /**
+   * Incrementa el contador de peticiones de una API Key y limpia los registros de más de 60 segundos.
+   */
+  private incrementKeyRequest(key: string): void {
+    if (!key) return;
+    
+    if (!this.keyStats.has(key)) {
+      this.keyStats.set(key, {
+        totalRequests: 0,
+        requestTimestamps: [],
+        minutelyMax: 0
+      });
+    }
+
+    const stats = this.keyStats.get(key)!;
+    stats.totalRequests++;
+    
+    const now = Date.now();
+    stats.requestTimestamps.push(now);
+    
+    // Limpiar peticiones de más de 60 segundos
+    stats.requestTimestamps = stats.requestTimestamps.filter(ts => now - ts <= 60000);
+    
+    // Actualizar máximo
+    if (stats.requestTimestamps.length > stats.minutelyMax) {
+      stats.minutelyMax = stats.requestTimestamps.length;
+    }
+
+    this.broadcastKeysStatus();
+  }
+
+  /**
+   * Transmite el estado actual de las llaves API a todos los clientes.
+   */
+  private broadcastKeysStatus(): void {
+    this.events.emit('broadcast', this.getKeysPoolStatus());
   }
 
   // Retorna todos los últimos snapshots del sistema
@@ -410,6 +528,9 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
     return new Promise((resolve) => {
       // Usar la key asignada dinámicamente al símbolo (pool de rotación)
       const key = this.activeAssignments.get(symbol) ?? this.apiKeyList[0] ?? '';
+
+      // Registrar petición de crédito
+      this.incrementKeyRequest(key);
 
       const path =
         `/time_series?symbol=${encodeURIComponent(symbol)}` +
