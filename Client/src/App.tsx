@@ -3,7 +3,6 @@ import './App.css'
 import { WS_URL, API_URL } from '@/config/env'
 
 import { useMarketData } from './hooks/useMarketData'
-import type { WsFallbackMap } from './hooks/useMarketData'
 import { useHistoricalData } from './hooks/useHistoricalData'
 import { useBacktest } from './hooks/useBacktest'
 

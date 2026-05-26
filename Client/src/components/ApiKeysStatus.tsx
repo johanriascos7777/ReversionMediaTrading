@@ -1,4 +1,3 @@
-import React from 'react';
 import type { ApiKeysPoolStatus, ApiKeyAssignment } from '../hooks/useMarketData';
 
 interface ApiKeysStatusProps {
