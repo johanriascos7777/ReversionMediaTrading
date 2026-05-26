@@ -5,12 +5,14 @@ import { WS_URL, API_URL } from '@/config/env'
 import { useMarketData } from './hooks/useMarketData'
 import { useHistoricalData } from './hooks/useHistoricalData'
 import { useBacktest } from './hooks/useBacktest'
+import { useStructureData } from './hooks/useStructureData'
 
 import { Semaforo } from './components/Semaforo'
 import { BacktestMetrics } from './components/BacktestMetrics'
 import { ElasticityCard } from './components/ElasticityCard'
 import { SystemObservability } from './components/SystemObservability'
 import { ApiKeysStatus } from './components/ApiKeysStatus'
+import { StructureCockpit } from './components/StructureCockpit'
 
 import { compareSignalWithHistory } from './backtest/compareSignal'
 import { fuseMarketState } from './logic/fuseMarketState'
@@ -59,6 +61,9 @@ function App() {
 
   // 🧪 3. Backtest real sobre el par activo — devuelve BacktestResult | null directamente
   const backtest = useBacktest(historical)
+
+  // 🏛️ 4. Motor de Confluencia y Estructura — paralelo al motor de elasticidad
+  const structureData = useStructureData()
 
   // 📡 Refs para Notificación de Telegram — Frontend (espejo del backend, aislado por símbolo)
   const prevFusedStateRefs = useRef<{ [symbol: string]: string | null }>({})   // para Tipo A
@@ -611,6 +616,20 @@ function App() {
 
         {/* OBSERVABILITY SECTION */}
         <SystemObservability />
+
+        {/* ========================================================= */}
+        {/* 🏛️ STRUCTURE ENGINE — CONFLUENCIA & NIVELES S/R           */}
+        {/* ========================================================= */}
+        <div style={{
+          marginTop: 40,
+          padding: '24px 28px',
+          background: 'rgba(167,139,250,0.03)',
+          border: '1px solid rgba(167,139,250,0.12)',
+          borderRadius: 18,
+          backdropFilter: 'blur(12px)',
+        }}>
+          <StructureCockpit data={structureData} />
+        </div>
 
         {/* BOTTOM TELEGRAM BOT TRIGGER */}
         <div style={{ display: 'flex', justifyContent: 'center', marginTop: 12 }}>
