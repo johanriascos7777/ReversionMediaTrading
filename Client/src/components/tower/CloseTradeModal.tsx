@@ -22,12 +22,30 @@ export function CloseTradeModal({ trade, onClose, onSubmit }: Props) {
   const [notes,        setNotes]        = useState('')
   const [submitting,   setSubmitting]   = useState(false)
 
-  // P&L preview
+  // Hora de cierre real (para calcular duración correcta)
+  // Pre-llenada con la hora actual en formato HH:MM
+  const nowLocal = () => {
+    const now = new Date()
+    const hh = String(now.getHours()).padStart(2, '0')
+    const mm = String(now.getMinutes()).padStart(2, '0')
+    return `${hh}:${mm}`
+  }
+  const [closedTime, setClosedTime] = useState(nowLocal)
+
+  // P&L preview — fórmula porcentual relativa al precio de entrada (igual a IQ Option)
   const exitN   = parseFloat(exitPrice) || 0
   const pnlPrev = exitN > 0
     ? ((trade.direction === 'BUY' ? exitN - trade.entryPrice : trade.entryPrice - exitN)
-        * trade.leverage * trade.investmentAmount)
+        / trade.entryPrice * trade.leverage * trade.investmentAmount)
     : null
+
+  // Construir ISO string de closedAt a partir de la fecha de hoy + hora ingresada
+  const buildClosedAt = (): string => {
+    const [hh, mm] = closedTime.split(':').map(Number)
+    const d = new Date()
+    d.setHours(hh ?? 0, mm ?? 0, 0, 0)
+    return d.toISOString()
+  }
 
   const handleSubmit = async () => {
     if (!exitPrice) return
@@ -36,6 +54,7 @@ export function CloseTradeModal({ trade, onClose, onSubmit }: Props) {
       exitPrice: exitN,
       outcome,
       closeReason,
+      closedAt: buildClosedAt(),
       mae: mae ? parseFloat(mae) : undefined,
       mfe: mfe ? parseFloat(mfe) : undefined,
       minutesInHolgura: minsHolgura ? parseInt(minsHolgura) : undefined,
@@ -79,7 +98,7 @@ export function CloseTradeModal({ trade, onClose, onSubmit }: Props) {
           <input type="number" step="0.00001" value={exitPrice} onChange={e => setExitPrice(e.target.value)} placeholder="1.34150" style={inp} />
           {pnlPrev !== null && (
             <div style={{ fontSize: 11, marginTop: 4, color: pnlPrev >= 0 ? '#10b981' : '#f43f5e', fontFamily: 'monospace' }}>
-              P&L estimado: {pnlPrev >= 0 ? '+' : ''}{pnlPrev.toFixed(4)} USD
+              P&L estimado: {pnlPrev >= 0 ? '+' : ''}{pnlPrev.toFixed(2)} USD
             </div>
           )}
         </div>
@@ -123,6 +142,31 @@ export function CloseTradeModal({ trade, onClose, onSubmit }: Props) {
             <label style={{ fontSize: 10, color: '#6b7280', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>MFE ($) mejor punto</label>
             <input type="number" step="0.01" value={mfe} onChange={e => setMfe(e.target.value)} placeholder="1.50" style={inp} />
           </div>
+        </div>
+
+        {/* Hora de cierre real */}
+        <div>
+          <label style={{ fontSize: 10, color: '#6b7280', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>
+            ⏱ Hora de cierre real <span style={{ color: '#4b5563', fontWeight: 400, textTransform: 'none' }}>(ajusta según IQ Option)</span>
+          </label>
+          <input
+            type="time"
+            value={closedTime}
+            onChange={e => setClosedTime(e.target.value)}
+            style={{ ...inp, cursor: 'pointer' }}
+          />
+          {/* Preview de duración calculada */}
+          {(() => {
+            const [hh, mm] = closedTime.split(':').map(Number)
+            const closeD = new Date(); closeD.setHours(hh ?? 0, mm ?? 0, 0, 0)
+            const diffMin = Math.round((closeD.getTime() - new Date(trade.openedAt).getTime()) / 60000)
+            const color = diffMin < 0 ? '#f43f5e' : '#9ca3af'
+            return (
+              <div style={{ fontSize: 11, marginTop: 4, color, fontFamily: 'monospace' }}>
+                Duración calculada: {diffMin >= 0 ? `${diffMin}m` : '⚠ hora anterior a apertura'}
+              </div>
+            )
+          })()}
         </div>
 
         {/* Tiempos */}

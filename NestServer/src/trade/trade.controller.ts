@@ -5,6 +5,7 @@ import {
 import { TradeService } from './trade.service';
 import { CreateTradeDto } from './dto/create-trade.dto';
 import { CloseTradeDto } from './dto/close-trade.dto';
+import { UpdateTradeDto } from './dto/update-trade.dto';
 
 @Controller('trade')
 export class TradeController {
@@ -27,6 +28,17 @@ export class TradeController {
   ) {
     return this.tradeService.close(id, dto);
   }
+
+  // ─── PATCH /trade/:id ─────────────────────────────────────────────────────
+  // Actualizar cualquier campo de una operación (abierta o cerrada)
+  @Patch(':id')
+  update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateTradeDto,
+  ) {
+    return this.tradeService.update(id, dto);
+  }
+
 
   // ─── GET /trade ───────────────────────────────────────────────────────────
   // Listar operaciones con filtros opcionales

@@ -33,6 +33,7 @@ interface TradeModalProps {
     contextualCases?: number
     recommendedTp?: number
     recommendedSl?: number
+    currentPrice?: number
   }
 }
 
@@ -55,7 +56,7 @@ export function TradeModal({ onClose, onSubmit, autoCapture }: TradeModalProps) 
   const [symbol,     setSymbol]     = useState(autoCapture?.symbol ?? 'EUR/USD')
   const [direction,  setDirection]  = useState<TradeDirection>('BUY')
   const [tradeType,  setTradeType]  = useState<TradeType>('scalping')
-  const [entry,      setEntry]      = useState('')
+  const [entry,      setEntry]      = useState(autoCapture?.currentPrice ? String(autoCapture.currentPrice) : '')
   const [leverage,   setLeverage]   = useState('200')
   const [spread,     setSpread]     = useState('0.00013')
   const [investment, setInvestment] = useState('2')
@@ -185,7 +186,7 @@ export function TradeModal({ onClose, onSubmit, autoCapture }: TradeModalProps) 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <Field label="Precio de entrada">
             <input type="number" step="0.00001" value={entry} onChange={e => setEntry(e.target.value)}
-              placeholder="1.34059" style={inputStyle} />
+              placeholder={autoCapture?.currentPrice ? String(autoCapture.currentPrice) : "1.34059"} style={inputStyle} />
           </Field>
           <Field label="Inversión ($)">
             <input type="number" step="1" value={investment} onChange={e => setInvestment(e.target.value)}

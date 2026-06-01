@@ -93,13 +93,15 @@ export function TowerControl() {
     } : {}),
     recommendedTp:      calculatedTp,
     recommendedSl:      calculatedSl,
+    currentPrice:       currentMarket.m5?.price,
   } : { symbol: activeSymbol }
 
   // ── Trades ────────────────────────────────────────────────────────────────
-  const { trades, analytics, loading, createTrade, closeTrade, deleteTrade } = useTrades()
+  const { trades, analytics, loading, createTrade, closeTrade, updateTrade, deleteTrade } = useTrades()
 
   // Wrappers void para compatibilidad con los tipos de TradeTable
   const handleCloseTrade  = async (id: number, payload: import('../hooks/useTrades').CloseTradePayload) => { await closeTrade(id, payload) }
+  const handleUpdateTrade = async (id: number, payload: Partial<import('../hooks/useTrades').Trade>) => { await updateTrade(id, payload) }
   const handleDeleteTrade = async (id: number) => { await deleteTrade(id) }
 
   const openTrades   = trades.filter(t => t.outcome === 'open')
@@ -119,7 +121,7 @@ export function TowerControl() {
       minHeight: '100vh',
       background: 'radial-gradient(ellipse at 20% 0%, rgba(124,58,237,0.08) 0%, transparent 60%), #07070f',
       padding: '32px 24px',
-      maxWidth: 1400,
+      maxWidth: '100%',
       margin: '0 auto',
       fontFamily: '"Inter", system-ui, sans-serif',
     }}>
@@ -246,7 +248,7 @@ export function TowerControl() {
       )}
 
       {!loading && tab === 'history' && (
-        <TradeTable trades={trades} onClose={handleCloseTrade} onDelete={handleDeleteTrade} />
+        <TradeTable trades={trades} onClose={handleCloseTrade} onUpdate={handleUpdateTrade} onDelete={handleDeleteTrade} />
       )}
 
       {/* ── Modal de registro ──────────────────────────────────────────────── */}

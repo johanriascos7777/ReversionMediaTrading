@@ -5,6 +5,9 @@ export class CloseTradeDto {
   outcome!: TradeOutcome;
   closeReason!: CloseReason;
 
+  // Hora real de cierre (ISO string). Si no se provee, se usa new Date() del servidor.
+  closedAt?: string;
+
   // Excursiones manuales (el trader las registra al cerrar)
   mae?: number;   // cuánto fue lo peor que llegó (en $)
   mfe?: number;   // cuánto fue lo mejor que llegó (en $)

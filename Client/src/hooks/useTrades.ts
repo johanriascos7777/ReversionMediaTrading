@@ -106,6 +106,7 @@ export interface CloseTradePayload {
   exitPrice: number
   outcome: TradeOutcome
   closeReason: CloseReason
+  closedAt?: string        // ISO string — hora real de cierre en IQ Option
   mae?: number
   mfe?: number
   minutesInHolgura?: number
@@ -227,6 +228,23 @@ export function useTrades() {
     }
   }, [fetchTrades, fetchAnalytics])
 
+  const updateTrade = useCallback(async (id: number, payload: Partial<Trade>): Promise<boolean> => {
+    try {
+      await fetch(`${TRADE_URL}/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      await fetchTrades()
+      await fetchAnalytics()
+      return true
+    } catch {
+      setError('Error actualizando operación')
+      return false
+    }
+  }, [fetchTrades, fetchAnalytics])
+
+
   const deleteTrade = useCallback(async (id: number): Promise<boolean> => {
     try {
       await fetch(`${TRADE_URL}/${id}`, { method: 'DELETE' })
@@ -254,6 +272,7 @@ export function useTrades() {
     fetchAnalytics,
     createTrade,
     closeTrade,
+    updateTrade,
     deleteTrade,
   }
 }

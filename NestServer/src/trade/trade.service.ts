@@ -4,6 +4,8 @@ import { EntityRepository, EntityManager } from '@mikro-orm/core';
 import { Trade } from './trade.entity';
 import { CreateTradeDto } from './dto/create-trade.dto';
 import { CloseTradeDto } from './dto/close-trade.dto';
+import { UpdateTradeDto } from './dto/update-trade.dto';
+
 
 // ─── Utilidades ───────────────────────────────────────────────────────────────
 
@@ -123,22 +125,105 @@ export class TradeService {
     return trade;
   }
 
+  // ─── UPDATE ───────────────────────────────────────────────────────────────
+
+  async update(id: number, dto: UpdateTradeDto): Promise<Trade> {
+    const trade = await this.tradeRepo.findOne(id);
+    if (!trade) throw new NotFoundException(`Operación #${id} no encontrada`);
+
+    if (dto.symbol !== undefined) trade.symbol = dto.symbol;
+    if (dto.direction !== undefined) trade.direction = dto.direction;
+    if (dto.tradeType !== undefined) trade.tradeType = dto.tradeType;
+    if (dto.session !== undefined) trade.session = dto.session;
+    if (dto.entryPrice !== undefined) trade.entryPrice = dto.entryPrice;
+    if (dto.leverage !== undefined) trade.leverage = dto.leverage;
+    if (dto.spread !== undefined) trade.spread = dto.spread;
+    if (dto.investmentAmount !== undefined) trade.investmentAmount = dto.investmentAmount;
+    
+    if (dto.liquidationTheoretical !== undefined) trade.liquidationTheoretical = dto.liquidationTheoretical;
+    if (dto.liquidationReal !== undefined) trade.liquidationReal = dto.liquidationReal;
+
+    if (dto.elasticityM5State !== undefined) trade.elasticityM5State = dto.elasticityM5State;
+    if (dto.elasticityM15State !== undefined) trade.elasticityM15State = dto.elasticityM15State;
+    if (dto.fusedState !== undefined) trade.fusedState = dto.fusedState;
+    if (dto.elasticityM5Value !== undefined) trade.elasticityM5Value = dto.elasticityM5Value;
+    if (dto.elasticityM15Value !== undefined) trade.elasticityM15Value = dto.elasticityM15Value;
+    if (dto.structureState !== undefined) trade.structureState = dto.structureState;
+    if (dto.structureSignal !== undefined) trade.structureSignal = dto.structureSignal;
+    if (dto.rsiAtEntry !== undefined) trade.rsiAtEntry = dto.rsiAtEntry;
+    if (dto.divergenceAtEntry !== undefined) trade.divergenceAtEntry = dto.divergenceAtEntry;
+    if (dto.ema200SlopeAtEntry !== undefined) trade.ema200SlopeAtEntry = dto.ema200SlopeAtEntry;
+    if (dto.nearestSRPrice !== undefined) trade.nearestSRPrice = dto.nearestSRPrice;
+    if (dto.nearestSRType !== undefined) trade.nearestSRType = dto.nearestSRType;
+    if (dto.nearestSRStrength !== undefined) trade.nearestSRStrength = dto.nearestSRStrength;
+    if (dto.nearestSRDistance !== undefined) trade.nearestSRDistance = dto.nearestSRDistance;
+    if (dto.contextualWinRate !== undefined) trade.contextualWinRate = dto.contextualWinRate;
+    if (dto.contextualCases !== undefined) trade.contextualCases = dto.contextualCases;
+
+    if (dto.recommendedTp !== undefined) trade.recommendedTp = dto.recommendedTp;
+    if (dto.recommendedSl !== undefined) trade.recommendedSl = dto.recommendedSl;
+
+    if (dto.mae !== undefined) trade.mae = dto.mae;
+    if (dto.mfe !== undefined) trade.mfe = dto.mfe;
+    if (dto.minutesInHolgura !== undefined) trade.minutesInHolgura = dto.minutesInHolgura;
+    if (dto.minutesInProfit !== undefined) trade.minutesInProfit = dto.minutesInProfit;
+    if (dto.closeReason !== undefined) trade.closeReason = dto.closeReason;
+    if (dto.outcome !== undefined) trade.outcome = dto.outcome;
+    if (dto.notes !== undefined) trade.notes = dto.notes;
+
+    if (dto.exitPrice !== undefined) {
+      trade.exitPrice = dto.exitPrice;
+    }
+
+    // Si la operación no está abierta, recalcular P&L y tiempos
+    if (trade.outcome !== 'open' && trade.exitPrice != null) {
+      if (!trade.closedAt) {
+        trade.closedAt = new Date();
+      }
+      const totalMinutes = Math.round(
+        (trade.closedAt.getTime() - trade.openedAt.getTime()) / 60000
+      );
+      trade.totalMinutesOpen = totalMinutes;
+
+      // Fórmula porcentual relativa al precio de entrada (igual a IQ Option)
+      const pip = trade.direction === 'BUY'
+        ? trade.exitPrice - trade.entryPrice
+        : trade.entryPrice - trade.exitPrice;
+      const pnl = (pip / trade.entryPrice) * trade.leverage * trade.investmentAmount;
+      const pnlPct = (pnl / trade.investmentAmount) * 100;
+
+      trade.pnl = Math.round(pnl * 10000) / 10000;
+      trade.pnlPercent = Math.round(pnlPct * 100) / 100;
+    } else if (trade.outcome === 'open') {
+      trade.exitPrice = undefined;
+      trade.closedAt = undefined;
+      trade.totalMinutesOpen = undefined;
+      trade.pnl = undefined;
+      trade.pnlPercent = undefined;
+      trade.closeReason = undefined;
+    }
+
+    await this.em.flush();
+    return trade;
+  }
+
   // ─── CLOSE ───────────────────────────────────────────────────────────────
 
   async close(id: number, dto: CloseTradeDto): Promise<Trade> {
     const trade = await this.tradeRepo.findOne(id);
     if (!trade) throw new NotFoundException(`Operación #${id} no encontrada`);
 
-    const closedAt     = new Date();
+    const closedAt     = dto.closedAt ? new Date(dto.closedAt) : new Date();
     const totalMinutes = Math.round(
       (closedAt.getTime() - trade.openedAt.getTime()) / 60000
     );
 
-    // Calcular P&L basado en dirección y diferencial de precio
+    // Calcular P&L — fórmula porcentual relativa al precio de entrada (igual a IQ Option)
+    // P&L = (pip / entryPrice) * leverage * investment
     const pip    = trade.direction === 'BUY'
       ? dto.exitPrice - trade.entryPrice
       : trade.entryPrice - dto.exitPrice;
-    const pnl    = pip * trade.leverage * trade.investmentAmount;
+    const pnl    = (pip / trade.entryPrice) * trade.leverage * trade.investmentAmount;
     const pnlPct = (pnl / trade.investmentAmount) * 100;
 
     trade.exitPrice        = dto.exitPrice;

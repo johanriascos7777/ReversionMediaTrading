@@ -5,12 +5,23 @@
 import { useState } from 'react'
 import type { Trade, CloseTradePayload } from '../../hooks/useTrades'
 import { CloseTradeModal } from './CloseTradeModal'
+import { EditTradeModal } from './EditTradeModal'
+
 
 interface Props {
   trades: Trade[]
   onClose:  (id: number, payload: CloseTradePayload) => Promise<void>
+  onUpdate: (id: number, payload: Partial<Trade>) => Promise<void>
   onDelete: (id: number) => Promise<void>
 }
+
+function formatDate(dateStr: string) {
+  const d = new Date(dateStr)
+  if (isNaN(d.getTime())) return '—'
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 
 const SESSION_LABELS: Record<string, string> = {
   asian: '🌏 Asiática', european: '🇪🇺 Europea',
@@ -23,11 +34,13 @@ const OUTCOME_CFG: Record<string, { color: string; label: string }> = {
   open:     { color: '#f59e0b', label: '⏳ ABIERTA'},
 }
 
-export function TradeTable({ trades, onClose, onDelete }: Props) {
+export function TradeTable({ trades, onClose, onUpdate, onDelete }: Props) {
   const [filterSymbol,  setFilterSymbol]  = useState('all')
   const [filterOutcome, setFilterOutcome] = useState('all')
   const [filterSession, setFilterSession] = useState('all')
   const [closingTrade,  setClosingTrade]  = useState<Trade | null>(null)
+  const [editingTrade,  setEditingTrade]  = useState<Trade | null>(null)
+
 
   const symbols  = ['all', ...Array.from(new Set(trades.map(t => t.symbol)))]
   const outcomes = ['all', 'open', 'win', 'loss', 'breakeven']
@@ -44,6 +57,12 @@ export function TradeTable({ trades, onClose, onDelete }: Props) {
     await onClose(id, payload)
     setClosingTrade(null)
   }
+
+  const handleEditSubmit = async (id: number, payload: Partial<Trade>) => {
+    await onUpdate(id, payload)
+    setEditingTrade(null)
+  }
+
 
   return (
     <>
@@ -62,7 +81,7 @@ export function TradeTable({ trades, onClose, onDelete }: Props) {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
           <thead>
             <tr style={{ background: 'rgba(255,255,255,0.03)' }}>
-              {['#','Par','Dir','Entrada','Salida','P&L','Lev','Sesión','M5','M15','Structure','RSI','Tipo','Duración','Estado','Acc'].map(h => (
+              {['#','Par','Fecha','Dir','Entrada','Salida','P&L','Lev','Sesión','M5','M15','Structure','RSI','Tipo','Duración','Estado','Acc'].map(h => (
                 <Th key={h}>{h}</Th>
               ))}
             </tr>
@@ -70,7 +89,7 @@ export function TradeTable({ trades, onClose, onDelete }: Props) {
           <tbody>
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={16} style={{ textAlign: 'center', padding: '32px 0', color: '#4b5563', fontSize: 12 }}>
+                <td colSpan={17} style={{ textAlign: 'center', padding: '32px 0', color: '#4b5563', fontSize: 12 }}>
                   Sin operaciones registradas
                 </td>
               </tr>
@@ -86,6 +105,7 @@ export function TradeTable({ trades, onClose, onDelete }: Props) {
                 }}>
                   <Td>{t.id}</Td>
                   <Td bold>{t.symbol}</Td>
+                  <Td mono style={{ color: '#9ca3af', fontSize: 10 }}>{formatDate(t.openedAt)}</Td>
                   <Td>
                     <span style={{ color: t.direction === 'BUY' ? '#10b981' : '#f43f5e', fontWeight: 700 }}>
                       {t.direction === 'BUY' ? '↑' : '↓'} {t.direction}
@@ -96,7 +116,7 @@ export function TradeTable({ trades, onClose, onDelete }: Props) {
                   <Td>
                     {t.pnl != null ? (
                       <span style={{ color: t.pnl >= 0 ? '#10b981' : '#f43f5e', fontWeight: 700 }}>
-                        {t.pnl >= 0 ? '+' : ''}{t.pnl.toFixed(3)}
+                        {t.pnl >= 0 ? '+' : ''}{t.pnl.toFixed(2)}
                       </span>
                     ) : '—'}
                   </Td>
@@ -116,6 +136,7 @@ export function TradeTable({ trades, onClose, onDelete }: Props) {
                       {isOpen && (
                         <ActionBtn color="#10b981" onClick={() => setClosingTrade(t)} title="Cerrar">🔒</ActionBtn>
                       )}
+                      <ActionBtn color="#a78bfa" onClick={() => setEditingTrade(t)} title="Actualizar">✏️</ActionBtn>
                       <ActionBtn color="#f43f5e" onClick={() => onDelete(t.id)} title="Eliminar">🗑</ActionBtn>
                     </div>
                   </Td>
@@ -128,6 +149,9 @@ export function TradeTable({ trades, onClose, onDelete }: Props) {
 
       {closingTrade && (
         <CloseTradeModal trade={closingTrade} onClose={() => setClosingTrade(null)} onSubmit={handleClose} />
+      )}
+      {editingTrade && (
+        <EditTradeModal trade={editingTrade} onClose={() => setEditingTrade(null)} onSubmit={handleEditSubmit} />
       )}
     </>
   )
