@@ -5,6 +5,27 @@
  */
 import { useState, useEffect } from 'react'
 import type { Trade, TradeDirection, TradeType, TradeOutcome, CloseReason } from '../../hooks/useTrades'
+import { API_URL } from '@/config/env'
+
+export const parseScreenshotUrls = (val: any): string[] => {
+  const sanitize = (arr: any[]): string[] => {
+    return arr.filter(u => typeof u === 'string' && u.length > 5 && u.startsWith('http'))
+  }
+  if (!val) return []
+  if (Array.isArray(val)) return sanitize(val)
+  if (typeof val === 'string') {
+    try {
+      const parsed = JSON.parse(val)
+      return Array.isArray(parsed) ? sanitize(parsed) : []
+    } catch {
+      if (val.startsWith('http') && val.length > 5) {
+        return [val]
+      }
+      return []
+    }
+  }
+  return []
+}
 
 interface Props {
   trade: Trade
@@ -36,6 +57,54 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
   
   const [notes, setNotes] = useState(trade.notes ?? '')
   const [submitting, setSubmitting] = useState(false)
+
+  // Estados de Screenshots (S3)
+  const [screenshotUrls, setScreenshotUrls] = useState<string[]>(parseScreenshotUrls(trade.screenshotUrls))
+  const [uploading, setUploading] = useState(false)
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
+
+  const handleUploadScreenshots = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return
+    
+    setUploading(true)
+    const formData = new FormData()
+    Array.from(e.target.files).forEach(file => {
+      formData.append('files', file)
+    })
+
+    try {
+      const res = await fetch(`${API_URL}/trade/${trade.id}/screenshots`, {
+        method: 'POST',
+        body: formData,
+      })
+      if (!res.ok) throw new Error('Error al subir imágenes')
+      const data = await res.json()
+      setScreenshotUrls(parseScreenshotUrls(data.screenshotUrls))
+    } catch (err) {
+      console.error(err)
+      alert('Fallo al subir capturas de pantalla a S3')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const handleDeleteScreenshot = async (url: string) => {
+    if (!confirm('¿Estás seguro de que quieres eliminar esta captura?')) return
+
+    try {
+      const res = await fetch(`${API_URL}/trade/${trade.id}/screenshots`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      })
+      if (!res.ok) throw new Error('Error al eliminar imagen')
+      const data = await res.json()
+      setScreenshotUrls(parseScreenshotUrls(data.screenshotUrls))
+    } catch (err) {
+      console.error(err)
+      alert('Fallo al eliminar captura de pantalla')
+    }
+  }
 
   // Calcular tiempo transcurrido en minutos desde openedAt hasta ahora
   const openedDate = new Date(trade.openedAt)
@@ -295,6 +364,65 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
             style={{ ...inp, height: 60, resize: 'vertical', fontFamily: 'inherit' }} />
         </Field>
 
+        {/* Capturas de Pantalla (Screenshots) */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <label style={{ fontSize: 10, color: '#6b7280', textTransform: 'uppercase', fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>📸 Capturas de Pantalla ({screenshotUrls.length}/5)</span>
+            {uploading && <span style={{ color: '#a78bfa', fontSize: 10, fontWeight: 700 }}>⏳ Subiendo...</span>}
+          </label>
+          
+          {/* Grid de miniaturas */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+            {screenshotUrls.map((url, i) => (
+              <div key={url} style={{
+                position: 'relative', width: 75, height: 75, borderRadius: 10, overflow: 'hidden',
+                border: '1px solid rgba(255,255,255,0.1)', background: '#000', cursor: 'pointer',
+                transition: 'transform 0.15s ease',
+              }} onClick={() => setLightboxUrl(url)}>
+                <img src={url} alt={`Screenshot ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                {/* Botón para eliminar */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleDeleteScreenshot(url)
+                  }}
+                  style={{
+                    position: 'absolute', top: 4, right: 4, width: 18, height: 18, borderRadius: '50%',
+                    background: 'rgba(0,0,0,0.8)', border: '1px solid rgba(255,255,255,0.15)',
+                    color: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    cursor: 'pointer', fontSize: 8, fontWeight: 'bold', padding: 0,
+                  }}
+                  title="Eliminar captura"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+
+            {/* Botón para añadir captura */}
+            {screenshotUrls.length < 5 && (
+              <label style={{
+                width: 75, height: 75, borderRadius: 10, border: '2px dashed rgba(124,58,237,0.3)',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                cursor: 'pointer', background: 'rgba(124,58,237,0.03)', transition: 'all 0.15s ease',
+                color: '#a78bfa', gap: 4,
+              }}>
+                <span style={{ fontSize: 18, lineHeight: 1 }}>+</span>
+                <span style={{ fontSize: 9, fontWeight: 600 }}>Adjuntar</span>
+                <input
+                  type="file"
+                  multiple
+                  accept="image/*"
+                  onChange={handleUploadScreenshots}
+                  style={{ display: 'none' }}
+                  disabled={uploading}
+                />
+              </label>
+            )}
+          </div>
+        </div>
+
         {/* Acciones del Modal */}
         <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
           <button type="button" onClick={onClose} style={{
@@ -315,6 +443,28 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
           </button>
         </div>
       </div>
+
+      {/* Lightbox Modal */}
+      {lightboxUrl && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 3000,
+          background: 'rgba(0,0,0,0.95)', backdropFilter: 'blur(10px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+        }} onClick={() => setLightboxUrl(null)}>
+          <div style={{ position: 'relative', maxWidth: '90vw', maxHeight: '90vh' }} onClick={e => e.stopPropagation()}>
+            <img src={lightboxUrl} alt="Screenshot Completa" style={{ maxWidth: '100%', maxHeight: '90vh', borderRadius: 10, boxShadow: '0 20px 50px rgba(0,0,0,0.8)' }} />
+            <button
+              onClick={() => setLightboxUrl(null)}
+              style={{
+                position: 'absolute', top: -35, right: 0, background: 'none', border: 'none',
+                color: '#fff', fontSize: 28, cursor: 'pointer', outline: 'none',
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

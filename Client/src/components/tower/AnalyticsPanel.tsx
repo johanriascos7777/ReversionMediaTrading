@@ -44,6 +44,9 @@ export function AnalyticsPanel({ analytics }: Props) {
         <KPI label="P&L Total"     value={`${summary.totalPnl >= 0 ? '+' : ''}$${summary.totalPnl}`}
           color={summary.totalPnl >= 0 ? '#10b981' : '#f43f5e'} />
         <KPI label="Operaciones"   value={`${summary.totalTrades}`} />
+        <KPI label="Ganadas"       value={`${summary.wins}`} color="#10b981" />
+        <KPI label="Perdidas"      value={`${summary.losses}`} color="#f43f5e" />
+        <KPI label="Breakeven"     value={`${summary.breakeven}`} color="#9ca3af" />
         <KPI label="Abiertas"      value={`${summary.open}`} color="#f59e0b" />
         <KPI label="MAE promedio"  value={summary.avgMAE != null ? `$${summary.avgMAE}` : '—'} color="#f43f5e" />
         <KPI label="MFE promedio"  value={summary.avgMFE != null ? `$${summary.avgMFE}` : '—'} color="#10b981" />

@@ -3,6 +3,7 @@ import { MikroOrmModule } from '@mikro-orm/nestjs';
 import { MarketModule } from './market/market.module';
 import { StructureModule } from './structure/structure.module';
 import { TradeModule } from './trade/trade.module';
+import { ScreenshotsModule } from './screenshots/screenshots.module';
 import config from './mikro-orm.config';
 
 @Module({
@@ -11,6 +12,7 @@ import config from './mikro-orm.config';
     MarketModule,
     StructureModule,
     TradeModule,
+    ScreenshotsModule,
   ],
 })
 export class AppModule {}

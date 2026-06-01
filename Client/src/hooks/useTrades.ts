@@ -67,6 +67,7 @@ export interface Trade {
   closeReason?: CloseReason
   outcome: TradeOutcome
   notes?: string
+  screenshotUrls?: string[]
 }
 
 export interface CreateTradePayload {

@@ -145,6 +145,10 @@ export class Trade {
   @Property({ type: 'text', nullable: true })
   notes?: string;
 
+  // ─── Screenshots (URLs de imágenes en S3) ────────────────────────────────
+  @Property({ type: 'json', nullable: true, fieldName: 'screenshot_urls' })
+  screenshotUrls?: string[];
+
   // ─── Timestamps automáticos ──────────────────────────────────────────────
   @Property({ onCreate: () => new Date() })
   createdAt: Date = new Date();

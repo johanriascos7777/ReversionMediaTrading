@@ -2,10 +2,10 @@
  * TradeTable.tsx
  * Tabla de historial de operaciones con filtros y acciones.
  */
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import type { Trade, CloseTradePayload } from '../../hooks/useTrades'
 import { CloseTradeModal } from './CloseTradeModal'
-import { EditTradeModal } from './EditTradeModal'
+import { EditTradeModal, parseScreenshotUrls } from './EditTradeModal'
 
 
 interface Props {
@@ -40,6 +40,23 @@ export function TradeTable({ trades, onClose, onUpdate, onDelete }: Props) {
   const [filterSession, setFilterSession] = useState('all')
   const [closingTrade,  setClosingTrade]  = useState<Trade | null>(null)
   const [editingTrade,  setEditingTrade]  = useState<Trade | null>(null)
+  const [lightboxUrls,  setLightboxUrls]  = useState<string[]>([])
+  const [lightboxIndex, setLightboxIndex] = useState<number>(0)
+
+  // Navegación por teclado para la galería de imágenes del histórico
+  useEffect(() => {
+    if (lightboxUrls.length === 0) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setLightboxUrls([])
+      else if (e.key === 'ArrowRight' && lightboxUrls.length > 1) {
+        setLightboxIndex(prev => (prev + 1) % lightboxUrls.length)
+      } else if (e.key === 'ArrowLeft' && lightboxUrls.length > 1) {
+        setLightboxIndex(prev => (prev - 1 + lightboxUrls.length) % lightboxUrls.length)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [lightboxUrls])
 
 
   const symbols  = ['all', ...Array.from(new Set(trades.map(t => t.symbol)))]
@@ -104,7 +121,26 @@ export function TradeTable({ trades, onClose, onUpdate, onDelete }: Props) {
                   transition: 'background 0.15s',
                 }}>
                   <Td>{t.id}</Td>
-                  <Td bold>{t.symbol}</Td>
+                  <Td bold>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {t.symbol}
+                      {(() => {
+                        const urls = parseScreenshotUrls(t.screenshotUrls)
+                        return urls.length > 0 && (
+                          <span
+                            onClick={() => {
+                              setLightboxUrls(urls)
+                              setLightboxIndex(0)
+                            }}
+                            style={{ cursor: 'pointer', fontSize: 12, filter: 'drop-shadow(0 0 2px rgba(167,139,250,0.5))' }}
+                            title={`Ver capturas (${urls.length})`}
+                          >
+                            📸
+                          </span>
+                        )
+                      })()}
+                    </div>
+                  </Td>
                   <Td mono style={{ color: '#9ca3af', fontSize: 10 }}>{formatDate(t.openedAt)}</Td>
                   <Td>
                     <span style={{ color: t.direction === 'BUY' ? '#10b981' : '#f43f5e', fontWeight: 700 }}>
@@ -147,11 +183,78 @@ export function TradeTable({ trades, onClose, onUpdate, onDelete }: Props) {
         </table>
       </div>
 
-      {closingTrade && (
+       {closingTrade && (
         <CloseTradeModal trade={closingTrade} onClose={() => setClosingTrade(null)} onSubmit={handleClose} />
       )}
       {editingTrade && (
         <EditTradeModal trade={editingTrade} onClose={() => setEditingTrade(null)} onSubmit={handleEditSubmit} />
+      )}
+
+      {/* Lightbox Modal con Slider */}
+      {lightboxUrls.length > 0 && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 3000,
+          background: 'rgba(0,0,0,0.95)', backdropFilter: 'blur(10px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+        }} onClick={() => setLightboxUrls([])}>
+          <div style={{ position: 'relative', maxWidth: '90vw', maxHeight: '90vh', display: 'flex', alignItems: 'center' }} onClick={e => e.stopPropagation()}>
+            
+            {/* Botón de Anterior */}
+            {lightboxUrls.length > 1 && (
+              <button
+                onClick={() => setLightboxIndex(prev => (prev - 1 + lightboxUrls.length) % lightboxUrls.length)}
+                style={{
+                  position: 'absolute', left: -60, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                  color: '#fff', fontSize: 24, width: 44, height: 44, borderRadius: '50%', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', outline: 'none', transition: 'all 0.15s ease',
+                  zIndex: 10,
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = 'rgba(124,58,237,0.3)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+              >
+                ‹
+              </button>
+            )}
+
+            {/* Contenedor de Imagen y Contador */}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+              <img src={lightboxUrls[lightboxIndex]} alt="Screenshot Completa" style={{ maxWidth: '100%', maxHeight: '80vh', borderRadius: 10, boxShadow: '0 20px 50px rgba(0,0,0,0.8)' }} />
+              {lightboxUrls.length > 1 && (
+                <span style={{ color: '#9ca3af', fontSize: 12, background: 'rgba(255,255,255,0.06)', padding: '4px 10px', borderRadius: 20 }}>
+                  {lightboxIndex + 1} / {lightboxUrls.length}
+                </span>
+              )}
+            </div>
+
+            {/* Botón de Siguiente */}
+            {lightboxUrls.length > 1 && (
+              <button
+                onClick={() => setLightboxIndex(prev => (prev + 1) % lightboxUrls.length)}
+                style={{
+                  position: 'absolute', right: -60, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                  color: '#fff', fontSize: 24, width: 44, height: 44, borderRadius: '50%', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', outline: 'none', transition: 'all 0.15s ease',
+                  zIndex: 10,
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = 'rgba(124,58,237,0.3)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+              >
+                ›
+              </button>
+            )}
+
+            {/* Botón de Cerrar */}
+            <button
+              onClick={() => setLightboxUrls([])}
+              style={{
+                position: 'absolute', top: -45, right: 0, background: 'none', border: 'none',
+                color: '#fff', fontSize: 28, cursor: 'pointer', outline: 'none',
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        </div>
       )}
     </>
   )

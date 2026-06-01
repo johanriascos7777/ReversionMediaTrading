@@ -15,7 +15,7 @@ async function main() {
     console.log('[DB] Schema sincronizado correctamente');
     console.log('[DB] Tabla trade lista en trading_journal\n');
   } catch (err: any) {
-    console.error('[DB] Error creando schema:', err?.message ?? err);
+    console.error('[DB] Error creando schema:', err?.stack ?? err);
     process.exit(1);
   } finally {
     await orm.close();
@@ -23,6 +23,6 @@ async function main() {
 }
 
 main().catch(err => {
-  console.error('[DB] Error fatal:', err.message ?? err);
+  console.error('[DB] Error fatal:', err.stack ?? err);
   process.exit(1);
 });
