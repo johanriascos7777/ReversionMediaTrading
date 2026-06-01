@@ -29,6 +29,9 @@ export type FinalMarketView = {
   m15:              MarketSnapshot
   finalState:       'GREEN' | 'YELLOW' | 'RED'
   fusedState:       'GREEN' | 'YELLOW' | 'RED'
+  triggerState?:    'reposo' | 'estirando' | 'giro'
+  lastClosedElasticityM5?: number | null
+  prevClosedElasticityM5?: number | null
   fusedExplanation: string
   fusedComparison:  any
   backtest:         any
@@ -62,6 +65,9 @@ type BackendMessage =
       m15:              MarketSnapshot
       finalState:       'GREEN' | 'YELLOW' | 'RED'
       fusedState:       'GREEN' | 'YELLOW' | 'RED'
+      triggerState?:    'reposo' | 'estirando' | 'giro'
+      lastClosedElasticityM5?: number | null
+      prevClosedElasticityM5?: number | null
       fusedExplanation: string
       fusedComparison:  any
       backtest:         any
@@ -131,7 +137,7 @@ export function useMarketData(): {
         }
 
         if (msg.type === 'snapshot') {
-          console.log(`[DEBUG] Snapshot recibido → ${msg.symbol} | M5: ${msg.m5?.state} | M15: ${msg.m15?.state} | Fused: ${msg.fusedState}`)
+          console.log(`[DEBUG] Snapshot recibido → ${msg.symbol} | M5: ${msg.m5?.state} | M15: ${msg.m15?.state} | Fused: ${msg.fusedState} | Trigger: ${msg.triggerState}`)
           setData(prev => ({
             ...prev,
             [msg.symbol]: {
@@ -140,6 +146,9 @@ export function useMarketData(): {
               m15:              msg.m15,
               finalState:       msg.finalState,
               fusedState:       msg.fusedState,
+              triggerState:     msg.triggerState,
+              lastClosedElasticityM5: msg.lastClosedElasticityM5,
+              prevClosedElasticityM5: msg.prevClosedElasticityM5,
               fusedExplanation: msg.fusedExplanation,
               fusedComparison:  msg.fusedComparison,
               backtest:         msg.backtest,

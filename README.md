@@ -534,3 +534,15 @@ El motor suma puntos por cada confluencia:
 | **AUD/USD** | DÉBIL COMPRAR | En soporte débil (fuerza 1), RSI neutral (43.1). Sin confluencia suficiente. No operar. |
 
 Los tres están en zona gris — ninguno tiene setup de alta convicción en este momento. Eso es información valiosa: el motor te está diciendo **"espera"**.
+
+
+
+
+# NUEVOS PARES AGREGADOS
+| Divisa | Spread en Broker | Apalancamiento | Justificación Táctica para tu Estrategia |
+|---------|-----------------|----------------|------------------------------------------|
+| **EUR/GBP** | 1.2 | x1000 | **El Rey de la Reversión:** Es el par más "rango-dependiente" del Forex. Pasa el 80% del tiempo consolidando en canales horizontales. Ideal para tu motor de elasticidad y soportes/resistencias. Spread extremadamente bajo. |
+| **USD/CAD** | 1.4 | x1000 | **Estructura Limpia:** Tiene movimientos limpios y sus soportes y resistencias son sumamente respetados. El spread es tan bajo como el de USD/JPY y cuenta con el máximo apalancamiento (x1000). |
+| **USD/CHF** | 1.4 | x1000 | **Activo Refugio:** Se mueve de forma inversa al EUR/USD. Cuando llega a extremos de sobreextensión (elasticidad alta), las reversiones a su EMA100 suelen ser rápidas y simétricas. |
+| **CAD/JPY** | 1.8 | x400 | **Volatilidad JPY Controlada:** Los pares con el Yen Japonés (JPY) son espectaculares para la elasticidad porque hacen movimientos extendidos muy marcados. CAD/JPY ofrece un spread de 1.8 (muy bajo para JPY) y apalancamiento de x400. |
+| **EUR/CHF** | 1.7 | x1000 | **Comportamiento Seguro:** Similar al EUR/GBP, es un par sumamente lento y lateral. Excelente para buscar rebotes en extremos de volatilidad con un spread muy competitivo de 1.7. |

@@ -30,6 +30,13 @@ export class SymbolState {
   public lastTelegramAlertTimeA = 0;
   public lastTelegramAlertTimeB = 0;
 
+  // Giro de Elasticidad (Gatillo) M5
+  public lastClosedElasticityM5: number | null = null;
+  public prevClosedElasticityM5: number | null = null;
+  public triggerStateM5: 'reposo' | 'estirando' | 'giro' = 'reposo';
+  public previousTriggerStateM5: 'reposo' | 'estirando' | 'giro' = 'reposo';
+  public lastTelegramAlertTimeTrigger = 0;
+
   // Tracking de historial individual
   public historyLoaded = false;
   public isHistoryLoading = false;
@@ -187,7 +194,11 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
             if (state.historicalM5.length > HISTORY_OUTPUT) state.historicalM5.shift();
 
             const el = calculateElasticityForCandles(state.builderM5.getCandles(), candle.close);
-            if (el !== null) pushPercentileHistory(sym, 'M5', el);
+            if (el !== null) {
+              pushPercentileHistory(sym, 'M5', el);
+              state.prevClosedElasticityM5 = state.lastClosedElasticityM5;
+              state.lastClosedElasticityM5 = el;
+            }
 
             // Recalcular backtest M5 con la nueva vela
             state.lastBacktestM5 = runBacktest(state.historicalM5, { emaPeriod: 100, maxBarsToRevert: 20 });
@@ -454,6 +465,9 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
           m15: state.lastSnapshotM15,
           finalState,
           fusedState: fusedStateResult.state,
+          triggerState: state.triggerStateM5,
+          lastClosedElasticityM5: state.lastClosedElasticityM5,
+          prevClosedElasticityM5: state.prevClosedElasticityM5,
           fusedExplanation: fusedStateResult.explanation,
           fusedComparison: comparison,
           backtest: state.lastBacktestM5,
@@ -486,6 +500,9 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
         m15: state.lastSnapshotM15,
         finalState,
         fusedState: fusedStateResult.state,
+        triggerState: state.triggerStateM5,
+        lastClosedElasticityM5: state.lastClosedElasticityM5,
+        prevClosedElasticityM5: state.prevClosedElasticityM5,
         fusedExplanation: fusedStateResult.explanation,
         fusedComparison: comparison,
         backtest: state.lastBacktestM5,
@@ -565,11 +582,16 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
   }
 
   private warmUpBuilder(symbol: string, builder: CandleBuilder, candles: Candle[]): void {
+    const state = this.symbolStates.get(symbol);
     candles.forEach((c) => {
       builder.injectHistoricalCandle(c);
       const elasticity = calculateElasticityForCandles(builder.getCandles(), c.close);
       if (elasticity !== null) {
         pushPercentileHistory(symbol, builder.getTimeframe(), elasticity);
+        if (builder.getTimeframe() === 'M5' && state) {
+          state.prevClosedElasticityM5 = state.lastClosedElasticityM5;
+          state.lastClosedElasticityM5 = elasticity;
+        }
       }
     });
     console.log(
@@ -690,6 +712,22 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       : null;
     const fusedStateResult = fuseMarketState(finalState, comparison);
 
+    // Resolver el estado del gatillo M5
+    if (fusedStateResult.state === 'GREEN') {
+      if (state.triggerStateM5 === 'reposo') {
+        state.triggerStateM5 = 'estirando';
+      }
+      if (state.lastClosedElasticityM5 !== null && state.prevClosedElasticityM5 !== null) {
+        if (state.lastClosedElasticityM5 < state.prevClosedElasticityM5) {
+          state.triggerStateM5 = 'giro';
+        } else {
+          state.triggerStateM5 = 'estirando';
+        }
+      }
+    } else {
+      state.triggerStateM5 = 'reposo';
+    }
+
     // Broadcast a través de eventos
     this.events.emit('broadcast', {
       type: 'snapshot',
@@ -698,6 +736,9 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       m15: snapshotM15,
       finalState,
       fusedState: fusedStateResult.state,
+      triggerState: state.triggerStateM5,
+      lastClosedElasticityM5: state.lastClosedElasticityM5,
+      prevClosedElasticityM5: state.prevClosedElasticityM5,
       fusedExplanation: fusedStateResult.explanation,
       fusedComparison: comparison,
       backtest: state.lastBacktestM5,
@@ -732,6 +773,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       console.warn('[Telegram-Service] No se pudo enviar alerta autónoma: Faltan credenciales en el .env');
       state.previousFusedState = fused.state;
       state.previousFinalState = finalState;
+      state.previousTriggerStateM5 = state.triggerStateM5;
       return;
     }
 
@@ -777,8 +819,32 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
+    // 🪃 Caso 3: Alerta Tipo C (Gatillo de Agotamiento / Giro de Elasticidad)
+    const isNewGiro = state.triggerStateM5 === 'giro' && state.previousTriggerStateM5 !== 'giro';
+    const canAlertTrigger = now - state.lastTelegramAlertTimeTrigger > 290000; // ~5 min cooldown (por vela de 5m)
+
+    if (isNewGiro && canAlertTrigger) {
+      state.lastTelegramAlertTimeTrigger = now;
+      const decaimiento = (state.prevClosedElasticityM5 ?? 0) - (state.lastClosedElasticityM5 ?? 0);
+      const direction = m5.price > m5.ema100 ? 'VENTA (SELL)' : 'COMPRA (BUY)';
+      const message = `[⚙️ BACKEND - Autónomo] ${state.symbol}: 🪃 ¡GATILLO DE AGOTAMIENTO CONFIRMADO! (Tipo C)\n\nLa resortera ha cedido y el impulso se agota. Entrada sugerida en ${direction}.\n\nElasticidad Vela Anterior: ${state.prevClosedElasticityM5?.toFixed(2)}\nElasticidad Vela Cerrada: ${state.lastClosedElasticityM5?.toFixed(2)} (Decae: -${decaimiento.toFixed(2)})\n\nPrecio actual: ${m5.price.toFixed(5)} | EMA100: ${m5.ema100.toFixed(5)}`;
+      const url = `https://api.telegram.org/bot${token}/sendMessage`;
+
+      try {
+        await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: chatId, text: message }),
+        });
+        console.log(`[Telegram-Service] [${state.symbol}] Alerta Tipo C (Gatillo de Agotamiento) enviada con éxito`);
+      } catch (err) {
+        console.error(`[Telegram-Service] [${state.symbol}] Error enviando alerta Tipo C:`, err);
+      }
+    }
+
     state.previousFusedState = fused.state;
     state.previousFinalState = finalState;
+    state.previousTriggerStateM5 = state.triggerStateM5;
   }
 
   private recordDroppedTick(reason: string) {

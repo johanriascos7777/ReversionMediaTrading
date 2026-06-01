@@ -13,6 +13,7 @@ import { TradeModal }       from '../components/tower/TradeModal'
 import { TradeTable }       from '../components/tower/TradeTable'
 import { AnalyticsPanel }   from '../components/tower/AnalyticsPanel'
 import { TradingRecommendation } from '../components/tower/TradingRecommendation'
+import { LaunchCockpit } from '../components/tower/LaunchCockpit'
 import type { CreateTradePayload } from '../hooks/useTrades'
 
 type Tab = 'analytics' | 'history'
@@ -209,6 +210,11 @@ export function TowerControl() {
             Se auto-capturarán al registrar
           </span>
         </div>
+      )}
+
+      {/* ── Cabina de Disparo por Agotamiento ────────────────────────────── */}
+      {currentMarket && (
+        <LaunchCockpit marketView={currentMarket as any} />
       )}
 
       {/* ── Recomendación operativa del par seleccionado ─────────────────── */}

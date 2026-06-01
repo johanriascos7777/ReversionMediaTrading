@@ -13,6 +13,7 @@ import { ElasticityCard } from './components/ElasticityCard'
 import { SystemObservability } from './components/SystemObservability'
 import { ApiKeysStatus } from './components/ApiKeysStatus'
 import { StructureCockpit } from './components/StructureCockpit'
+import { LaunchCockpit } from './components/tower/LaunchCockpit'
 
 import { compareSignalWithHistory } from './backtest/compareSignal'
 import { fuseMarketState } from './logic/fuseMarketState'
@@ -586,6 +587,11 @@ function App() {
           </div>
 
         </div>
+
+        {/* ==================================================== */}
+        {/* 🪃 CABINA DE DISPARO POR AGOTAMIENTO                 */}
+        {/* ==================================================== */}
+        <LaunchCockpit marketView={currentMarket} />
 
         {/* FUSED STATE MAIN SIGNAL CARD */}
         <div style={{

@@ -58,6 +58,9 @@ export type BackendMessage =
       m15: MarketSnapshot;
       finalState: MarketState;
       fusedState: MarketState;
+      triggerState?: 'reposo' | 'estirando' | 'giro';
+      lastClosedElasticityM5?: number | null;
+      prevClosedElasticityM5?: number | null;
       fusedExplanation: string;
       fusedComparison: SignalComparisonResult | null;
       backtest: BacktestResult | null;
