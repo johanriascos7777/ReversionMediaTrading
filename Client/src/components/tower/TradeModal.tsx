@@ -1,0 +1,322 @@
+/**
+ * TradeModal.tsx
+ *
+ * Modal para registrar una nueva operación.
+ * Auto-captura las señales actuales del dashboard (elasticidad + estructura)
+ * y calcula el precio de liquidación en tiempo real mientras el usuario escribe.
+ */
+
+import { useState } from 'react'
+import type { CreateTradePayload, TradeDirection, TradeType } from '../../hooks/useTrades'
+
+interface TradeModalProps {
+  onClose: () => void
+  onSubmit: (payload: CreateTradePayload) => Promise<void>
+  // Señales auto-capturadas del estado del dashboard
+  autoCapture?: {
+    symbol?: string
+    elasticityM5State?: string
+    elasticityM15State?: string
+    fusedState?: string
+    elasticityM5Value?: number
+    elasticityM15Value?: number
+    structureState?: string
+    structureSignal?: string
+    rsiAtEntry?: number
+    divergenceAtEntry?: string
+    ema200SlopeAtEntry?: string
+    nearestSRPrice?: number
+    nearestSRType?: string
+    nearestSRStrength?: number
+    nearestSRDistance?: number
+    contextualWinRate?: number
+    contextualCases?: number
+    recommendedTp?: number
+    recommendedSl?: number
+  }
+}
+
+// Detectar sesión desde hora UTC actual
+function detectSessionNow(): string {
+  const h = new Date().getUTCHours()
+  if (h >= 23 || h < 8)  return 'asian'
+  if (h >= 8  && h < 12) return 'european'
+  return 'american'
+}
+
+// Calcular liquidación
+function calcLiq(entry: number, leverage: number, spread: number, dir: TradeDirection) {
+  const margin = entry / leverage
+  if (dir === 'BUY') return { theo: entry - margin, real: entry - margin + spread }
+  return { theo: entry + margin, real: entry + margin - spread }
+}
+
+export function TradeModal({ onClose, onSubmit, autoCapture }: TradeModalProps) {
+  const [symbol,     setSymbol]     = useState(autoCapture?.symbol ?? 'EUR/USD')
+  const [direction,  setDirection]  = useState<TradeDirection>('BUY')
+  const [tradeType,  setTradeType]  = useState<TradeType>('scalping')
+  const [entry,      setEntry]      = useState('')
+  const [leverage,   setLeverage]   = useState('200')
+  const [spread,     setSpread]     = useState('0.00013')
+  const [investment, setInvestment] = useState('2')
+  const [notes,      setNotes]      = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  // Calculadora de liquidación en vivo
+  const entryN   = parseFloat(entry)   || 0
+  const leverageN = parseFloat(leverage) || 1
+  const spreadN  = parseFloat(spread)  || 0
+  const liq = entryN > 0 ? calcLiq(entryN, leverageN, spreadN, direction) : null
+
+  const handleSubmit = async () => {
+    if (!entry || !leverage || !investment) return
+    setSubmitting(true)
+
+    const payload: CreateTradePayload = {
+      symbol,
+      direction,
+      tradeType,
+      session: detectSessionNow() as any,
+      entryPrice: entryN,
+      leverage: leverageN,
+      spread: spreadN,
+      investmentAmount: parseFloat(investment),
+      liquidationTheoretical: liq?.theo,
+      liquidationReal: liq?.real,
+      notes: notes || undefined,
+      // Señales auto-capturadas (casts a tipos del DTO)
+      elasticityM5State:  autoCapture?.elasticityM5State  as any,
+      elasticityM15State: autoCapture?.elasticityM15State as any,
+      fusedState:         autoCapture?.fusedState         as any,
+      elasticityM5Value:  autoCapture?.elasticityM5Value,
+      elasticityM15Value: autoCapture?.elasticityM15Value,
+      structureState:     autoCapture?.structureState     as any,
+      structureSignal:    autoCapture?.structureSignal,
+      rsiAtEntry:         autoCapture?.rsiAtEntry,
+      divergenceAtEntry:  autoCapture?.divergenceAtEntry  as any,
+      ema200SlopeAtEntry: autoCapture?.ema200SlopeAtEntry as any,
+      nearestSRPrice:     autoCapture?.nearestSRPrice,
+      nearestSRType:      autoCapture?.nearestSRType,
+      nearestSRStrength:  autoCapture?.nearestSRStrength,
+      nearestSRDistance:  autoCapture?.nearestSRDistance,
+      contextualWinRate:  autoCapture?.contextualWinRate,
+      contextualCases:    autoCapture?.contextualCases,
+      recommendedTp:      autoCapture?.recommendedTp,
+      recommendedSl:      autoCapture?.recommendedSl,
+    }
+
+    await onSubmit(payload)
+    setSubmitting(false)
+  }
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 2000,
+      background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(6px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 20,
+    }} onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{
+        background: '#0d0d14',
+        border: '1px solid rgba(255,255,255,0.1)',
+        borderRadius: 18, padding: '28px 32px',
+        width: '100%', maxWidth: 520,
+        boxShadow: '0 24px 60px rgba(0,0,0,0.6)',
+        display: 'flex', flexDirection: 'column', gap: 20,
+        maxHeight: '90vh', overflowY: 'auto',
+      }}>
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#fff' }}>
+            ➕ Registrar Operación
+          </h2>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 20 }}>✕</button>
+        </div>
+
+        {/* Par + Dirección */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <Field label="Par">
+            <select value={symbol} onChange={e => setSymbol(e.target.value)} style={selectStyle}>
+              {['EUR/USD','GBP/USD','USD/JPY','USD/CAD','AUD/USD'].map(s => (
+                <option key={s}>{s}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Dirección">
+            <div style={{ display: 'flex', gap: 8 }}>
+              {(['BUY','SELL'] as TradeDirection[]).map(d => (
+                <button key={d} onClick={() => setDirection(d)} style={{
+                  flex: 1, padding: '8px 0', borderRadius: 8, cursor: 'pointer',
+                  fontWeight: 700, fontSize: 13,
+                  background: direction === d
+                    ? (d === 'BUY' ? 'rgba(16,185,129,0.25)' : 'rgba(244,63,94,0.25)')
+                    : 'rgba(255,255,255,0.04)',
+                  color: direction === d ? (d === 'BUY' ? '#10b981' : '#f43f5e') : '#6b7280',
+                  border: direction === d
+                    ? `1px solid ${d === 'BUY' ? '#10b981' : '#f43f5e'}40`
+                    : '1px solid rgba(255,255,255,0.08)',
+                }}>
+                  {d === 'BUY' ? '↑ BUY' : '↓ SELL'}
+                </button>
+              ))}
+            </div>
+          </Field>
+        </div>
+
+        {/* Tipo */}
+        <Field label="Tipo de operación">
+          <div style={{ display: 'flex', gap: 8 }}>
+            {(['scalping','swing','positional'] as TradeType[]).map(t => (
+              <button key={t} onClick={() => setTradeType(t)} style={{
+                flex: 1, padding: '7px 0', borderRadius: 8, cursor: 'pointer',
+                fontSize: 11, fontWeight: tradeType === t ? 700 : 500,
+                background: tradeType === t ? 'rgba(167,139,250,0.2)' : 'rgba(255,255,255,0.04)',
+                color: tradeType === t ? '#a78bfa' : '#6b7280',
+                border: tradeType === t ? '1px solid rgba(167,139,250,0.4)' : '1px solid rgba(255,255,255,0.08)',
+                textTransform: 'capitalize',
+              }}>
+                {t}
+              </button>
+            ))}
+          </div>
+        </Field>
+
+        {/* Precios */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <Field label="Precio de entrada">
+            <input type="number" step="0.00001" value={entry} onChange={e => setEntry(e.target.value)}
+              placeholder="1.34059" style={inputStyle} />
+          </Field>
+          <Field label="Inversión ($)">
+            <input type="number" step="1" value={investment} onChange={e => setInvestment(e.target.value)}
+              placeholder="2" style={inputStyle} />
+          </Field>
+          <Field label="Apalancamiento">
+            <select value={leverage} onChange={e => setLeverage(e.target.value)} style={selectStyle}>
+              {['10','50','100','200','500','1000'].map(l => (
+                <option key={l} value={l}>x{l}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Spread (precio)">
+            <input type="number" step="0.00001" value={spread} onChange={e => setSpread(e.target.value)}
+              placeholder="0.00013" style={inputStyle} />
+          </Field>
+        </div>
+
+        {/* Calculadora de liquidación en vivo */}
+        {liq && (
+          <div style={{
+            padding: '12px 14px', borderRadius: 10,
+            background: 'rgba(244,63,94,0.07)',
+            border: '1px solid rgba(244,63,94,0.2)',
+          }}>
+            <div style={{ fontSize: 10, color: '#f43f5e', textTransform: 'uppercase', fontWeight: 700, marginBottom: 8 }}>
+              ☠️ Zona de Liquidación
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <LiqRow label="Teórica (sin spread)" value={liq.theo.toFixed(5)} />
+              <LiqRow label="Real (con spread)" value={liq.real.toFixed(5)} highlight />
+            </div>
+            <div style={{ fontSize: 10, color: '#6b7280', marginTop: 8 }}>
+              Distancia real: {Math.abs(entryN - liq.real).toFixed(5)} ({(Math.abs(entryN - liq.real) / entryN * 100).toFixed(3)}% del capital)
+            </div>
+          </div>
+        )}
+
+        {/* Señales auto-capturadas */}
+        {autoCapture && Object.keys(autoCapture).length > 0 && (
+          <div style={{
+            padding: '10px 12px', borderRadius: 10,
+            background: 'rgba(16,185,129,0.05)',
+            border: '1px solid rgba(16,185,129,0.15)',
+          }}>
+            <div style={{ fontSize: 10, color: '#10b981', textTransform: 'uppercase', fontWeight: 700, marginBottom: 6 }}>
+              ✅ Señales auto-capturadas del dashboard
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {autoCapture.elasticityM5State  && <Badge label={`M5: ${autoCapture.elasticityM5State}`} />}
+              {autoCapture.elasticityM15State && <Badge label={`M15: ${autoCapture.elasticityM15State}`} />}
+              {autoCapture.structureState     && <Badge label={`Structure: ${autoCapture.structureState}`} />}
+              {autoCapture.rsiAtEntry         && <Badge label={`RSI: ${autoCapture.rsiAtEntry?.toFixed(1)}`} />}
+              {autoCapture.contextualWinRate  != null && <Badge label={`WR ctx: ${autoCapture.contextualWinRate}%`} />}
+              {autoCapture.divergenceAtEntry  && autoCapture.divergenceAtEntry !== 'none' && (
+                <Badge label={`Div: ${autoCapture.divergenceAtEntry}`} />
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Notas */}
+        <Field label="Notas (opcional)">
+          <textarea value={notes} onChange={e => setNotes(e.target.value)}
+            placeholder="Observaciones de la operación..."
+            style={{ ...inputStyle, height: 60, resize: 'vertical', fontFamily: 'inherit' }} />
+        </Field>
+
+        {/* Botones */}
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={onClose} style={{
+            flex: 1, padding: '11px 0', borderRadius: 10, cursor: 'pointer',
+            background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
+            color: '#6b7280', fontWeight: 600, fontSize: 13,
+          }}>
+            Cancelar
+          </button>
+          <button onClick={handleSubmit} disabled={submitting || !entry} style={{
+            flex: 2, padding: '11px 0', borderRadius: 10, cursor: 'pointer',
+            background: 'linear-gradient(135deg, #7c3aed, #a78bfa)',
+            border: 'none', color: '#fff', fontWeight: 700, fontSize: 13,
+            opacity: submitting || !entry ? 0.5 : 1,
+          }}>
+            {submitting ? 'Registrando...' : '📋 Registrar Operación'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Sub-componentes ─────────────────────────────────────────────────────────
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+      <label style={{ fontSize: 10, color: '#6b7280', textTransform: 'uppercase', fontWeight: 600 }}>{label}</label>
+      {children}
+    </div>
+  )
+}
+
+function LiqRow({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+  return (
+    <div>
+      <div style={{ fontSize: 9, color: '#6b7280', marginBottom: 2 }}>{label}</div>
+      <div style={{ fontSize: 14, fontWeight: 800, color: highlight ? '#f43f5e' : '#9ca3af', fontFamily: 'monospace' }}>
+        {value}
+      </div>
+    </div>
+  )
+}
+
+function Badge({ label }: { label: string }) {
+  return (
+    <span style={{
+      fontSize: 9, padding: '2px 6px', borderRadius: 4,
+      background: 'rgba(255,255,255,0.05)', color: '#9ca3af',
+      border: '1px solid rgba(255,255,255,0.08)', fontFamily: 'monospace',
+    }}>
+      {label}
+    </span>
+  )
+}
+
+const inputStyle: React.CSSProperties = {
+  width: '100%', padding: '8px 10px', borderRadius: 8, boxSizing: 'border-box',
+  background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+  color: '#fff', fontSize: 13, outline: 'none', fontFamily: 'monospace',
+}
+
+const selectStyle: React.CSSProperties = {
+  ...inputStyle, cursor: 'pointer', appearance: 'none',
+}

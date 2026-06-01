@@ -421,3 +421,116 @@ Tras revisar minuciosamente la documentación y especificaciones del plan gratui
 > [!NOTE]
 > **Nota de rendimiento y estabilidad:** Si configuras hasta 4 símbolos simultáneos (8 llamadas REST en total), la pausa inteligente de 2 segundos garantiza que la inicialización demore unos 16 segundos, pero nunca superará el límite de tasa de 8 req/min de tu cuenta Free.
 
+---
+# nuevos indicadores
+Perfecto, sin tocar git. Veo la imagen — el panel está funcionando. Te explico cómo leer cada elemento:
+
+---
+
+## Cómo leer el Structure Engine
+
+### 🏷️ Badges superiores (los dos de la derecha)
+
+```
+EUR/USD  MODERADO  ↓ VENDER
+```
+- **FUERTE** → 3+ confluencias alineadas. Señal de alta convicción.
+- **MODERADO** → 2 confluencias. Señal existe pero requiere cuidado.
+- **DÉBIL** → 0-1 confluencias. El motor no ve setup claro. **No operar.**
+- **↓ VENDER / ↑ COMPRAR / – ESPERAR** → dirección que sugiere la confluencia total.
+
+---
+
+### 📊 RSI(14) — la barra horizontal
+
+```
+RSI(14)          63.7 — Neutral
+     30                    70
+```
+La barra tiene **tres zonas de color**:
+- **Verde (0–30)**: Sobrevendido → favorece COMPRAR
+- **Gris (30–70)**: Neutral → sin señal RSI sola
+- **Rojo (70–100)**: Sobrecomprado → favorece VENDER
+
+> **Regla práctica**: el RSI solo no es señal. Vale cuando se combina con S/R o divergencia.
+
+---
+
+### 🔄 Divergencia RSI
+
+- **Sin Divergencia** → precio y RSI se mueven en la misma dirección. No hay señal adicional.
+- **↓ Div. Bajista** → precio sube pero RSI baja. El momentum se agota. **Anticipa caída.**
+- **↑ Div. Alcista** → precio baja pero RSI sube. El momentum de venta se agota. **Anticipa subida.**
+
+> Este es el factor más poderoso. En el caso USD/JPY del gráfico que me mostraste, era **divergencia bajista** en el pico — lo que el motor de elasticidad no detectó.
+
+---
+
+### 📈 EMA200 · Precio ↑ sobre / ↓ bajo
+
+```
+EMA200 · Precio ↓ bajo    ▼ Bajista
+EMA200 · Precio ↑ sobre   ▲ Alcista
+```
+- Primero te dice **dónde está el precio respecto a la EMA200** (la tendencia de largo plazo).
+- Luego el **slope** (ángulo de la EMA200):
+  - `▼ Bajista` + precio sobre EMA200 → precio yendo contra tendencia mayor → **reversion más probable hacia abajo**
+  - `▲ Alcista` + precio bajo EMA200 → precio yendo contra tendencia mayor → **reversion más probable hacia arriba**
+  - `→ Lateral` → tendencia sin definición, factor neutral
+
+---
+
+### 🎯 Niveles S/R Detectados
+
+```
+R  1.16489  (0.00007 lejos)  ●●●●
+R  1.16506  (0.00010 lejos)  ●●○○
+S  1.16505  (0.00009 lejos)  ●●○○
+S  1.16485  (0.00011 lejos)  ●○○○
+```
+- **R** (rojo) = Resistencia. El precio llegó ahí y rebotó hacia abajo en el pasado.
+- **S** (verde) = Soporte. El precio llegó ahí y rebotó hacia arriba en el pasado.
+- **"X lejos"** = distancia actual en pips/precio. Cuanto más cercano, más relevante.
+- **Dots (●●●●)** = fuerza del nivel (cuántas veces fue testeado): `●○○○` débil → `●●●●` muy fuerte.
+
+> **Clave**: cuando el precio está a menos de 0.5 ATR de un nivel fuerte (●●● o ●●●●), el motor lo cuenta como "confluencia" y sube el score.
+
+---
+
+### 💬 Texto de explicación (parte inferior de cada tarjeta)
+
+```
+Confluencia MODERADA: En resistencia (1.16489, fuerza 4)
+```
+Resume textualmente **exactamente qué factores activaron la señal** y con qué intensidad. Si ves "Señal DÉBIL", significa que ningún factor tiene suficiente peso para operar.
+
+---
+
+### 🔢 Cómo se decide FUERTE / MODERADO / DÉBIL
+
+El motor suma puntos por cada confluencia:
+
+| Factor | Puntos |
+|---|---|
+| RSI ≥ 75 o ≤ 25 | 3 |
+| RSI ≥ 70 o ≤ 30 | 2 |
+| En S/R fuerte (≤ 0.5 ATR, fuerza 3-4) | 3 |
+| En S/R medio | 1–2 |
+| Divergencia RSI | 3 |
+| EMA200 slope contra precio | 1 |
+
+- **≥ 6 puntos** → FUERTE
+- **3–5 puntos** → MODERADO  
+- **< 3 puntos** → DÉBIL
+
+---
+
+### En la imagen que mandaste
+
+| Par | Situación | Interpretación |
+|---|---|---|
+| **EUR/USD** | MODERADO VENDER | En resistencia fuerte (fuerza 4) pero RSI neutral (63.7). Falta divergencia. Precaución. |
+| **GBP/USD** | DÉBIL VENDER | En resistencia pero RSI muy neutral (60.5) y EMA200 alcista (va contra la señal SELL). Mejor esperar. |
+| **AUD/USD** | DÉBIL COMPRAR | En soporte débil (fuerza 1), RSI neutral (43.1). Sin confluencia suficiente. No operar. |
+
+Los tres están en zona gris — ninguno tiene setup de alta convicción en este momento. Eso es información valiosa: el motor te está diciendo **"espera"**.
