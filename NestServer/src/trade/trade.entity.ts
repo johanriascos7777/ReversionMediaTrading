@@ -146,8 +146,26 @@ export class Trade {
   notes?: string;
 
   // ─── Screenshots (URLs de imágenes en S3) ────────────────────────────────
-  @Property({ type: 'json', nullable: true, fieldName: 'screenshot_urls' })
-  screenshotUrls?: string[];
+  @Property({ type: 'text', nullable: true, fieldName: 'screenshot_urls' })
+  screenshotUrlsRaw?: string;
+
+  @Property({ persist: false })
+  get screenshotUrls(): string[] {
+    if (!this.screenshotUrlsRaw) return [];
+    try {
+      const parsed = JSON.parse(this.screenshotUrlsRaw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      if (this.screenshotUrlsRaw.startsWith('http')) {
+        return [this.screenshotUrlsRaw];
+      }
+      return [];
+    }
+  }
+
+  set screenshotUrls(urls: string[]) {
+    this.screenshotUrlsRaw = JSON.stringify(urls);
+  }
 
   // ─── Timestamps automáticos ──────────────────────────────────────────────
   @Property({ onCreate: () => new Date() })
