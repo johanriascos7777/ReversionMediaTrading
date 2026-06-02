@@ -1,4 +1,5 @@
 import { Entity, PrimaryKey, Property } from '@mikro-orm/decorators/legacy';
+import { wrap } from '@mikro-orm/core';
 
 export type TradeDirection  = 'BUY' | 'SELL';
 export type TradeType       = 'scalping' | 'swing' | 'positional';
@@ -149,7 +150,12 @@ export class Trade {
   @Property({ type: 'text', nullable: true, fieldName: 'screenshot_urls' })
   screenshotUrlsRaw?: string;
 
-  @Property({ persist: false })
+  // ⚠️ NOTA PARA EL DESARROLLADOR (VIRTUAL FIELD / GETTER-SETTER):
+  // NO DECORAR 'screenshotUrls' con '@Property({ persist: false })' en MikroORM v6/v7.
+  // Decorar getters virtuales con @Property causa que MikroORM intente mapearlo de forma inconsistente
+  // o intente generar/eliminar columnas durante schema.update().
+  // La mejor práctica profesional es dejarlo como un getter/setter estándar de TypeScript
+  // sin decoradores de base de datos, y agregarlo explícitamente en el método toJSON() de abajo.
   get screenshotUrls(): string[] {
     if (!this.screenshotUrlsRaw) return [];
     try {
@@ -165,6 +171,14 @@ export class Trade {
 
   set screenshotUrls(urls: string[]) {
     this.screenshotUrlsRaw = JSON.stringify(urls);
+  }
+
+  toJSON(): any {
+    return {
+      ...wrap(this).toObject(),
+      // Inyectar explícitamente el array virtual en la respuesta de la API JSON
+      screenshotUrls: this.screenshotUrls,
+    };
   }
 
   // ─── Timestamps automáticos ──────────────────────────────────────────────

@@ -42,6 +42,9 @@ export class CreateTradeDto {
   recommendedTp?: number;
   recommendedSl?: number;
 
+  // Fecha/hora de apertura personalizable (ISO string; si no viene, se usa now)
+  openedAt?: string;
+
   // Notas
   notes?: string;
 }

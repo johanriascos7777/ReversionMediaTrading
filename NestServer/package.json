@@ -13,6 +13,9 @@
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
     "db:create": "node dist/scripts/create-schema.js",
+    "db:migration:create": "npx mikro-orm migration:create",
+    "db:migration:up": "npx mikro-orm migration:up",
+    "db:migration:down": "npx mikro-orm migration:down",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "test": "jest",
     "test:watch": "jest --watch",
@@ -24,6 +27,7 @@
     "@aws-sdk/client-s3": "^3.1058.0",
     "@mikro-orm/core": "^7.1.3",
     "@mikro-orm/decorators": "^7.1.3",
+    "@mikro-orm/migrations": "^7.1.3",
     "@mikro-orm/mysql": "^7.1.3",
     "@mikro-orm/nestjs": "^7.0.2",
     "@nestjs/cli": "^11.0.0",
@@ -80,5 +84,12 @@
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
+  },
+  "mikro-orm": {
+    "useTsNode": true,
+    "configPaths": [
+      "./src/mikro-orm.config.ts",
+      "./dist/mikro-orm.config.js"
+    ]
   }
 }

@@ -41,22 +41,29 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
   const [leverage, setLeverage] = useState(String(trade.leverage))
   const [spread, setSpread] = useState(String(trade.spread))
   const [investment, setInvestment] = useState(String(trade.investmentAmount))
-  
+
   const [exitPrice, setExitPrice] = useState(trade.exitPrice != null ? String(trade.exitPrice) : '')
   const [outcome, setOutcome] = useState<TradeOutcome>(trade.outcome)
   const [closeReason, setCloseReason] = useState<CloseReason>(trade.closeReason ?? 'manual')
-  
+
   const [recommendedTp, setRecommendedTp] = useState(trade.recommendedTp != null ? String(trade.recommendedTp) : '')
   const [recommendedSl, setRecommendedSl] = useState(trade.recommendedSl != null ? String(trade.recommendedSl) : '')
 
   const [mae, setMae] = useState(trade.mae != null ? String(trade.mae) : '')
   const [mfe, setMfe] = useState(trade.mfe != null ? String(trade.mfe) : '')
-  
+
   const [minsHolgura, setMinsHolgura] = useState(trade.minutesInHolgura != null ? String(trade.minutesInHolgura) : '')
   const [minsProfit, setMinsProfit] = useState(trade.minutesInProfit != null ? String(trade.minutesInProfit) : '')
-  
+
   const [notes, setNotes] = useState(trade.notes ?? '')
   const [submitting, setSubmitting] = useState(false)
+
+  // Fecha/hora de apertura editable
+  const toLocalDT = (d: Date) => {
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  }
+  const [openedAtEdit, setOpenedAtEdit] = useState<string>(toLocalDT(new Date(trade.openedAt)))
 
   // Estados de Screenshots (S3)
   const [screenshotUrls, setScreenshotUrls] = useState<string[]>(parseScreenshotUrls(trade.screenshotUrls))
@@ -65,7 +72,7 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
 
   const handleUploadScreenshots = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return
-    
+
     setUploading(true)
     const formData = new FormData()
     Array.from(e.target.files).forEach(file => {
@@ -144,6 +151,8 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
       minutesInHolgura: minsHolgura ? parseInt(minsHolgura) : undefined,
       minutesInProfit: minsProfit ? parseInt(minsProfit) : undefined,
       outcome,
+      // Fecha de apertura editable — convertida a ISO string
+      openedAt: new Date(openedAtEdit).toISOString() as any,
     }
 
     if (outcome !== 'open') {
@@ -190,6 +199,22 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
             <span style={{ fontSize: 11, color: '#6b7280', display: 'block', marginTop: 4 }}>
               Abierta el: {openedDate.toLocaleString()}
             </span>
+            {/* Campo editable de fecha/hora de apertura */}
+            <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: 9, color: '#6b7280', textTransform: 'uppercase', fontWeight: 600 }}>📅 Editar fecha/hora de apertura</label>
+              <input
+                type="datetime-local"
+                value={openedAtEdit}
+                onChange={e => setOpenedAtEdit(e.target.value)}
+                style={{
+                  padding: '6px 10px', borderRadius: 8, boxSizing: 'border-box' as const,
+                  background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(124,58,237,0.3)',
+                  color: '#a78bfa', fontSize: 12, outline: 'none', fontFamily: 'monospace',
+                  width: '100%',
+                }}
+              />
+              <span style={{ fontSize: 9, color: '#4b5563' }}>Ajusta si la operación fue abierta en otro momento</span>
+            </div>
           </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 20 }}>✕</button>
         </div>
@@ -198,14 +223,14 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <Field label="Par">
             <select value={symbol} onChange={e => setSymbol(e.target.value)} style={selectStyle}>
-              {['EUR/USD','GBP/USD','USD/JPY','USD/CAD','AUD/USD'].map(s => (
+              {['EUR/USD', 'GBP/USD', 'USD/JPY', 'USD/CAD', 'AUD/USD'].map(s => (
                 <option key={s}>{s}</option>
               ))}
             </select>
           </Field>
           <Field label="Dirección">
             <div style={{ display: 'flex', gap: 8 }}>
-              {(['BUY','SELL'] as TradeDirection[]).map(d => (
+              {(['BUY', 'SELL'] as TradeDirection[]).map(d => (
                 <button key={d} onClick={() => setDirection(d)} style={{
                   flex: 1, padding: '8px 0', borderRadius: 8, cursor: 'pointer',
                   fontWeight: 700, fontSize: 12,
@@ -227,7 +252,7 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
         {/* Tipo */}
         <Field label="Tipo de operación">
           <div style={{ display: 'flex', gap: 8 }}>
-            {(['scalping','swing','positional'] as TradeType[]).map(t => (
+            {(['scalping', 'swing', 'positional'] as TradeType[]).map(t => (
               <button key={t} onClick={() => setTradeType(t)} style={{
                 flex: 1, padding: '8px 0', borderRadius: 8, cursor: 'pointer',
                 fontSize: 12, fontWeight: tradeType === t ? 700 : 500,
@@ -252,7 +277,7 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
           </Field>
           <Field label="Apalancamiento">
             <select value={leverage} onChange={e => setLeverage(e.target.value)} style={selectStyle}>
-              {['10','50','100','200','500','1000'].map(l => (
+              {['10', '50', '100', '200', '500', '1000'].map(l => (
                 <option key={l} value={l}>x{l}</option>
               ))}
             </select>
@@ -370,7 +395,7 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
             <span>📸 Capturas de Pantalla ({screenshotUrls.length}/5)</span>
             {uploading && <span style={{ color: '#a78bfa', fontSize: 10, fontWeight: 700 }}>⏳ Subiendo...</span>}
           </label>
-          
+
           {/* Grid de miniaturas */}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
             {screenshotUrls.map((url, i) => (

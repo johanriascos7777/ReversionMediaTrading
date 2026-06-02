@@ -5,6 +5,10 @@ import config from '../mikro-orm.config';
 
 async function main() {
   console.log('[Fix] Iniciando reparación de base de datos...');
+  // ⚠️ ADVERTENCIA: Este es un script de reparación temporal para desarrollo local
+  // que realiza alteraciones manuales a la tabla física ('ALTER TABLE ... DROP COLUMN ...').
+  // NUNCA lo ejecutes en producción. Las modificaciones de esquema en producción
+  // deben realizarse únicamente mediante archivos de migración bajo control de versiones.
   const orm = await MikroORM.init(config);
 
   try {

@@ -100,6 +100,8 @@ export interface CreateTradePayload {
   contextualCases?: number
   recommendedTp?: number
   recommendedSl?: number
+  // Fecha/hora de apertura personalizada (ISO string); si no viene, el server usa now
+  openedAt?: string
   notes?: string
 }
 

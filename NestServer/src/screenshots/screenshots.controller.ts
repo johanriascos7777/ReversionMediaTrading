@@ -8,7 +8,7 @@
 import {
   Controller, Post, Delete, Param, Body,
   UploadedFiles, UseInterceptors, ParseIntPipe,
-  BadRequestException,
+  BadRequestException, InternalServerErrorException, Logger,
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
@@ -17,6 +17,8 @@ import { TradeScreenshotService } from './trade-screenshot.service';
 
 @Controller('trade/:id/screenshots')
 export class ScreenshotsController {
+  private readonly logger = new Logger(ScreenshotsController.name);
+
   constructor(
     private readonly screenshotsService: ScreenshotsService,
     private readonly tradeScreenshotService: TradeScreenshotService,
@@ -33,10 +35,21 @@ export class ScreenshotsController {
       throw new BadRequestException('No se recibieron archivos');
     }
 
-    // Subir cada archivo a S3
-    const urls = await Promise.all(
-      files.map(f => this.screenshotsService.upload(id, f))
-    );
+    this.logger.log(`[Trade #${id}] Subiendo ${files.length} imagen(es) a S3...`);
+
+    let urls: string[];
+    try {
+      urls = await Promise.all(
+        files.map(f => this.screenshotsService.upload(id, f))
+      );
+    } catch (err: any) {
+      this.logger.error(`[Trade #${id}] Error al subir a S3: ${err?.message ?? err}`);
+      throw new InternalServerErrorException(
+        `No se pudo subir la imagen a S3: ${err?.message ?? 'Error desconocido'}`
+      );
+    }
+
+    this.logger.log(`[Trade #${id}] ✓ Subida OK: ${urls.join(', ')}`);
 
     // Agregar URLs al campo screenshotUrls del trade
     const trade = await this.tradeScreenshotService.addScreenshots(id, urls);
@@ -50,8 +63,15 @@ export class ScreenshotsController {
     @Body('url') url: string,
   ) {
     if (!url) throw new BadRequestException('Se requiere el campo url');
-    const key = this.screenshotsService.extractKey(url);
-    await this.screenshotsService.delete(key);
+    try {
+      const key = this.screenshotsService.extractKey(url);
+      await this.screenshotsService.delete(key);
+    } catch (err: any) {
+      this.logger.error(`[Trade #${id}] Error al eliminar de S3: ${err?.message ?? err}`);
+      throw new InternalServerErrorException(
+        `No se pudo eliminar la imagen de S3: ${err?.message ?? 'Error desconocido'}`
+      );
+    }
     const trade = await this.tradeScreenshotService.removeScreenshot(id, url);
     return { screenshotUrls: trade.screenshotUrls };
   }

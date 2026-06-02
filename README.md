@@ -546,3 +546,14 @@ Los tres están en zona gris — ninguno tiene setup de alta convicción en este
 | **USD/CHF** | 1.4 | x1000 | **Activo Refugio:** Se mueve de forma inversa al EUR/USD. Cuando llega a extremos de sobreextensión (elasticidad alta), las reversiones a su EMA100 suelen ser rápidas y simétricas. |
 | **CAD/JPY** | 1.8 | x400 | **Volatilidad JPY Controlada:** Los pares con el Yen Japonés (JPY) son espectaculares para la elasticidad porque hacen movimientos extendidos muy marcados. CAD/JPY ofrece un spread de 1.8 (muy bajo para JPY) y apalancamiento de x400. |
 | **EUR/CHF** | 1.7 | x1000 | **Comportamiento Seguro:** Similar al EUR/GBP, es un par sumamente lento y lateral. Excelente para buscar rebotes en extremos de volatilidad con un spread muy competitivo de 1.7. |
+
+
+--
+
+# limites estrategias
+
+| Tipo | Duración típica | Uso con apalancamiento alto |
+|------|----------------|-----------------------------|
+| ⚡ Scalping | 1 seg – 15 min | El nuestro (x200, x500) |
+| 📈 Swing | 15 min – 24 horas | Poco frecuente con x200 |
+| 🏦 Positional | +1 día | Raro con x200 (liquidación rápida) |

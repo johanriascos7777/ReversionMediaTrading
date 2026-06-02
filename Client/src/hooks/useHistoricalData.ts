@@ -27,7 +27,6 @@ export function useHistoricalData(symbol: string): Candle[] | null {
       .then((data: Candle[]) => {
         if (Array.isArray(data) && data.length > 0) {
           setCandles(data)
-          console.log(`[useHistoricalData] [${symbol}] ${data.length} velas recibidas del backend`)
         }
       })
       .catch((err) => {

@@ -63,6 +63,13 @@ export function TradeModal({ onClose, onSubmit, autoCapture }: TradeModalProps) 
   const [notes,      setNotes]      = useState('')
   const [submitting, setSubmitting] = useState(false)
 
+  // Fecha/hora de apertura: por defecto "ahora" en local, ajustable
+  const toLocalDT = (d: Date) => {
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  }
+  const [openedAt, setOpenedAt] = useState<string>(toLocalDT(new Date()))
+
   // Calculadora de liquidación en vivo
   const entryN   = parseFloat(entry)   || 0
   const leverageN = parseFloat(leverage) || 1
@@ -85,6 +92,8 @@ export function TradeModal({ onClose, onSubmit, autoCapture }: TradeModalProps) 
       liquidationTheoretical: liq?.theo,
       liquidationReal: liq?.real,
       notes: notes || undefined,
+      // Fecha de apertura personalizada (convertida a ISO UTC)
+      openedAt: new Date(openedAt).toISOString(),
       // Señales auto-capturadas (casts a tipos del DTO)
       elasticityM5State:  autoCapture?.elasticityM5State  as any,
       elasticityM15State: autoCapture?.elasticityM15State as any,
@@ -180,6 +189,19 @@ export function TradeModal({ onClose, onSubmit, autoCapture }: TradeModalProps) 
               </button>
             ))}
           </div>
+        </Field>
+
+        {/* Fecha/hora de apertura */}
+        <Field label="📅 Fecha y hora de apertura">
+          <input
+            type="datetime-local"
+            value={openedAt}
+            onChange={e => setOpenedAt(e.target.value)}
+            style={inputStyle}
+          />
+          <span style={{ fontSize: 9, color: '#6b7280', marginTop: 2 }}>
+            Puedes ajustar si registras la operación después de haberla abierto
+          </span>
         </Field>
 
         {/* Precios */}

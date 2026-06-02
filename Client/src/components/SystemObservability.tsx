@@ -13,8 +13,6 @@ type HealthMetrics = {
 export function SystemObservability() {
   const [metrics, setMetrics] = useState<HealthMetrics | null>(null);
 
-  console.log('Current Metrics API Payload:', metrics);
-
   useEffect(() => {
     const fetchMetrics = async () => {
       try {

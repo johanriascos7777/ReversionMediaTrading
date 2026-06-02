@@ -50,5 +50,8 @@ export class UpdateTradeDto {
   closeReason?: CloseReason;
   outcome?: TradeOutcome;
 
+  // Fecha/hora de apertura editable (ISO string)
+  openedAt?: string;
+
   notes?: string;
 }

@@ -37,7 +37,7 @@ function NavBar() {
       </span>
 
       {/* Links */}
-      <NavLink to="/"              label="📊 Dashboard"      active={!isTower} />
+      <NavLink to="/" label="📊 Dashboard" active={!isTower} />
       <NavLink to="/tower-control" label="🗼 Torre de Control" active={isTower} />
     </nav>
   )
@@ -73,7 +73,7 @@ export function AppRouter() {
       {/* Offset para el navbar fijo */}
       <div style={{ paddingTop: 44 }}>
         <Routes>
-          <Route path="/"             element={<App />} />
+          <Route path="/" element={<App />} />
           <Route path="/tower-control" element={<TowerControl />} />
         </Routes>
       </div>
