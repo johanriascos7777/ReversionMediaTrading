@@ -103,7 +103,11 @@ export function TowerControl() {
   // Wrappers void para compatibilidad con los tipos de TradeTable
   const handleCloseTrade  = async (id: number, payload: import('../hooks/useTrades').CloseTradePayload) => { await closeTrade(id, payload) }
   const handleUpdateTrade = async (id: number, payload: Partial<import('../hooks/useTrades').Trade>) => { await updateTrade(id, payload) }
-  const handleDeleteTrade = async (id: number) => { await deleteTrade(id) }
+  const handleDeleteTrade = async (id: number) => {
+    if (window.confirm('¿Estás seguro de que deseas eliminar esta operación del registro? Esta acción no se puede deshacer.')) {
+      await deleteTrade(id)
+    }
+  }
 
   const openTrades   = trades.filter(t => t.outcome === 'open')
   const closedTrades = trades.filter(t => t.outcome !== 'open')
