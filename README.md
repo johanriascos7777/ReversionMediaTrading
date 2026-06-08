@@ -557,3 +557,86 @@ Los tres están en zona gris — ninguno tiene setup de alta convicción en este
 | ⚡ Scalping | 1 seg – 15 min | El nuestro (x200, x500) |
 | 📈 Swing | 15 min – 24 horas | Poco frecuente con x200 |
 | 🏦 Positional | +1 día | Raro con x200 (liquidación rápida) |
+
+---
+
+# 🧪 Home `/` vs Experimental `/experimental` — ¿Qué es diferente y qué es igual?
+
+## Contexto
+
+El sistema tiene **dos motores que corren en paralelo** dentro del backend (NestJS). El motor de producción alimenta el Home. El motor experimental (corregido) alimenta `/experimental`. En ningún caso se toca la lógica del otro.
+
+```
+Backend NestJS
+  ├── Motor PRODUCCIÓN   →  data.m5, data.m15, data.fusedState …  →  Home /
+  └── Motor EXPERIMENTAL →  data.experimental.m5,                 →  /experimental
+                             data.experimental.m15,
+                             data.experimental.fusedState,
+                             data.experimental.pedestrianLight,
+                             data.experimental.fusedComparison,
+                             data.experimental.triggerState …
+```
+
+---
+
+## ¿Por qué los valores de Elasticidad se ven iguales en ambas pantallas?
+
+Esto es **completamente normal**. La elasticidad mide la distancia del precio a la EMA100:
+
+```
+Elasticidad = |Precio - EMA100| / ATR
+```
+
+Ese precio y esa EMA100 son los mismos datos de mercado en ambos motores. No hay razón para que cambien. Lo que cambia es **cómo se interpreta** esa elasticidad.
+
+---
+
+## Tabla comparativa: dato por dato
+
+| Dato en pantalla | Home (Producción) | Experimental (Corregido) | ¿Difieren? |
+|---|---|---|---|
+| `m5.elasticity` (número) | Distancia precio-EMA100 | Mismo cálculo | ❌ **Igual** |
+| `m15.elasticity` (número) | Distancia precio-EMA100 | Mismo cálculo | ❌ **Igual** |
+| `m5.state` / `m15.state` | Umbral estático | Mismo umbral | ❌ **Igual** |
+| `fusedComparison.winRate` | Calculado con **SMA** sin separar dirección | Calculado con **EMA real** segmentado por BUY/SELL | ✅ **Diferente** |
+| `fusedState` | Basado en winRate con SMA | Basado en winRate con EMA + dirección | ✅ **Diferente** |
+| `triggerState` (giro) | Se activa de forma prematura (en tiempo real) | Se activa solo cuando el **pico real** ha sido superado (vela cerrada) | ✅ **Diferente** |
+| `pedestrianLight` | ❌ No existe | ✅ STOP / WALK (confluencia total de las 3 condiciones) | ✅ **Exclusivo exp.** |
+| `m5.direction` | ❌ No se expone explícitamente | ✅ BUY / SELL explícito por EMA | ✅ **Exclusivo exp.** |
+| Alertas Telegram | Tipo A (fusedGreen) / Tipo B (finalGreen) | Tipo A + Tipo B experimentales + **Semáforo WALK** | ✅ **Diferente** |
+
+---
+
+## Las 3 correcciones del motor experimental
+
+### A. EMA en el Backtest (en vez de SMA)
+- **Producción**: el backtest histórico calcula sus medias con SMA (promedio simple). Esto le da el mismo peso a un dato de hace 100 velas que a uno de hace 2 velas.
+- **Experimental**: usa EMA, que da más peso a las velas recientes. Esto hace que el `winRate` sea más representativo de las condiciones actuales del mercado.
+
+### B. Segmentación BUY/SELL en las estadísticas
+- **Producción**: calcula el win rate mezclando todas las señales, sin importar si eran de compra o venta.
+- **Experimental**: separa el historial en dos grupos (señales BUY vs señales SELL) y compara la señal actual solo contra su grupo correspondiente. Esto elimina el ruido estadístico y da una ventaja más honesta.
+
+### C. Giro reactivo basado en pico real
+- **Producción**: el `triggerState = 'giro'` puede activarse mientras la elasticidad sigue subiendo en tiempo real (giro prematuro).
+- **Experimental**: el giro solo se confirma cuando **una vela ya cerrada** tiene menor elasticidad que la vela cerrada anterior. Es decir, espera a que el pico haya pasado de verdad.
+
+---
+
+## ¿Qué paneles SÍ se ven iguales aunque usen datos distintos?
+
+- **ElasticityCard** (barras M5 y M15): siempre mostrará los mismos números porque miden el mismo precio.
+- **SystemObservability**: observabilidad del servidor (WS, latencia), no depende del motor.
+- **StructureCockpit**: S/R, RSI, EMA200 — son indicadores del mercado, independientes del motor de elasticidad.
+
+---
+
+## ¿Cuándo verás diferencias claras?
+
+Las diferencias serán visibles especialmente cuando:
+1. El mercado está en un **momento de giro** — el triggerState diferirá (uno dice `giro`, el otro `estirando`).
+2. El par tiene **historial asimétrico BUY vs SELL** — el winRate del experimental será diferente al de producción.
+3. El mercado está justo en el umbral de GREEN/YELLOW — el fusedState puede cambiar de color entre los dos motores.
+
+> [!TIP]
+> Usa la ruta `/experimental` como tu **laboratorio de QA**. Si ves que el motor experimental da señales más limpias o más tardías que el de producción, eso es información valiosa para decidir si migrar las correcciones a producción en el futuro.

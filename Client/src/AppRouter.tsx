@@ -9,6 +9,7 @@ import { Routes, Route, Link, useLocation } from 'react-router-dom'
 import App from './App'
 import { TowerControl } from './pages/TowerControl'
 import { HolguraCalculator } from './pages/HolguraCalculator'
+import { ExperimentalDashboard } from './pages/ExperimentalDashboard'
 
 // ─── Barra de navegación global ──────────────────────────────────────────────
 
@@ -41,6 +42,7 @@ function NavBar() {
       <NavLink to="/" label="📊 Dashboard" active={currentPath === '/'} />
       <NavLink to="/tower-control" label="🗼 Torre de Control" active={currentPath === '/tower-control'} />
       <NavLink to="/holgura-calculator" label="🧮 Calculadora de Holgura" active={currentPath === '/holgura-calculator'} />
+      <NavLink to="/experimental" label="🧪 Experimental" active={currentPath === '/experimental'} />
     </nav>
   )
 }
@@ -78,6 +80,7 @@ export function AppRouter() {
           <Route path="/" element={<App />} />
           <Route path="/tower-control" element={<TowerControl />} />
           <Route path="/holgura-calculator" element={<HolguraCalculator />} />
+          <Route path="/experimental" element={<ExperimentalDashboard />} />
         </Routes>
       </div>
     </>

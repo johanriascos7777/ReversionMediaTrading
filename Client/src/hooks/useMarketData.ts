@@ -35,6 +35,17 @@ export type FinalMarketView = {
   fusedExplanation: string
   fusedComparison:  any
   backtest:         any
+  experimental?: {
+    m5:               MarketSnapshot & { direction: 'BUY' | 'SELL' }
+    m15:              MarketSnapshot & { direction: 'BUY' | 'SELL' }
+    finalState:       'GREEN' | 'YELLOW' | 'RED'
+    fusedState:       'GREEN' | 'YELLOW' | 'RED'
+    triggerState:     'reposo' | 'estirando' | 'giro'
+    pedestrianLight:  'STOP' | 'WALK'
+    fusedExplanation: string
+    fusedComparison:  any
+    backtest:         any
+  }
 }
 
 export type MultiSymbolMarketData = {
@@ -71,6 +82,17 @@ type BackendMessage =
       fusedExplanation: string
       fusedComparison:  any
       backtest:         any
+      experimental?: {
+        m5:               MarketSnapshot & { direction: 'BUY' | 'SELL' }
+        m15:              MarketSnapshot & { direction: 'BUY' | 'SELL' }
+        finalState:       'GREEN' | 'YELLOW' | 'RED'
+        fusedState:       'GREEN' | 'YELLOW' | 'RED'
+        triggerState:     'reposo' | 'estirando' | 'giro'
+        pedestrianLight:  'STOP' | 'WALK'
+        fusedExplanation: string
+        fusedComparison:  any
+        backtest:         any
+      }
     }
   | { type: 'status';    status: string; message: string }
   | { type: 'error';     message: string }
@@ -152,6 +174,7 @@ export function useMarketData(): {
               fusedExplanation: msg.fusedExplanation,
               fusedComparison:  msg.fusedComparison,
               backtest:         msg.backtest,
+              experimental:     msg.experimental,
             }
           }))
         }

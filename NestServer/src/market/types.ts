@@ -64,6 +64,19 @@ export type BackendMessage =
       fusedExplanation: string;
       fusedComparison: SignalComparisonResult | null;
       backtest: BacktestResult | null;
+      experimental?: {
+        m5: MarketSnapshot & { direction: 'BUY' | 'SELL' };
+        m15: MarketSnapshot & { direction: 'BUY' | 'SELL' };
+        finalState: MarketState;
+        fusedState: MarketState;
+        triggerState: 'reposo' | 'estirando' | 'giro';
+        pedestrianLight: 'STOP' | 'WALK';
+        fusedExplanation: string;
+        fusedComparison: SignalComparisonResult | null;
+        backtest: any | null; // Usar any para simplificar el mapeo de BacktestResultExp
+        lastClosedElasticityM5?: number | null;
+        prevClosedElasticityM5?: number | null;
+      };
     }
   | { type: 'status';     status: 'connecting' | 'connected' | 'disconnected'; message: string }
   | { type: 'error';      message: string }

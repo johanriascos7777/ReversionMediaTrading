@@ -5,10 +5,15 @@ import http from 'http';
 import { TwelveDataClient } from './twelveDataClient';
 import { CandleBuilder } from './candleBuilder';
 import { calculateSnapshot, resolveMultiTF, calculateElasticityForCandles, pushPercentileHistory, clearPercentileHistory } from './marketEngine';
-import type { BackendMessage, Candle, MarketSnapshot, MarketState, FusedStateResult, BacktestResult } from './types';
+import type { BackendMessage, Candle, MarketSnapshot, MarketState, FusedStateResult, BacktestResult, SignalComparisonResult } from './types';
 import { runBacktest } from './backtestEngine';
 import { compareSignalWithHistory } from './compareSignal';
 import { fuseMarketState } from './fuseMarketState';
+
+// --- Imports de Versión Experimental ---
+import { calculateSnapshotExp, resolveMultiTFExp, calculateElasticityForCandlesExp, pushPercentileHistoryExp, clearPercentileHistoryExp } from './marketEngineExp';
+import { runBacktestExp } from './backtestEngineExp';
+import { compareSignalWithHistoryExp } from './compareSignalExp';
 
 const HISTORY_OUTPUT = 500;
 
@@ -36,6 +41,29 @@ export class SymbolState {
   public triggerStateM5: 'reposo' | 'estirando' | 'giro' = 'reposo';
   public previousTriggerStateM5: 'reposo' | 'estirando' | 'giro' = 'reposo';
   public lastTelegramAlertTimeTrigger = 0;
+
+  // --- Versión Experimental ---
+  public lastSnapshotM5Exp: any = null;
+  public lastSnapshotM15Exp: any = null;
+  public lastBacktestM5Exp: any = null;
+  
+  public previousFusedStateExp: MarketState | null = null;
+  public previousFinalStateExp: MarketState | null = null;
+  
+  public lastClosedElasticityM5Exp: number | null = null;
+  public prevClosedElasticityM5Exp: number | null = null;
+  
+  public triggerStateM5Exp: 'reposo' | 'estirando' | 'giro' = 'reposo';
+  public previousTriggerStateM5Exp: 'reposo' | 'estirando' | 'giro' = 'reposo';
+  public maxLiveElasticityExp = 0;
+  
+  public lastTelegramAlertTimeAExp = 0;
+  public lastTelegramAlertTimeBExp = 0;
+  public lastTelegramAlertTimeTriggerExp = 0;
+  public lastTelegramAlertTimePedestrian = 0;
+  
+  public pedestrianLight: 'STOP' | 'WALK' = 'STOP';
+  public previousPedestrianLight: 'STOP' | 'WALK' = 'STOP';
 
   // Tracking de historial individual
   public historyLoaded = false;
@@ -127,8 +155,8 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
   }
 
   // ─── Programador de Horario Operativo ────────────────────────────────────────
-  // Domingo  : 7:30 PM – 11:30 PM COT (19:30 – 23:30)
-  // Lun–Jue  : 7:00 AM – 10:00 PM COT (07:00 – 22:00)
+  // Domingo  : 7:30 PM – Lunes 1:30 AM COT (19:30 – 01:30) (Aumentado 2 hrs)
+  // Lun–Jue  : 7:00 AM – 11:59 PM COT (07:00 – 24:00)
   // Viernes  : 7:00 AM – 12:00 PM COT (07:00 – 12:00)
   // Sábado   : Siempre cerrado
   // NOTA: Usamos COT (UTC-5) explícitamente para que funcione igual en
@@ -143,15 +171,20 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
     const hora = ahoraCOT.getUTCHours();   // Hora en COT
     const min  = ahoraCOT.getUTCMinutes(); // Minutos en COT
 
-    // Domingo: sesión apertura de mercado
+    // Domingo: sesión apertura de mercado (7:30 PM COT en adelante)
     if (dia === 0) {
-      const inicio = hora > 19 || (hora === 19 && min >= 30);
-      const fin   = hora < 23 || (hora === 23 && min < 30);
-      return inicio && fin;
+      return hora > 19 || (hora === 19 && min >= 30);
     }
 
-    // Lunes a Jueves: 7:00 AM – 11:59 PM
-    if (dia >= 1 && dia <= 4) {
+    // Lunes: sesión extendida hasta la 1:30 AM (extensión del domingo), y luego 7:00 AM en adelante
+    if (dia === 1) {
+      const extensionDomingo = hora === 0 || (hora === 1 && min < 30);
+      const sesionEstandar = hora >= 7;
+      return extensionDomingo || sesionEstandar;
+    }
+
+    // Martes a Jueves: 7:00 AM en adelante
+    if (dia >= 2 && dia <= 4) {
       return hora >= 7;
     }
 
@@ -200,10 +233,19 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
               state.lastClosedElasticityM5 = el;
             }
 
+            // --- Versión Experimental ---
+            const elExp = calculateElasticityForCandlesExp(state.builderM5.getCandles(), candle.close);
+            if (elExp !== null) {
+              pushPercentileHistoryExp(sym, 'M5', elExp);
+              state.prevClosedElasticityM5Exp = state.lastClosedElasticityM5Exp;
+              state.lastClosedElasticityM5Exp = elExp;
+            }
+
             // Recalcular backtest M5 con la nueva vela
             state.lastBacktestM5 = runBacktest(state.historicalM5, { emaPeriod: 100, maxBarsToRevert: 20 });
+            state.lastBacktestM5Exp = runBacktestExp(state.historicalM5, { emaPeriod: 100, maxBarsToRevert: 20 });
             console.log(
-              `[MarketService] [${sym}] Vela M5 cerrada. Backtest M5 recalculado: WinRate: ${state.lastBacktestM5.winRate}%`
+              `[MarketService] [${sym}] Vela M5 cerrada. Backtest M5 recalculado: WinRate: ${state.lastBacktestM5.winRate}% | Exp WinRate: ${state.lastBacktestM5Exp.winRate}%`
             );
           });
 
@@ -213,6 +255,10 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
 
             const el = calculateElasticityForCandles(state.builderM15.getCandles(), candle.close);
             if (el !== null) pushPercentileHistory(sym, 'M15', el);
+
+            // --- Versión Experimental ---
+            const elExp = calculateElasticityForCandlesExp(state.builderM15.getCandles(), candle.close);
+            if (elExp !== null) pushPercentileHistoryExp(sym, 'M15', elExp);
           });
 
           // Intentar cargar el historial inicial de forma asíncrona pero secuencial durante el startup
@@ -458,6 +504,22 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
           : null;
         const fusedStateResult = fuseMarketState(finalState, comparison);
 
+        // --- Versión Experimental ---
+        const finalStateExp = state.lastSnapshotM5Exp && state.lastSnapshotM15Exp
+          ? resolveMultiTFExp(state.lastSnapshotM5Exp, state.lastSnapshotM15Exp)
+          : ('RED' as MarketState);
+
+        const comparisonExp = state.lastSnapshotM5Exp && state.lastSnapshotM15Exp && state.lastBacktestM5Exp
+          ? compareSignalWithHistoryExp(
+              { state: state.lastSnapshotM5Exp.state, elasticity: state.lastSnapshotM5Exp.elasticity, direction: state.lastSnapshotM5Exp.direction },
+              state.lastBacktestM5Exp
+            )
+          : null;
+
+        const fusedStateResultExp = state.lastSnapshotM5Exp && state.lastSnapshotM15Exp
+          ? fuseMarketState(finalStateExp, comparisonExp)
+          : { state: 'RED' as MarketState, explanation: 'Esperando datos...' };
+
         list.push({
           type: 'snapshot',
           symbol: state.symbol,
@@ -471,6 +533,17 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
           fusedExplanation: fusedStateResult.explanation,
           fusedComparison: comparison,
           backtest: state.lastBacktestM5,
+          experimental: state.lastSnapshotM5Exp && state.lastSnapshotM15Exp ? {
+            m5: state.lastSnapshotM5Exp,
+            m15: state.lastSnapshotM15Exp,
+            finalState: finalStateExp,
+            fusedState: fusedStateResultExp.state,
+            triggerState: state.triggerStateM5Exp,
+            pedestrianLight: state.pedestrianLight,
+            fusedExplanation: fusedStateResultExp.explanation,
+            fusedComparison: comparisonExp,
+            backtest: state.lastBacktestM5Exp,
+          } : undefined
         });
       }
     }
@@ -593,6 +666,16 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
           state.lastClosedElasticityM5 = elasticity;
         }
       }
+
+      // --- Versión Experimental ---
+      const elasticityExp = calculateElasticityForCandlesExp(builder.getCandles(), c.close);
+      if (elasticityExp !== null) {
+        pushPercentileHistoryExp(symbol, builder.getTimeframe(), elasticityExp);
+        if (builder.getTimeframe() === 'M5' && state) {
+          state.prevClosedElasticityM5Exp = state.lastClosedElasticityM5Exp;
+          state.lastClosedElasticityM5Exp = elasticityExp;
+        }
+      }
     });
     console.log(
       `[WarmUp] [${symbol}] ${builder.getTimeframe()} precalentado con ${candles.length} velas (percentiles listos)`
@@ -627,6 +710,10 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       clearPercentileHistory(sym, 'M5');
       clearPercentileHistory(sym, 'M15');
 
+      // --- Versión Experimental ---
+      clearPercentileHistoryExp(sym, 'M5');
+      clearPercentileHistoryExp(sym, 'M15');
+
       state.historicalM5 = histM5;
       state.historicalM15 = histM15;
 
@@ -634,8 +721,9 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       this.warmUpBuilder(sym, state.builderM15, state.historicalM15);
 
       state.lastBacktestM5 = runBacktest(state.historicalM5, { emaPeriod: 100, maxBarsToRevert: 20 });
+      state.lastBacktestM5Exp = runBacktestExp(state.historicalM5, { emaPeriod: 100, maxBarsToRevert: 20 });
       console.log(
-        `[MarketService] [${sym}] Historial cargado con éxito en segundo plano. Backtest M5 recalculado: WinRate: ${state.lastBacktestM5.winRate}% · Señales: ${state.lastBacktestM5.totalSignals}`
+        `[MarketService] [${sym}] Historial cargado con éxito en segundo plano. Backtest M5 recalculado: WinRate: ${state.lastBacktestM5.winRate}% · Exp WinRate: ${state.lastBacktestM5Exp.winRate}%`
       );
 
       // Calcular snapshot inicial con el último precio del historial cargado
@@ -650,6 +738,14 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
         console.log(
           `[MarketService] [${sym}] Snapshot inicial recalculado: M5: ${snap5.elasticity.toFixed(3)} ${snap5.state} · M15: ${snap15.elasticity.toFixed(3)} ${snap15.state}`
         );
+      }
+
+      // --- Versión Experimental ---
+      const snap5Exp = calculateSnapshotExp(sym, state.builderM5.getCandles(), lastPrice, 'M5', ts);
+      const snap15Exp = calculateSnapshotExp(sym, state.builderM15.getCandles(), lastPrice, 'M15', ts);
+      if (snap5Exp && snap15Exp) {
+        state.lastSnapshotM5Exp = snap5Exp;
+        state.lastSnapshotM15Exp = snap15Exp;
       }
 
       state.historyLoaded = true;
@@ -712,7 +808,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       : null;
     const fusedStateResult = fuseMarketState(finalState, comparison);
 
-    // Resolver el estado del gatillo M5
+    // Resolver el estado del gatillo M5 (Tradicional)
     if (fusedStateResult.state === 'GREEN') {
       if (state.triggerStateM5 === 'reposo') {
         state.triggerStateM5 = 'estirando';
@@ -728,7 +824,53 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       state.triggerStateM5 = 'reposo';
     }
 
-    // Broadcast a través de eventos
+    // --- Versión Experimental ---
+    let finalStateExp = 'RED' as MarketState;
+    let fusedStateResultExp = { state: 'RED' as MarketState, explanation: 'Esperando datos...' };
+    let comparisonExp: SignalComparisonResult | null = null;
+    
+    const snapshotM5Exp = calculateSnapshotExp(symbol, state.builderM5.getCandles(), price, 'M5', timestamp);
+    const snapshotM15Exp = calculateSnapshotExp(symbol, state.builderM15.getCandles(), price, 'M15', timestamp);
+
+    if (snapshotM5Exp && snapshotM15Exp) {
+      state.lastSnapshotM5Exp = snapshotM5Exp;
+      state.lastSnapshotM15Exp = snapshotM15Exp;
+
+      finalStateExp = resolveMultiTFExp(snapshotM5Exp, snapshotM15Exp);
+
+      comparisonExp = state.lastBacktestM5Exp
+        ? compareSignalWithHistoryExp(
+            { state: snapshotM5Exp.state, elasticity: snapshotM5Exp.elasticity, direction: snapshotM5Exp.direction },
+            state.lastBacktestM5Exp
+          )
+        : null;
+
+      fusedStateResultExp = fuseMarketState(finalStateExp, comparisonExp);
+
+      // Resolver estado de gatillo experimental usando detector de pico
+      if (fusedStateResultExp.state === 'GREEN') {
+        if (state.triggerStateM5Exp === 'reposo') {
+          state.maxLiveElasticityExp = snapshotM5Exp.elasticity;
+          state.triggerStateM5Exp = 'estirando';
+        } else if (snapshotM5Exp.elasticity > state.maxLiveElasticityExp) {
+          state.maxLiveElasticityExp = snapshotM5Exp.elasticity;
+          state.triggerStateM5Exp = 'estirando';
+        } else if (state.maxLiveElasticityExp - snapshotM5Exp.elasticity >= 0.1) {
+          state.triggerStateM5Exp = 'giro';
+        }
+      } else {
+        state.maxLiveElasticityExp = 0;
+        state.triggerStateM5Exp = 'reposo';
+      }
+
+      // Semáforo de peatón experimental
+      const checkAnomaly = finalStateExp === 'GREEN' || finalStateExp === 'YELLOW';
+      const checkBacktest = fusedStateResultExp.state === 'GREEN' || (comparisonExp && comparisonExp.winRate >= 65);
+      const checkTrigger = state.triggerStateM5Exp === 'giro';
+      state.pedestrianLight = checkAnomaly && checkBacktest && checkTrigger ? 'WALK' : 'STOP';
+    }
+
+    // Broadcast a través de eventos (Tradicional + Experimental)
     this.events.emit('broadcast', {
       type: 'snapshot',
       symbol,
@@ -742,10 +884,28 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       fusedExplanation: fusedStateResult.explanation,
       fusedComparison: comparison,
       backtest: state.lastBacktestM5,
+      experimental: snapshotM5Exp && snapshotM15Exp ? {
+        m5: snapshotM5Exp,
+        m15: snapshotM15Exp,
+        finalState: finalStateExp,
+        fusedState: fusedStateResultExp.state,
+        triggerState: state.triggerStateM5Exp,
+        pedestrianLight: state.pedestrianLight,
+        fusedExplanation: fusedStateResultExp.explanation,
+        fusedComparison: comparisonExp,
+        backtest: state.lastBacktestM5Exp,
+        lastClosedElasticityM5: state.lastClosedElasticityM5Exp,
+        prevClosedElasticityM5: state.prevClosedElasticityM5Exp,
+      } : undefined
     } satisfies BackendMessage);
 
-    // Alerta de Telegram autónoma
+    // Alerta de Telegram autónoma tradicional
     this.checkAndSendTelegramAlert(state, fusedStateResult, finalState, snapshotM5, snapshotM15);
+
+    // Alerta de Telegram autónoma experimental
+    if (snapshotM5Exp && snapshotM15Exp) {
+      this.checkAndSendTelegramAlertExp(state, fusedStateResultExp, finalStateExp, snapshotM5Exp, snapshotM15Exp, comparisonExp);
+    }
 
     if (Math.random() < 0.05) {
       console.log(
@@ -845,6 +1005,121 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
     state.previousFusedState = fused.state;
     state.previousFinalState = finalState;
     state.previousTriggerStateM5 = state.triggerStateM5;
+  }
+
+  private async checkAndSendTelegramAlertExp(
+    state: SymbolState,
+    fused: FusedStateResult,
+    finalState: MarketState,
+    m5: MarketSnapshot & { direction: 'BUY' | 'SELL' },
+    m15: MarketSnapshot & { direction: 'BUY' | 'SELL' },
+    comparison: any
+  ): Promise<void> {
+    const now = Date.now();
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    const chatId = process.env.TELEGRAM_CHAT_ID;
+
+    if (!token || !chatId) {
+      state.previousFusedStateExp = fused.state;
+      state.previousFinalStateExp = finalState;
+      state.previousTriggerStateM5Exp = state.triggerStateM5Exp;
+      state.previousPedestrianLight = state.pedestrianLight;
+      return;
+    }
+
+    const directionLabel = m5.direction === 'BUY' ? 'COMPRA (BUY) 🟢' : 'VENTA (SELL) 🔴';
+
+    // 1️⃣ Alerta Experimental Tipo A (Señal Confirmada e Históricamente Sólida)
+    const isNewFusedGreen = state.previousFusedStateExp !== 'GREEN' && fused.state === 'GREEN';
+    const canAlertA = now - state.lastTelegramAlertTimeAExp > 300000;
+
+    if (isNewFusedGreen && canAlertA) {
+      state.lastTelegramAlertTimeAExp = now;
+      const message = `[🧪 EXPERIMENTAL] ${state.symbol}: 🟢 ALERTA CONFIRMADA (Tipo A)\n\nSugerido: ${directionLabel}\n\n${fused.explanation}\n\nM5: ${m5.elasticity.toFixed(2)} | M15: ${m15.elasticity.toFixed(2)}`;
+      const url = `https://api.telegram.org/bot${token}/sendMessage`;
+
+      try {
+        await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: chatId, text: message }),
+        });
+        console.log(`[Telegram-Exp] [${state.symbol}] Alerta Tipo A enviada`);
+      } catch (err) {
+        console.error(`[Telegram-Exp] [${state.symbol}] Error Alerta Tipo A:`, err);
+      }
+    }
+
+    // 2️⃣ Alerta Experimental Tipo B (Señal en Tiempo Real)
+    const isNewFinalGreen = state.previousFinalStateExp !== 'GREEN' && finalState === 'GREEN';
+    const canAlertB = now - state.lastTelegramAlertTimeBExp > 300000;
+
+    if (isNewFinalGreen && fused.state !== 'GREEN' && canAlertB) {
+      state.lastTelegramAlertTimeBExp = now;
+      const message = `[🧪 EXPERIMENTAL] ${state.symbol}: 🟡 ALERTA TIEMPO REAL (Tipo B)\n\nSugerido: ${directionLabel}\n\nSobre-estirado en M5/M15 pero sin ventaja estadística en backtest.\n\nM5: ${m5.elasticity.toFixed(2)} | M15: ${m15.elasticity.toFixed(2)}`;
+      const url = `https://api.telegram.org/bot${token}/sendMessage`;
+
+      try {
+        await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: chatId, text: message }),
+        });
+        console.log(`[Telegram-Exp] [${state.symbol}] Alerta Tipo B enviada`);
+      } catch (err) {
+        console.error(`[Telegram-Exp] [${state.symbol}] Error Alerta Tipo B:`, err);
+      }
+    }
+
+    // 3️⃣ Alerta Experimental Tipo C (Gatillo de Agotamiento / Giro Confirmado)
+    const isNewGiro = state.triggerStateM5Exp === 'giro' && state.previousTriggerStateM5Exp !== 'giro';
+    const canAlertTrigger = now - state.lastTelegramAlertTimeTriggerExp > 290000;
+
+    if (isNewGiro && canAlertTrigger) {
+      state.lastTelegramAlertTimeTriggerExp = now;
+      const message = `[🧪 EXPERIMENTAL] ${state.symbol}: 🪃 ¡GATILLO DE AGOTAMIENTO CONFIRMADO! (Tipo C)\n\nSugerido: ${directionLabel}\n\nLa elasticidad ha comenzado a ceder en tiempo real desde el pico detectado.\n\nPrecio actual: ${m5.price.toFixed(5)} | EMA100: ${m5.ema100.toFixed(5)}`;
+      const url = `https://api.telegram.org/bot${token}/sendMessage`;
+
+      try {
+        await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: chatId, text: message }),
+        });
+        console.log(`[Telegram-Exp] [${state.symbol}] Alerta Tipo C enviada`);
+      } catch (err) {
+        console.error(`[Telegram-Exp] [${state.symbol}] Error Alerta Tipo C:`, err);
+      }
+    }
+
+    // 4️⃣ Alerta del Semáforo de Peatón (Transición a WALK / Todas las confluencias correctas)
+    const isNewWalk = state.pedestrianLight === 'WALK' && state.previousPedestrianLight !== 'WALK';
+    const canAlertPedestrian = now - state.lastTelegramAlertTimePedestrian > 300000;
+
+    if (isNewWalk && canAlertPedestrian) {
+      state.lastTelegramAlertTimePedestrian = now;
+      const winRatePercent = comparison ? comparison.winRate.toFixed(0) : '—';
+      const casesCount = comparison ? comparison.similarSignals : '0';
+      
+      const message = `🚦 [SEMÁFORO DE PEATÓN]\n\n¡CAMINAR (WALK) en ${state.symbol}! 🚶‍♂️💨\n\nTodas las confluencias del checklist están ALINEADAS:\n\n1. ✅ Anomalía M5+M15\n2. ✅ Ventaja del Backtest (Win Rate: ${winRatePercent}% en ${casesCount} señales similares)\n3. ✅ Giro de Elasticidad Confirmado en M5 (Pico superado)\n\n👉 Operación Sugerida: ${directionLabel}\nPrecio: ${m5.price.toFixed(5)}`;
+      const url = `https://api.telegram.org/bot${token}/sendMessage`;
+
+      try {
+        await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: chatId, text: message }),
+        });
+        console.log(`[Telegram-Exp] [${state.symbol}] Alerta Semáforo de Peatón enviada con éxito`);
+      } catch (err) {
+        console.error(`[Telegram-Exp] [${state.symbol}] Error enviando alerta Semáforo de Peatón:`, err);
+      }
+    }
+
+    state.previousFusedStateExp = fused.state;
+    state.previousFinalStateExp = finalState;
+    state.previousTriggerStateM5Exp = state.triggerStateM5Exp;
+    state.previousPedestrianLight = state.pedestrianLight;
   }
 
   private recordDroppedTick(reason: string) {
