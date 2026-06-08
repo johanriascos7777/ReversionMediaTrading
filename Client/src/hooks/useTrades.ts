@@ -11,21 +11,26 @@ import { API_URL } from '@/config/env'
 
 // ─── Tipos (espejo del backend) ───────────────────────────────────────────────
 
-export type TradeDirection  = 'BUY' | 'SELL'
-export type TradeType       = 'scalping' | 'swing' | 'positional'
-export type TradingSession  = 'asian' | 'european' | 'american' | 'pacific'
-export type TradeOutcome    = 'win' | 'loss' | 'breakeven' | 'open'
-export type CloseReason     = 'tp' | 'sl' | 'signal' | 'manual' | 'time'
+export type TradeDirection = 'BUY' | 'SELL'
+export type TradeType = 'scalping' | 'swing' | 'positional'
+export type TradingSession = 'asian' | 'european' | 'american' | 'pacific'
+export type TradeOutcome = 'win' | 'loss' | 'breakeven' | 'open'
+export type CloseReason = 'tp' | 'sl' | 'signal' | 'manual' | 'time'
 export type ElasticityState = 'GREEN' | 'YELLOW' | 'RED'
-export type StructureState  = 'STRONG' | 'MODERATE' | 'WEAK'
-export type DivergenceType  = 'bearish' | 'bullish' | 'none'
-export type TrendDirection  = 'up' | 'down' | 'flat'
+export type StructureState = 'STRONG' | 'MODERATE' | 'WEAK'
+export type DivergenceType = 'bearish' | 'bullish' | 'none'
+export type TrendDirection = 'up' | 'down' | 'flat'
+export type TradeMode = 'normal' | 'experimental'
 
 export interface Trade {
   id: number
   symbol: string
   direction: TradeDirection
   tradeType: TradeType
+  tradeMode?: TradeMode
+  hasTypeC?: boolean | null
+  hasPedestrianLight?: boolean | null
+
   session: TradingSession
   entryPrice: number
   exitPrice?: number
@@ -74,6 +79,10 @@ export interface CreateTradePayload {
   symbol: string
   direction: TradeDirection
   tradeType: TradeType
+  tradeMode?: TradeMode
+  hasTypeC?: boolean | null
+  hasPedestrianLight?: boolean | null
+
   session?: TradingSession
   entryPrice: number
   leverage: number
@@ -138,6 +147,30 @@ export interface GroupStat {
   pnl: number
 }
 
+export interface SetupStat {
+  dashboard: 'PROD' | 'EXP'
+  type: string
+  hasTypeC: 'Sí' | 'No'
+  walkState: 'WALK' | 'STOP' | '—'
+  structureState: string
+  session: TradingSession
+  total: number
+  wins: number
+  winRate: number
+  pnl: number
+  expectancy: number
+  avgDuration: number | null
+}
+
+export interface DurationBracketStat {
+  name: string
+  total: number
+  wins: number
+  winRate: number
+  pnl: number
+  avgPnl: number
+}
+
 export interface Analytics {
   summary: AnalyticsSummary
   bySession: GroupStat[]
@@ -150,6 +183,15 @@ export interface Analytics {
     message?: string
     trades?: { id: number; symbol: string; pnl: number; session: string }[]
   }
+  bestSetup: SetupStat | null
+  worstSetup: SetupStat | null
+  mediumSetup: SetupStat | null
+  setupCombinations: SetupStat[]
+  durationBrackets: DurationBracketStat[]
+  byPedestrianLight: {
+    walk: { total: number; wins: number; winRate: number; pnl: number; expectancy: number } | null
+    stop: { total: number; wins: number; winRate: number; pnl: number; expectancy: number } | null
+  }
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -157,10 +199,12 @@ export interface Analytics {
 const TRADE_URL = `${API_URL}/trade`
 
 export function useTrades() {
-  const [trades, setTrades]       = useState<Trade[]>([])
+  const [trades, setTrades] = useState<Trade[]>([])
   const [analytics, setAnalytics] = useState<Analytics | null>(null)
-  const [loading, setLoading]     = useState(false)
-  const [error, setError]         = useState<string | null>(null)
+  const [analyticsMode, setAnalyticsMode] = useState<string>('all')
+  const [analyticsMinTrades, setAnalyticsMinTrades] = useState<number>(3)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const fetchTrades = useCallback(async (filters?: {
     symbol?: string; outcome?: string; session?: string
@@ -168,10 +212,10 @@ export function useTrades() {
     try {
       setLoading(true)
       const params = new URLSearchParams()
-      if (filters?.symbol)  params.set('symbol', filters.symbol)
+      if (filters?.symbol) params.set('symbol', filters.symbol)
       if (filters?.outcome) params.set('outcome', filters.outcome)
       if (filters?.session) params.set('session', filters.session)
-      const res  = await fetch(`${TRADE_URL}?${params}`)
+      const res = await fetch(`${TRADE_URL}?${params}`)
       if (!res.ok) {
         setError(`Backend error ${res.status}`)
         return
@@ -186,9 +230,22 @@ export function useTrades() {
     }
   }, [])
 
-  const fetchAnalytics = useCallback(async () => {
+  const fetchAnalytics = useCallback(async (tradeMode?: string, minTrades?: number) => {
+    const activeMode = tradeMode !== undefined ? tradeMode : analyticsMode
+    const activeMinTrades = minTrades !== undefined ? minTrades : analyticsMinTrades
+    if (tradeMode !== undefined) {
+      setAnalyticsMode(tradeMode)
+    }
+    if (minTrades !== undefined) {
+      setAnalyticsMinTrades(minTrades)
+    }
     try {
-      const res  = await fetch(`${TRADE_URL}/analytics`)
+      const params = new URLSearchParams()
+      if (activeMode && activeMode !== 'all') {
+        params.set('tradeMode', activeMode)
+      }
+      params.set('minTrades', String(activeMinTrades))
+      const res = await fetch(`${TRADE_URL}/analytics?${params}`)
       if (!res.ok) return
       const data = await res.json()
       if (data?.summary) setAnalytics(data)
@@ -196,11 +253,11 @@ export function useTrades() {
     } catch {
       setAnalytics(null)
     }
-  }, [])
+  }, [analyticsMode, analyticsMinTrades])
 
   const createTrade = useCallback(async (payload: CreateTradePayload): Promise<Trade | null> => {
     try {
-      const res  = await fetch(TRADE_URL, {
+      const res = await fetch(TRADE_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -269,6 +326,8 @@ export function useTrades() {
   return {
     trades,
     analytics,
+    analyticsMode,
+    analyticsMinTrades,
     loading,
     error,
     fetchTrades,

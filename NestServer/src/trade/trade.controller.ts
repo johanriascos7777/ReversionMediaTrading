@@ -56,8 +56,12 @@ export class TradeController {
   // ─── GET /trade/analytics ─────────────────────────────────────────────────
   // Panel de analytics: win rate por sesión/señal/par, MAE/MFE, alertas
   @Get('analytics')
-  getAnalytics() {
-    return this.tradeService.getAnalytics();
+  getAnalytics(
+    @Query('tradeMode') tradeMode?: string,
+    @Query('minTrades') minTrades?: string,
+  ) {
+    const min = minTrades ? parseInt(minTrades, 10) : 3;
+    return this.tradeService.getAnalytics(tradeMode, isNaN(min) ? 3 : min);
   }
 
   // ─── DELETE /trade/:id ────────────────────────────────────────────────────

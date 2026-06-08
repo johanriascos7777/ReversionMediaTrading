@@ -1,15 +1,16 @@
 import { Entity, PrimaryKey, Property } from '@mikro-orm/decorators/legacy';
 import { wrap } from '@mikro-orm/core';
 
-export type TradeDirection  = 'BUY' | 'SELL';
-export type TradeType       = 'scalping' | 'swing' | 'positional';
-export type TradingSession  = 'asian' | 'european' | 'american' | 'pacific';
-export type TradeOutcome    = 'win' | 'loss' | 'breakeven' | 'open';
-export type CloseReason     = 'tp' | 'sl' | 'signal' | 'manual' | 'time';
+export type TradeDirection = 'BUY' | 'SELL';
+export type TradeType = 'scalping' | 'swing' | 'positional';
+export type TradingSession = 'asian' | 'european' | 'american' | 'pacific';
+export type TradeOutcome = 'win' | 'loss' | 'breakeven' | 'open';
+export type CloseReason = 'tp' | 'sl' | 'signal' | 'manual' | 'time';
 export type ElasticityState = 'GREEN' | 'YELLOW' | 'RED';
-export type StructureState  = 'STRONG' | 'MODERATE' | 'WEAK';
-export type DivergenceType  = 'bearish' | 'bullish' | 'none';
-export type TrendDirection  = 'up' | 'down' | 'flat';
+export type StructureState = 'STRONG' | 'MODERATE' | 'WEAK';
+export type DivergenceType = 'bearish' | 'bullish' | 'none';
+export type TrendDirection = 'up' | 'down' | 'flat';
+export type TradeMode = 'normal' | 'experimental';
 
 @Entity()
 export class Trade {
@@ -26,6 +27,16 @@ export class Trade {
 
   @Property({ length: 12 })
   tradeType!: TradeType;                // 'scalping' | 'swing' | 'positional'
+
+  @Property({ length: 15, default: 'normal', fieldName: 'trade_mode' })
+  tradeMode: TradeMode = 'normal';
+
+  @Property({ type: 'boolean', nullable: true, fieldName: 'has_type_c' })
+  hasTypeC?: boolean | null;
+
+  @Property({ type: 'boolean', nullable: true, fieldName: 'has_pedestrian_light' })
+  hasPedestrianLight?: boolean | null;
+
 
   @Property({ length: 12 })
   session!: TradingSession;             // 'asian' | 'european' | 'american' | 'pacific'

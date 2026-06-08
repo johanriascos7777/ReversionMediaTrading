@@ -7,7 +7,7 @@
  */
 
 import { useState } from 'react'
-import type { CreateTradePayload, TradeDirection, TradeType } from '../../hooks/useTrades'
+import type { CreateTradePayload, TradeDirection, TradeType, TradeMode } from '../../hooks/useTrades'
 
 interface TradeModalProps {
   onClose: () => void
@@ -40,8 +40,8 @@ interface TradeModalProps {
 // Detectar sesión desde hora UTC actual
 function detectSessionNow(): string {
   const h = new Date().getUTCHours()
-  if (h >= 23 || h < 8)  return 'asian'
-  if (h >= 8  && h < 12) return 'european'
+  if (h >= 23 || h < 8) return 'asian'
+  if (h >= 8 && h < 12) return 'european'
   return 'american'
 }
 
@@ -53,32 +53,40 @@ function calcLiq(entry: number, leverage: number, spread: number, dir: TradeDire
 }
 
 export function TradeModal({ onClose, onSubmit, autoCapture }: TradeModalProps) {
-  const [symbol,     setSymbol]     = useState(autoCapture?.symbol ?? 'EUR/USD')
-  const [direction,  setDirection]  = useState<TradeDirection>('BUY')
-  const [tradeType,  setTradeType]  = useState<TradeType>('scalping')
-  const [entry,      setEntry]      = useState(autoCapture?.currentPrice ? String(autoCapture.currentPrice) : '')
-  const [leverage,   setLeverage]   = useState('200')
-  const [spread,     setSpread]     = useState('0.00013')
+  const [symbol, setSymbol] = useState(autoCapture?.symbol ?? 'EUR/USD')
+  const [direction, setDirection] = useState<TradeDirection>('BUY')
+  const [tradeType, setTradeType] = useState<TradeType>('scalping')
+  const [entry, setEntry] = useState(autoCapture?.currentPrice ? String(autoCapture.currentPrice) : '')
+  const [leverage, setLeverage] = useState('200')
+  const [spread, setSpread] = useState('0.00013')
   const [investment, setInvestment] = useState('2')
-  const [notes,      setNotes]      = useState('')
+  const [notes, setNotes] = useState('')
+  const [tradeMode, setTradeMode] = useState<TradeMode>('normal')
   const [submitting, setSubmitting] = useState(false)
 
   // Señales de entrada editables
-  const [elasticityM5State,  setElasticityM5State]  = useState<string>(autoCapture?.elasticityM5State ?? '')
+  const [elasticityM5State, setElasticityM5State] = useState<string>(autoCapture?.elasticityM5State ?? '')
   const [elasticityM15State, setElasticityM15State] = useState<string>(autoCapture?.elasticityM15State ?? '')
-  const [structureState,     setStructureState]     = useState<string>(autoCapture?.structureState ?? '')
+  const [structureState, setStructureState] = useState<string>(autoCapture?.structureState ?? '')
+  const [hasTypeC, setHasTypeC] = useState<boolean | null>(null)
+  const [hasPedestrianLight, setHasPedestrianLight] = useState<boolean | null>(
+    autoCapture && 'pedestrianLight' in autoCapture && autoCapture.pedestrianLight
+      ? (autoCapture.pedestrianLight as string) === 'WALK'
+      : null
+  )
+
 
   // Fecha/hora de apertura: por defecto "ahora" en local, ajustable
   const toLocalDT = (d: Date) => {
     const pad = (n: number) => String(n).padStart(2, '0')
-    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
   }
   const [openedAt, setOpenedAt] = useState<string>(toLocalDT(new Date()))
 
   // Calculadora de liquidación en vivo
-  const entryN   = parseFloat(entry)   || 0
+  const entryN = parseFloat(entry) || 0
   const leverageN = parseFloat(leverage) || 1
-  const spreadN  = parseFloat(spread)  || 0
+  const spreadN = parseFloat(spread) || 0
   const liq = entryN > 0 ? calcLiq(entryN, leverageN, spreadN, direction) : null
 
   const handleSubmit = async () => {
@@ -89,6 +97,7 @@ export function TradeModal({ onClose, onSubmit, autoCapture }: TradeModalProps) 
       symbol,
       direction,
       tradeType,
+      tradeMode,
       session: detectSessionNow() as any,
       entryPrice: entryN,
       leverage: leverageN,
@@ -97,27 +106,30 @@ export function TradeModal({ onClose, onSubmit, autoCapture }: TradeModalProps) 
       liquidationTheoretical: liq?.theo,
       liquidationReal: liq?.real,
       notes: notes || undefined,
+      hasTypeC,
+      hasPedestrianLight: tradeMode === 'experimental' ? hasPedestrianLight : null,
       // Fecha de apertura personalizada (convertida a ISO UTC)
       openedAt: new Date(openedAt).toISOString(),
       // Señales auto-capturadas y editables (casts a tipos del DTO)
-      elasticityM5State:  (elasticityM5State || undefined) as any,
+      elasticityM5State: (elasticityM5State || undefined) as any,
+
       elasticityM15State: (elasticityM15State || undefined) as any,
-      fusedState:         autoCapture?.fusedState         as any,
-      elasticityM5Value:  autoCapture?.elasticityM5Value,
+      fusedState: autoCapture?.fusedState as any,
+      elasticityM5Value: autoCapture?.elasticityM5Value,
       elasticityM15Value: autoCapture?.elasticityM15Value,
-      structureState:     (structureState || undefined) as any,
-      structureSignal:    autoCapture?.structureSignal,
-      rsiAtEntry:         autoCapture?.rsiAtEntry,
-      divergenceAtEntry:  autoCapture?.divergenceAtEntry  as any,
+      structureState: (structureState || undefined) as any,
+      structureSignal: autoCapture?.structureSignal,
+      rsiAtEntry: autoCapture?.rsiAtEntry,
+      divergenceAtEntry: autoCapture?.divergenceAtEntry as any,
       ema200SlopeAtEntry: autoCapture?.ema200SlopeAtEntry as any,
-      nearestSRPrice:     autoCapture?.nearestSRPrice,
-      nearestSRType:      autoCapture?.nearestSRType,
-      nearestSRStrength:  autoCapture?.nearestSRStrength,
-      nearestSRDistance:  autoCapture?.nearestSRDistance,
-      contextualWinRate:  autoCapture?.contextualWinRate,
-      contextualCases:    autoCapture?.contextualCases,
-      recommendedTp:      autoCapture?.recommendedTp,
-      recommendedSl:      autoCapture?.recommendedSl,
+      nearestSRPrice: autoCapture?.nearestSRPrice,
+      nearestSRType: autoCapture?.nearestSRType,
+      nearestSRStrength: autoCapture?.nearestSRStrength,
+      nearestSRDistance: autoCapture?.nearestSRDistance,
+      contextualWinRate: autoCapture?.contextualWinRate,
+      contextualCases: autoCapture?.contextualCases,
+      recommendedTp: autoCapture?.recommendedTp,
+      recommendedSl: autoCapture?.recommendedSl,
     }
 
     await onSubmit(payload)
@@ -151,7 +163,15 @@ export function TradeModal({ onClose, onSubmit, autoCapture }: TradeModalProps) 
         {/* Par + Dirección */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <Field label="Par">
-            <select value={symbol} onChange={e => setSymbol(e.target.value)} style={selectStyle}>
+            <select value={symbol} onChange={e => {
+              const val = e.target.value;
+              setSymbol(val);
+              if (val !== autoCapture?.symbol) {
+                setEntry('');
+              } else {
+                setEntry(autoCapture?.currentPrice ? String(autoCapture.currentPrice) : '');
+              }
+            }} style={selectStyle}>
               {[
                 'EUR/USD',
                 'GBP/USD',
@@ -169,7 +189,7 @@ export function TradeModal({ onClose, onSubmit, autoCapture }: TradeModalProps) 
           </Field>
           <Field label="Dirección">
             <div style={{ display: 'flex', gap: 8 }}>
-              {(['BUY','SELL'] as TradeDirection[]).map(d => (
+              {(['BUY', 'SELL'] as TradeDirection[]).map(d => (
                 <button key={d} onClick={() => setDirection(d)} style={{
                   flex: 1, padding: '8px 0', borderRadius: 8, cursor: 'pointer',
                   fontWeight: 700, fontSize: 13,
@@ -191,8 +211,8 @@ export function TradeModal({ onClose, onSubmit, autoCapture }: TradeModalProps) 
         {/* Tipo */}
         <Field label="Tipo de operación">
           <div style={{ display: 'flex', gap: 8 }}>
-            {(['scalping','swing','positional'] as TradeType[]).map(t => (
-              <button key={t} onClick={() => setTradeType(t)} style={{
+            {(['scalping', 'swing', 'positional'] as TradeType[]).map(t => (
+              <button key={t} type="button" onClick={() => setTradeType(t)} style={{
                 flex: 1, padding: '7px 0', borderRadius: 8, cursor: 'pointer',
                 fontSize: 11, fontWeight: tradeType === t ? 700 : 500,
                 background: tradeType === t ? 'rgba(167,139,250,0.2)' : 'rgba(255,255,255,0.04)',
@@ -201,6 +221,28 @@ export function TradeModal({ onClose, onSubmit, autoCapture }: TradeModalProps) 
                 textTransform: 'capitalize',
               }}>
                 {t}
+              </button>
+            ))}
+          </div>
+        </Field>
+
+        {/* Modo (Normal vs. Experimental) */}
+        <Field label="Modo de Operación">
+          <div style={{ display: 'flex', gap: 8 }}>
+            {(['normal', 'experimental'] as TradeMode[]).map(m => (
+              <button key={m} type="button" onClick={() => setTradeMode(m)} style={{
+                flex: 1, padding: '7px 0', borderRadius: 8, cursor: 'pointer',
+                fontSize: 11, fontWeight: tradeMode === m ? 700 : 500,
+                background: tradeMode === m
+                  ? (m === 'experimental' ? 'rgba(167,139,250,0.2)' : 'rgba(16,185,129,0.2)')
+                  : 'rgba(255,255,255,0.04)',
+                color: tradeMode === m ? (m === 'experimental' ? '#a78bfa' : '#10b981') : '#6b7280',
+                border: tradeMode === m
+                  ? `1px solid ${m === 'experimental' ? '#a78bfa' : '#10b981'}40`
+                  : '1px solid rgba(255,255,255,0.08)',
+                textTransform: 'capitalize',
+              }}>
+                {m === 'experimental' ? '🧪 Experimental' : '💼 Normal'}
               </button>
             ))}
           </div>
@@ -231,7 +273,7 @@ export function TradeModal({ onClose, onSubmit, autoCapture }: TradeModalProps) 
           </Field>
           <Field label="Apalancamiento">
             <select value={leverage} onChange={e => setLeverage(e.target.value)} style={selectStyle}>
-              {['10','50','100','200','300','500','1000'].map(l => (
+              {['10', '50', '100', '200', '300', '500', '1000'].map(l => (
                 <option key={l} value={l}>x{l}</option>
               ))}
             </select>
@@ -272,7 +314,7 @@ export function TradeModal({ onClose, onSubmit, autoCapture }: TradeModalProps) 
           <div style={{ fontSize: 10, color: '#a78bfa', textTransform: 'uppercase', fontWeight: 700 }}>
             📊 Señales de Entrada (Auto-capturadas / Editables)
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
             <Field label="Elasticidad M5">
               <select value={elasticityM5State} onChange={e => setElasticityM5State(e.target.value)} style={selectStyle}>
                 <option value="">—</option>
@@ -297,7 +339,38 @@ export function TradeModal({ onClose, onSubmit, autoCapture }: TradeModalProps) 
                 <option value="WEAK">WEAK</option>
               </select>
             </Field>
+            <Field label="Alerta Tipo C">
+              <select
+                value={hasTypeC === null ? '' : String(hasTypeC)}
+                onChange={e => {
+                  const val = e.target.value;
+                  setHasTypeC(val === '' ? null : val === 'true');
+                }}
+                style={selectStyle}
+              >
+                <option value="">—</option>
+                <option value="true">Sí</option>
+                <option value="false">No</option>
+              </select>
+            </Field>
+            {tradeMode === 'experimental' && (
+              <Field label="Semáforo Peatón">
+                <select
+                  value={hasPedestrianLight === null ? '' : String(hasPedestrianLight)}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setHasPedestrianLight(val === '' ? null : val === 'true');
+                  }}
+                  style={selectStyle}
+                >
+                  <option value="">—</option>
+                  <option value="true">Sí (WALK)</option>
+                  <option value="false">No (STOP)</option>
+                </select>
+              </Field>
+            )}
           </div>
+
           {/* Otras señales auto-capturadas no editables (como RSI, Win Rate, etc.) */}
           {autoCapture && (autoCapture.rsiAtEntry != null || autoCapture.contextualWinRate != null || (autoCapture.divergenceAtEntry && autoCapture.divergenceAtEntry !== 'none')) && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>

@@ -640,3 +640,57 @@ Las diferencias serán visibles especialmente cuando:
 
 > [!TIP]
 > Usa la ruta `/experimental` como tu **laboratorio de QA**. Si ves que el motor experimental da señales más limpias o más tardías que el de producción, eso es información valiosa para decidir si migrar las correcciones a producción en el futuro.
+
+---
+
+# 📡 Patrón Fan-Out — ¿Cuánto consume tu app si hay múltiples usuarios?
+
+## La respuesta corta: nada extra en Twelve Data
+
+Sin importar si tienes 1 ventana abierta o 10 amigos conectados desde distintas ciudades del mundo, **Twelve Data siempre ve exactamente lo mismo: 1 cliente (tu servidor)**.
+
+## El diagrama
+
+```
+Twelve Data
+    │
+    │  (1 conexión total, siempre)
+    ▼
+Tu NestJS Server  ◄─── aquí está toda la inteligencia
+    │
+    │  broadcast simultáneo a todos
+    ├──────┬──────┬──────┬──────┬──────┐
+    ▼      ▼      ▼      ▼      ▼      ▼
+  Tú    Amigo  Ciudad  Ciudad  Ciudad  Ciudad
+ Casa   Bogotá Medellín  Cali  Madrid   NY
+```
+
+Esto se llama patrón **Fan-Out**: uno recibe los datos, muchos los escuchan. El cálculo ocurre una sola vez en el servidor y el resultado se distribuye a todos los clientes al mismo tiempo.
+
+## ¿Por qué no gasto más en la API?
+
+Tus ventanas del browser **nunca** llaman directamente a Twelve Data. Solo escuchan al backend a través de su WebSocket interno. Esto aplica tanto para:
+
+- **EUR/USD** (vía WebSocket de TwelveData → backend → clientes)
+- **GBP/USD, USD/JPY, etc.** (vía REST polling cada 10s → backend → clientes)
+
+En ambos casos, Twelve Data solo tiene un interlocutor: **tu servidor NestJS**.
+
+## Lo que sí escala con más usuarios
+
+Lo único que crece es la carga de **tu propio servidor**, no el consumo de API externa:
+
+| Métrica | Con 1 usuario | Con 10 usuarios |
+|---|---|---|
+| Conexiones WS a Twelve Data | 1 | 1 ✅ |
+| REST calls a Twelve Data | N por símbolo (fijo) | N por símbolo (fijo) ✅ |
+| Conexiones WS al backend | 1 | 10 |
+| CPU del servidor | Mínima | Un poco más |
+| RAM del servidor | Mínima | Un poco más |
+
+## La analogía
+
+Es exactamente el mismo principio por el que **un canal de Telegram puede tener 100,000 suscriptores** pero el bot solo envía el mensaje una vez. El canal es tu servidor; los suscriptores son los navegadores de tus amigos.
+
+> [!TIP]
+> Podrías compartir tu dashboard con tus amigos traders ahora mismo — solo necesitan la IP de tu servidor — y no gastarías ni un crédito adicional de Twelve Data. El límite no es la API externa, es el ancho de banda y CPU de tu máquina local.

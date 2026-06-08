@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@mikro-orm/nestjs';
 import { EntityRepository, EntityManager } from '@mikro-orm/core';
 import { Trade } from './trade.entity';
@@ -54,6 +54,12 @@ export class TradeService {
     trade.symbol = dto.symbol;
     trade.direction = dto.direction;
     trade.tradeType = dto.tradeType;
+    trade.tradeMode = dto.tradeMode ?? 'normal';
+    if (dto.hasTypeC !== undefined) trade.hasTypeC = dto.hasTypeC;
+    if (trade.tradeMode === 'experimental' && dto.hasPedestrianLight !== undefined) {
+      trade.hasPedestrianLight = dto.hasPedestrianLight;
+    }
+
     trade.session = dto.session ?? detectSession(openedAt);
     trade.entryPrice = dto.entryPrice;
     trade.leverage = dto.leverage;
@@ -136,6 +142,14 @@ export class TradeService {
     if (dto.symbol !== undefined) trade.symbol = dto.symbol;
     if (dto.direction !== undefined) trade.direction = dto.direction;
     if (dto.tradeType !== undefined) trade.tradeType = dto.tradeType;
+    if (dto.tradeMode !== undefined) trade.tradeMode = dto.tradeMode;
+    if (dto.hasTypeC !== undefined) trade.hasTypeC = dto.hasTypeC;
+    if (trade.tradeMode === 'experimental' && dto.hasPedestrianLight !== undefined) {
+      trade.hasPedestrianLight = dto.hasPedestrianLight;
+    } else if (trade.tradeMode !== 'experimental') {
+      trade.hasPedestrianLight = null;
+    }
+
     if (dto.session !== undefined) trade.session = dto.session;
     if (dto.entryPrice !== undefined) trade.entryPrice = dto.entryPrice;
     if (dto.leverage !== undefined) trade.leverage = dto.leverage;
@@ -205,6 +219,15 @@ export class TradeService {
       const pnl = (pip / trade.entryPrice) * trade.leverage * trade.investmentAmount;
       const pnlPct = (pnl / trade.investmentAmount) * 100;
 
+      if (Math.abs(pnl) > 999999.9999) {
+        throw new BadRequestException(
+          `El precio de salida (${dto.exitPrice}) genera un P&L de ${pnl.toFixed(2)} USD, ` +
+          `el cual supera el límite permitido por la base de datos. ` +
+          `Asegúrate de que estás ingresando un precio de salida correcto para el par ${trade.symbol} ` +
+          `(Entrada: ${trade.entryPrice}).`
+        );
+      }
+
       trade.pnl = Math.round(pnl * 10000) / 10000;
       trade.pnlPercent = Math.round(pnlPct * 100) / 100;
     } else if (trade.outcome === 'open') {
@@ -238,6 +261,15 @@ export class TradeService {
       : trade.entryPrice - dto.exitPrice;
     const pnl = (pip / trade.entryPrice) * trade.leverage * trade.investmentAmount;
     const pnlPct = (pnl / trade.investmentAmount) * 100;
+
+    if (Math.abs(pnl) > 999999.9999) {
+      throw new BadRequestException(
+        `El precio de salida (${dto.exitPrice}) genera un P&L de ${pnl.toFixed(2)} USD, ` +
+        `el cual supera el límite permitido por la base de datos. ` +
+        `Asegúrate de que estás ingresando un precio de salida correcto para el par ${trade.symbol} ` +
+        `(Entrada: ${trade.entryPrice}).`
+      );
+    }
 
     trade.exitPrice = dto.exitPrice;
     trade.outcome = dto.outcome;
@@ -285,15 +317,43 @@ export class TradeService {
 
   // ─── ANALYTICS ───────────────────────────────────────────────────────────
 
-  async getAnalytics() {
+  async getAnalytics(tradeMode?: string, minTrades: number = 3) {
+    const where: Record<string, any> = {};
+    if (tradeMode === 'normal' || tradeMode === 'experimental') {
+      where['tradeMode'] = tradeMode;
+    }
     const all = await this.tradeRepo.find(
-      {} as any,
+      where as any,
       { orderBy: { openedAt: 'DESC' }, limit: 1000 },
     );
 
     const closed = all.filter(t => t.outcome !== 'open');
     if (closed.length === 0) {
-      return { message: 'Sin operaciones cerradas aún', data: null };
+      return {
+        summary: {
+          totalTrades: 0,
+          open: all.filter(t => t.outcome === 'open').length,
+          wins: 0,
+          losses: 0,
+          breakeven: 0,
+          winRate: 0,
+          totalPnl: 0,
+          avgMAE: null,
+          avgMFE: null,
+          avgDuration: null,
+        },
+        bySession: [],
+        bySymbol: [],
+        byStructure: [],
+        byTradeType: [],
+        byLeverage: [],
+        losingPattern: { active: false },
+        bestSetup: null,
+        worstSetup: null,
+        mediumSetup: null,
+        setupCombinations: [],
+        durationBrackets: [],
+      };
     }
 
     const wins = closed.filter(t => t.outcome === 'win');
@@ -314,6 +374,52 @@ export class TradeService {
       }
       : { active: false };
 
+    // Agrupamiento y selección de setups
+    const setupGroups = getSetupGroups(closed);
+    // Filtrar los que tienen >= minTrades trades para el ranking oficial
+    const rankingSetups = setupGroups.filter(s => s.total >= minTrades);
+    const sortedSetups = [...rankingSetups].sort((a, b) => b.expectancy - a.expectancy);
+
+    let bestSetup: any = null;
+    let worstSetup: any = null;
+    let mediumSetup: any = null;
+
+    if (sortedSetups.length > 0) {
+      bestSetup = sortedSetups[0];
+    }
+    if (sortedSetups.length > 1) {
+      worstSetup = sortedSetups[sortedSetups.length - 1];
+    }
+    if (sortedSetups.length >= 3) {
+      const midIndex = Math.floor(sortedSetups.length / 2);
+      mediumSetup = sortedSetups[midIndex];
+    }
+
+    const setupCombinations = [...setupGroups].sort((a, b) => b.expectancy - a.expectancy);
+    const durationBrackets = getDurationBrackets(closed);
+
+    const expClosed = closed.filter(t => t.tradeMode === 'experimental');
+    const walkTrades = expClosed.filter(t => t.hasPedestrianLight === true);
+    const stopTrades = expClosed.filter(t => t.hasPedestrianLight === false);
+
+    const calcPedestrianStat = (items: Trade[]) => {
+      if (items.length === 0) return null;
+      const w = items.filter(t => t.outcome === 'win').length;
+      const p = items.reduce((s, t) => s + (t.pnl ?? 0), 0);
+      return {
+        total: items.length,
+        wins: w,
+        winRate: Math.round((w / items.length) * 1000) / 10,
+        pnl: Math.round(p * 100) / 100,
+        expectancy: Math.round((p / items.length) * 100) / 100,
+      };
+    };
+
+    const byPedestrianLight = {
+      walk: calcPedestrianStat(walkTrades),
+      stop: calcPedestrianStat(stopTrades),
+    };
+
     return {
       summary: {
         totalTrades: closed.length,
@@ -333,6 +439,12 @@ export class TradeService {
       byTradeType: groupStats(closed, t => t.tradeType),
       byLeverage: groupStats(closed, t => String(t.leverage)),
       losingPattern,
+      bestSetup,
+      worstSetup,
+      mediumSetup,
+      setupCombinations,
+      durationBrackets,
+      byPedestrianLight,
     };
   }
 
@@ -351,6 +463,94 @@ export class TradeService {
 function avg(nums: number[]): number | undefined {
   if (!nums.length) return undefined;
   return nums.reduce((s, v) => s + v, 0) / nums.length;
+}
+
+function getSetupGroups(trades: Trade[]) {
+  const groups: Record<string, Trade[]> = {};
+  for (const t of trades) {
+    const dashboard = t.tradeMode === 'experimental' ? 'EXP' : 'PROD';
+    const m5Green = t.elasticityM5State === 'GREEN';
+    const m15Green = t.elasticityM15State === 'GREEN';
+    const hasC = t.hasTypeC === true;
+
+    let type = 'Fuera de Sistema';
+    if (m5Green && m15Green) {
+      type = t.structureState === 'STRONG' ? 'Tipo A' : 'Tipo B';
+    } else if (hasC) {
+      type = 'Tipo C';
+    }
+
+    const hasTypeC = hasC ? 'Sí' : 'No';
+    const struct = t.structureState ?? '—';
+    const sess = t.session;
+    const walkState = t.tradeMode === 'experimental'
+      ? (t.hasPedestrianLight === true ? 'WALK' : t.hasPedestrianLight === false ? 'STOP' : '—')
+      : '—';
+
+    const key = `${dashboard}|${type}|${hasTypeC}|${walkState}|${struct}|${sess}`;
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(t);
+  }
+
+  return Object.entries(groups).map(([key, items]) => {
+    const [dashboard, type, hasTypeC, walkState, structureState, session] = key.split('|');
+    const wins = items.filter(t => t.outcome === 'win').length;
+    const pnl = items.reduce((s, t) => s + (t.pnl ?? 0), 0);
+    const avgDur = avg(items.map(t => t.totalMinutesOpen).filter(v => v != null) as number[]);
+
+    return {
+      dashboard,
+      type,
+      hasTypeC,
+      walkState,
+      structureState,
+      session,
+      total: items.length,
+      wins,
+      winRate: Math.round((wins / items.length) * 1000) / 10,
+      pnl: Math.round(pnl * 100) / 100,
+      expectancy: Math.round((pnl / items.length) * 100) / 100,
+      avgDuration: avgDur != null ? Math.round(avgDur) : null,
+    };
+  });
+}
+
+function getDurationBrackets(trades: Trade[]) {
+  const brackets = [
+    { name: '⚡ Corto (<15 min)', min: 0, max: 14 },
+    { name: '🔄 Medio (15-45 min)', min: 15, max: 45 },
+    { name: '🐢 Largo (>45 min)', min: 46, max: Infinity },
+  ];
+
+  return brackets.map(b => {
+    const items = trades.filter(t => {
+      const dur = t.totalMinutesOpen;
+      return dur != null && dur >= b.min && dur <= b.max;
+    });
+
+    if (items.length === 0) {
+      return {
+        name: b.name,
+        total: 0,
+        wins: 0,
+        winRate: 0,
+        pnl: 0,
+        avgPnl: 0,
+      };
+    }
+
+    const wins = items.filter(t => t.outcome === 'win').length;
+    const pnl = items.reduce((s, t) => s + (t.pnl ?? 0), 0);
+
+    return {
+      name: b.name,
+      total: items.length,
+      wins,
+      winRate: Math.round((wins / items.length) * 1000) / 10,
+      pnl: Math.round(pnl * 100) / 100,
+      avgPnl: Math.round((pnl / items.length) * 100) / 100,
+    };
+  });
 }
 
 function groupStats(trades: Trade[], key: (t: Trade) => string) {

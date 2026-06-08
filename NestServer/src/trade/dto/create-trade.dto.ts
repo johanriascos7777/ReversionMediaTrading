@@ -1,6 +1,6 @@
 import type {
   TradeDirection, TradeType, TradingSession,
-  ElasticityState, StructureState, DivergenceType, TrendDirection,
+  ElasticityState, StructureState, DivergenceType, TrendDirection, TradeMode,
 } from '../trade.entity';
 
 export class CreateTradeDto {
@@ -8,6 +8,10 @@ export class CreateTradeDto {
   symbol!: string;
   direction!: TradeDirection;
   tradeType!: TradeType;
+  tradeMode?: TradeMode;
+  hasTypeC?: boolean | null;
+  hasPedestrianLight?: boolean | null;
+
   session!: TradingSession;
 
   // Precios

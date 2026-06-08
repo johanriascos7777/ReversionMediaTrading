@@ -60,6 +60,9 @@ CREATE TABLE IF NOT EXISTS `trade` (
   `pnl_percent`               DECIMAL(8,2)  NULL COMMENT 'P&L como % sobre la inversión',
   `close_reason`              VARCHAR(8)   NULL COMMENT 'tp | sl | signal | manual | time',
   `outcome`                   VARCHAR(10)  NOT NULL DEFAULT 'open' COMMENT 'win | loss | breakeven | open',
+  `trade_mode`                VARCHAR(15)  NOT NULL DEFAULT 'normal' COMMENT 'normal | experimental',
+  `has_type_c`                TINYINT(1)   NULL DEFAULT NULL COMMENT 'Alerta Tipo C al entrar (true/false/null)',
+
 
   -- Notas
   `notes`                     TEXT         NULL,

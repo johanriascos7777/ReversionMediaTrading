@@ -10,7 +10,7 @@ import { EditTradeModal, parseScreenshotUrls } from './EditTradeModal'
 
 interface Props {
   trades: Trade[]
-  onClose:  (id: number, payload: CloseTradePayload) => Promise<void>
+  onClose: (id: number, payload: CloseTradePayload) => Promise<void>
   onUpdate: (id: number, payload: Partial<Trade>) => Promise<void>
   onDelete: (id: number) => Promise<void>
 }
@@ -28,19 +28,19 @@ const SESSION_LABELS: Record<string, string> = {
   american: '🗽 Americana', pacific: '🌊 Pacífico',
 }
 const OUTCOME_CFG: Record<string, { color: string; label: string }> = {
-  win:      { color: '#10b981', label: '✓ WIN'    },
-  loss:     { color: '#f43f5e', label: '✗ LOSS'   },
-  breakeven:{ color: '#9ca3af', label: '= BREAK'  },
-  open:     { color: '#f59e0b', label: '⏳ ABIERTA'},
+  win: { color: '#10b981', label: '✓ WIN' },
+  loss: { color: '#f43f5e', label: '✗ LOSS' },
+  breakeven: { color: '#9ca3af', label: '= BREAK' },
+  open: { color: '#f59e0b', label: '⏳ ABIERTA' },
 }
 
 export function TradeTable({ trades, onClose, onUpdate, onDelete }: Props) {
-  const [filterSymbol,  setFilterSymbol]  = useState('all')
+  const [filterSymbol, setFilterSymbol] = useState('all')
   const [filterOutcome, setFilterOutcome] = useState('all')
   const [filterSession, setFilterSession] = useState('all')
-  const [closingTrade,  setClosingTrade]  = useState<Trade | null>(null)
-  const [editingTrade,  setEditingTrade]  = useState<Trade | null>(null)
-  const [lightboxUrls,  setLightboxUrls]  = useState<string[]>([])
+  const [closingTrade, setClosingTrade] = useState<Trade | null>(null)
+  const [editingTrade, setEditingTrade] = useState<Trade | null>(null)
+  const [lightboxUrls, setLightboxUrls] = useState<string[]>([])
   const [lightboxIndex, setLightboxIndex] = useState<number>(0)
 
   // Navegación por teclado para la galería de imágenes del histórico
@@ -59,12 +59,12 @@ export function TradeTable({ trades, onClose, onUpdate, onDelete }: Props) {
   }, [lightboxUrls])
 
 
-  const symbols  = ['all', ...Array.from(new Set(trades.map(t => t.symbol)))]
+  const symbols = ['all', ...Array.from(new Set(trades.map(t => t.symbol)))]
   const outcomes = ['all', 'open', 'win', 'loss', 'breakeven']
   const sessions = ['all', 'asian', 'european', 'american', 'pacific']
 
   const filtered = trades.filter(t => {
-    if (filterSymbol  !== 'all' && t.symbol  !== filterSymbol)  return false
+    if (filterSymbol !== 'all' && t.symbol !== filterSymbol) return false
     if (filterOutcome !== 'all' && t.outcome !== filterOutcome) return false
     if (filterSession !== 'all' && t.session !== filterSession) return false
     return true
@@ -85,9 +85,9 @@ export function TradeTable({ trades, onClose, onUpdate, onDelete }: Props) {
     <>
       {/* Filtros */}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
-        <FilterSelect label="Par"     value={filterSymbol}  onChange={setFilterSymbol}  options={symbols} />
-        <FilterSelect label="Estado"  value={filterOutcome} onChange={setFilterOutcome} options={outcomes} />
-        <FilterSelect label="Sesión"  value={filterSession} onChange={setFilterSession} options={sessions} />
+        <FilterSelect label="Par" value={filterSymbol} onChange={setFilterSymbol} options={symbols} />
+        <FilterSelect label="Estado" value={filterOutcome} onChange={setFilterOutcome} options={outcomes} />
+        <FilterSelect label="Sesión" value={filterSession} onChange={setFilterSession} options={sessions} />
         <span style={{ marginLeft: 'auto', fontSize: 11, color: '#6b7280', alignSelf: 'center' }}>
           {filtered.length} operaciones
         </span>
@@ -98,7 +98,7 @@ export function TradeTable({ trades, onClose, onUpdate, onDelete }: Props) {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
           <thead>
             <tr style={{ background: 'rgba(255,255,255,0.03)' }}>
-              {['#','Par','Fecha','Dir','Entrada','Salida','P&L','Lev','Sesión','M5','M15','Structure','RSI','Tipo','Duración','Estado','Acc'].map(h => (
+              {['#', 'Par', 'Fecha', 'Dir', 'Entrada', 'Salida', 'P&L', 'Lev', 'Sesión', 'M5', 'M15', 'Structure', 'Tipo C', '🚶 Semáforo', 'RSI', 'Tipo', 'Modo', 'Duración', 'Estado', 'Acc'].map(h => (
                 <Th key={h}>{h}</Th>
               ))}
             </tr>
@@ -106,7 +106,7 @@ export function TradeTable({ trades, onClose, onUpdate, onDelete }: Props) {
           <tbody>
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={17} style={{ textAlign: 'center', padding: '32px 0', color: '#4b5563', fontSize: 12 }}>
+                <td colSpan={20} style={{ textAlign: 'center', padding: '32px 0', color: '#4b5563', fontSize: 12 }}>
                   Sin operaciones registradas
                 </td>
               </tr>
@@ -161,8 +161,41 @@ export function TradeTable({ trades, onClose, onUpdate, onDelete }: Props) {
                   <Td><StateBadge state={t.elasticityM5State} /></Td>
                   <Td><StateBadge state={t.elasticityM15State} /></Td>
                   <Td><StructBadge state={t.structureState} /></Td>
+                  <Td>
+                    {t.hasTypeC === true ? (
+                      <span style={{ color: '#10b981', fontWeight: 700 }}>🪃 Sí</span>
+                    ) : t.hasTypeC === false ? (
+                      <span style={{ color: '#f43f5e', fontWeight: 700 }}>✗ No</span>
+                    ) : (
+                      <span style={{ color: '#4b5563' }}>—</span>
+                    )}
+                  </Td>
+                  <Td>
+                    {t.tradeMode === 'experimental' ? (
+                      t.hasPedestrianLight === true ? (
+                        <span style={{ color: '#10b981', fontWeight: 700 }}>🚶 WALK</span>
+                      ) : t.hasPedestrianLight === false ? (
+                        <span style={{ color: '#f43f5e', fontWeight: 700 }}>🛑 STOP</span>
+                      ) : (
+                        <span style={{ color: '#4b5563' }}>—</span>
+                      )
+                    ) : (
+                      <span style={{ color: '#4b5563' }}>—</span>
+                    )}
+                  </Td>
                   <Td mono>{t.rsiAtEntry?.toFixed(1) ?? '—'}</Td>
                   <Td style={{ textTransform: 'capitalize' }}>{t.tradeType}</Td>
+                  <Td>
+                    {t.tradeMode === 'experimental' ? (
+                      <span style={{ color: '#a78bfa', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <span>🧪</span> <span style={{ fontSize: 10 }}>Exp</span>
+                      </span>
+                    ) : (
+                      <span style={{ color: '#6b7280', display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <span>💼</span> <span style={{ fontSize: 10 }}>Normal</span>
+                      </span>
+                    )}
+                  </Td>
                   <Td>{t.totalMinutesOpen != null ? `${t.totalMinutesOpen}m` : '—'}</Td>
                   <Td>
                     <span style={{ color: outcfg.color, fontWeight: 700, fontSize: 10 }}>{outcfg.label}</span>
@@ -183,7 +216,7 @@ export function TradeTable({ trades, onClose, onUpdate, onDelete }: Props) {
         </table>
       </div>
 
-       {closingTrade && (
+      {closingTrade && (
         <CloseTradeModal trade={closingTrade} onClose={() => setClosingTrade(null)} onSubmit={handleClose} />
       )}
       {editingTrade && (
@@ -198,7 +231,7 @@ export function TradeTable({ trades, onClose, onUpdate, onDelete }: Props) {
           display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
         }} onClick={() => setLightboxUrls([])}>
           <div style={{ position: 'relative', maxWidth: '90vw', maxHeight: '90vh', display: 'flex', alignItems: 'center' }} onClick={e => e.stopPropagation()}>
-            
+
             {/* Botón de Anterior */}
             {lightboxUrls.length > 1 && (
               <button
@@ -264,8 +297,10 @@ export function TradeTable({ trades, onClose, onUpdate, onDelete }: Props) {
 
 function Th({ children }: { children: React.ReactNode }) {
   return (
-    <th style={{ padding: '8px 10px', textAlign: 'left', color: '#4b5563', fontWeight: 700,
-      textTransform: 'uppercase', fontSize: 9, letterSpacing: '0.8px', whiteSpace: 'nowrap' }}>
+    <th style={{
+      padding: '8px 10px', textAlign: 'left', color: '#4b5563', fontWeight: 700,
+      textTransform: 'uppercase', fontSize: 9, letterSpacing: '0.8px', whiteSpace: 'nowrap'
+    }}>
       {children}
     </th>
   )
@@ -275,8 +310,10 @@ function Td({ children, bold, mono, style }: {
   children: React.ReactNode; bold?: boolean; mono?: boolean; style?: React.CSSProperties
 }) {
   return (
-    <td style={{ padding: '7px 10px', color: '#d1d5db', fontWeight: bold ? 700 : 400,
-      fontFamily: mono ? 'monospace' : 'inherit', whiteSpace: 'nowrap', ...style }}>
+    <td style={{
+      padding: '7px 10px', color: '#d1d5db', fontWeight: bold ? 700 : 400,
+      fontFamily: mono ? 'monospace' : 'inherit', whiteSpace: 'nowrap', ...style
+    }}>
       {children}
     </td>
   )
@@ -289,10 +326,11 @@ function StateBadge({ state }: { state?: string }) {
 }
 
 function StructBadge({ state }: { state?: string }) {
-  const cfg = state === 'STRONG' ? '#f43f5e' : state === 'MODERATE' ? '#f59e0b' : '#6b7280'
+  const cfg = state === 'STRONG' ? '#10b981' : state === 'MODERATE' ? '#f59e0b' : state === 'WEAK' ? '#f43f5e' : '#6b7280'
   if (!state) return <span style={{ color: '#4b5563' }}>—</span>
   return <span style={{ color: cfg, fontWeight: 700, fontSize: 10 }}>{state}</span>
 }
+
 
 function FilterSelect({ label, value, onChange, options }: {
   label: string; value: string; onChange: (v: string) => void; options: string[]

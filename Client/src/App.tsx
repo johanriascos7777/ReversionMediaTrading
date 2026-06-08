@@ -253,7 +253,7 @@ function App() {
 
   return (
     // ── DIV PADRE AQUI!!!!!!! ──────────────────────────────────────────
-    <div style={{ padding: '24px 0', maxWidth: 1200, margin: '0 auto' }}>
+    <div style={{ padding: '24px 0', margin: '0 auto' }}>
 
 
 

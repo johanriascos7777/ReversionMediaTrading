@@ -95,10 +95,11 @@ export function TowerControl() {
     recommendedTp:      calculatedTp,
     recommendedSl:      calculatedSl,
     currentPrice:       currentMarket.m5?.price,
+    pedestrianLight:    currentMarket.experimental?.pedestrianLight,
   } : { symbol: activeSymbol }
 
   // ── Trades ────────────────────────────────────────────────────────────────
-  const { trades, analytics, loading, createTrade, closeTrade, updateTrade, deleteTrade } = useTrades()
+  const { trades, analytics, analyticsMode, analyticsMinTrades, loading, createTrade, closeTrade, updateTrade, deleteTrade, fetchAnalytics } = useTrades()
 
   // Wrappers void para compatibilidad con los tipos de TradeTable
   const handleCloseTrade  = async (id: number, payload: import('../hooks/useTrades').CloseTradePayload) => { await closeTrade(id, payload) }
@@ -254,7 +255,7 @@ export function TowerControl() {
       )}
 
       {!loading && tab === 'analytics' && (
-        <AnalyticsPanel analytics={analytics} />
+        <AnalyticsPanel analytics={analytics} fetchAnalytics={fetchAnalytics} analyticsMode={analyticsMode} analyticsMinTrades={analyticsMinTrades} />
       )}
 
       {!loading && tab === 'history' && (

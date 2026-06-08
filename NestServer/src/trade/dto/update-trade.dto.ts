@@ -1,13 +1,17 @@
 import type {
   TradeDirection, TradeType, TradingSession,
   ElasticityState, StructureState, DivergenceType, TrendDirection,
-  CloseReason, TradeOutcome
+  CloseReason, TradeOutcome, TradeMode
 } from '../trade.entity';
 
 export class UpdateTradeDto {
   symbol?: string;
   direction?: TradeDirection;
   tradeType?: TradeType;
+  tradeMode?: TradeMode;
+  hasTypeC?: boolean | null;
+  hasPedestrianLight?: boolean | null;
+
   session?: TradingSession;
 
   // Precios y configuración

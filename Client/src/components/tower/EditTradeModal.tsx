@@ -4,7 +4,7 @@
  * Permite calcular de forma automática el "tiempo en holgura" transcurrido desde la apertura.
  */
 import { useState, useEffect } from 'react'
-import type { Trade, TradeDirection, TradeType, TradeOutcome, CloseReason } from '../../hooks/useTrades'
+import type { Trade, TradeDirection, TradeType, TradeOutcome, CloseReason, TradeMode } from '../../hooks/useTrades'
 import { API_URL } from '@/config/env'
 
 export const parseScreenshotUrls = (val: any): string[] => {
@@ -60,8 +60,12 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
   const [elasticityM5State, setElasticityM5State] = useState<string>(trade.elasticityM5State ?? '')
   const [elasticityM15State, setElasticityM15State] = useState<string>(trade.elasticityM15State ?? '')
   const [structureState, setStructureState] = useState<string>(trade.structureState ?? '')
+  const [hasTypeC, setHasTypeC] = useState<boolean | null>(trade.hasTypeC ?? null)
+  const [hasPedestrianLight, setHasPedestrianLight] = useState<boolean | null>(trade.hasPedestrianLight ?? null)
+
 
   const [notes, setNotes] = useState(trade.notes ?? '')
+  const [tradeMode, setTradeMode] = useState<TradeMode>(trade.tradeMode ?? 'normal')
   const [submitting, setSubmitting] = useState(false)
 
   // Fecha/hora de apertura editable
@@ -145,6 +149,7 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
       symbol,
       direction,
       tradeType,
+      tradeMode,
       entryPrice: parseFloat(entryPrice),
       leverage: parseInt(leverage),
       spread: parseFloat(spread),
@@ -156,7 +161,10 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
       mfe: mfe ? parseFloat(mfe) : undefined,
       minutesInHolgura: minsHolgura ? parseInt(minsHolgura) : undefined,
       minutesInProfit: minsProfit ? parseInt(minsProfit) : undefined,
+      hasTypeC,
+      hasPedestrianLight: tradeMode === 'experimental' ? hasPedestrianLight : null,
       elasticityM5State: (elasticityM5State || null) as any,
+
       elasticityM15State: (elasticityM15State || null) as any,
       structureState: (structureState || null) as any,
       outcome,
@@ -274,7 +282,7 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
         <Field label="Tipo de operación">
           <div style={{ display: 'flex', gap: 8 }}>
             {(['scalping', 'swing', 'positional'] as TradeType[]).map(t => (
-              <button key={t} onClick={() => setTradeType(t)} style={{
+              <button key={t} type="button" onClick={() => setTradeType(t)} style={{
                 flex: 1, padding: '8px 0', borderRadius: 8, cursor: 'pointer',
                 fontSize: 12, fontWeight: tradeType === t ? 700 : 500,
                 background: tradeType === t ? 'rgba(167,139,250,0.15)' : 'rgba(255,255,255,0.03)',
@@ -283,6 +291,28 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
                 textTransform: 'capitalize',
               }}>
                 {t}
+              </button>
+            ))}
+          </div>
+        </Field>
+
+        {/* Modo (Normal vs. Experimental) */}
+        <Field label="Modo de Operación">
+          <div style={{ display: 'flex', gap: 8 }}>
+            {(['normal', 'experimental'] as TradeMode[]).map(m => (
+              <button key={m} type="button" onClick={() => setTradeMode(m)} style={{
+                flex: 1, padding: '8px 0', borderRadius: 8, cursor: 'pointer',
+                fontSize: 12, fontWeight: tradeMode === m ? 700 : 500,
+                background: tradeMode === m
+                  ? (m === 'experimental' ? 'rgba(167,139,250,0.15)' : 'rgba(16,185,129,0.15)')
+                  : 'rgba(255,255,255,0.03)',
+                color: tradeMode === m ? (m === 'experimental' ? '#a78bfa' : '#10b981') : '#6b7280',
+                border: tradeMode === m
+                  ? `1px solid ${m === 'experimental' ? '#a78bfa' : '#10b981'}30`
+                  : '1px solid rgba(255,255,255,0.06)',
+                textTransform: 'capitalize',
+              }}>
+                {m === 'experimental' ? '🧪 Experimental' : '💼 Normal'}
               </button>
             ))}
           </div>
@@ -328,7 +358,7 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
           <div style={{ fontSize: 10, color: '#a78bfa', textTransform: 'uppercase', fontWeight: 700 }}>
             📊 Señales de Entrada
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
             <Field label="Elasticidad M5">
               <select value={elasticityM5State} onChange={e => setElasticityM5State(e.target.value)} style={selectStyle}>
                 <option value="">—</option>
@@ -353,7 +383,38 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
                 <option value="WEAK">WEAK</option>
               </select>
             </Field>
+            <Field label="Alerta Tipo C">
+              <select
+                value={hasTypeC === null ? '' : String(hasTypeC)}
+                onChange={e => {
+                  const val = e.target.value;
+                  setHasTypeC(val === '' ? null : val === 'true');
+                }}
+                style={selectStyle}
+              >
+                <option value="">—</option>
+                <option value="true">Sí</option>
+                <option value="false">No</option>
+              </select>
+            </Field>
+            {tradeMode === 'experimental' && (
+              <Field label="Semáforo Peatón">
+                <select
+                  value={hasPedestrianLight === null ? '' : String(hasPedestrianLight)}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setHasPedestrianLight(val === '' ? null : val === 'true');
+                  }}
+                  style={selectStyle}
+                >
+                  <option value="">—</option>
+                  <option value="true">Sí (WALK)</option>
+                  <option value="false">No (STOP)</option>
+                </select>
+              </Field>
+            )}
           </div>
+
         </div>
 
         {/* Separador */}
