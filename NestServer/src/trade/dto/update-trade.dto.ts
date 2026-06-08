@@ -47,6 +47,7 @@ export class UpdateTradeDto {
   mfe?: number;
   minutesInHolgura?: number;
   minutesInProfit?: number;
+  totalMinutesOpen?: number;
   closeReason?: CloseReason;
   outcome?: TradeOutcome;
 

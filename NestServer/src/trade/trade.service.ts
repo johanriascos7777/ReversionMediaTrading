@@ -189,10 +189,14 @@ export class TradeService {
       if (!trade.closedAt) {
         trade.closedAt = new Date();
       }
-      const totalMinutes = Math.round(
-        (trade.closedAt.getTime() - trade.openedAt.getTime()) / 60000
-      );
-      trade.totalMinutesOpen = totalMinutes;
+      if (dto.totalMinutesOpen !== undefined) {
+        trade.totalMinutesOpen = dto.totalMinutesOpen;
+      } else {
+        const totalMinutes = Math.round(
+          (trade.closedAt.getTime() - trade.openedAt.getTime()) / 60000
+        );
+        trade.totalMinutesOpen = totalMinutes;
+      }
 
       // Fórmula porcentual relativa al precio de entrada (igual a IQ Option)
       const pip = trade.direction === 'BUY'

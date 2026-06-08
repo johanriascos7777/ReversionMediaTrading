@@ -63,6 +63,11 @@ export function TradeModal({ onClose, onSubmit, autoCapture }: TradeModalProps) 
   const [notes,      setNotes]      = useState('')
   const [submitting, setSubmitting] = useState(false)
 
+  // Señales de entrada editables
+  const [elasticityM5State,  setElasticityM5State]  = useState<string>(autoCapture?.elasticityM5State ?? '')
+  const [elasticityM15State, setElasticityM15State] = useState<string>(autoCapture?.elasticityM15State ?? '')
+  const [structureState,     setStructureState]     = useState<string>(autoCapture?.structureState ?? '')
+
   // Fecha/hora de apertura: por defecto "ahora" en local, ajustable
   const toLocalDT = (d: Date) => {
     const pad = (n: number) => String(n).padStart(2, '0')
@@ -94,13 +99,13 @@ export function TradeModal({ onClose, onSubmit, autoCapture }: TradeModalProps) 
       notes: notes || undefined,
       // Fecha de apertura personalizada (convertida a ISO UTC)
       openedAt: new Date(openedAt).toISOString(),
-      // Señales auto-capturadas (casts a tipos del DTO)
-      elasticityM5State:  autoCapture?.elasticityM5State  as any,
-      elasticityM15State: autoCapture?.elasticityM15State as any,
+      // Señales auto-capturadas y editables (casts a tipos del DTO)
+      elasticityM5State:  (elasticityM5State || undefined) as any,
+      elasticityM15State: (elasticityM15State || undefined) as any,
       fusedState:         autoCapture?.fusedState         as any,
       elasticityM5Value:  autoCapture?.elasticityM5Value,
       elasticityM15Value: autoCapture?.elasticityM15Value,
-      structureState:     autoCapture?.structureState     as any,
+      structureState:     (structureState || undefined) as any,
       structureSignal:    autoCapture?.structureSignal,
       rsiAtEntry:         autoCapture?.rsiAtEntry,
       divergenceAtEntry:  autoCapture?.divergenceAtEntry  as any,
@@ -147,7 +152,17 @@ export function TradeModal({ onClose, onSubmit, autoCapture }: TradeModalProps) 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <Field label="Par">
             <select value={symbol} onChange={e => setSymbol(e.target.value)} style={selectStyle}>
-              {['EUR/USD','GBP/USD','USD/JPY','USD/CAD','AUD/USD'].map(s => (
+              {[
+                'EUR/USD',
+                'GBP/USD',
+                'USD/JPY',
+                'USD/CAD',
+                'AUD/USD',
+                'EUR/GBP',
+                'USD/CHF',
+                'CAD/JPY',
+                'EUR/CHF'
+              ].map(s => (
                 <option key={s}>{s}</option>
               ))}
             </select>
@@ -216,7 +231,7 @@ export function TradeModal({ onClose, onSubmit, autoCapture }: TradeModalProps) 
           </Field>
           <Field label="Apalancamiento">
             <select value={leverage} onChange={e => setLeverage(e.target.value)} style={selectStyle}>
-              {['10','50','100','200','500','1000'].map(l => (
+              {['10','50','100','200','300','500','1000'].map(l => (
                 <option key={l} value={l}>x{l}</option>
               ))}
             </select>
@@ -247,28 +262,53 @@ export function TradeModal({ onClose, onSubmit, autoCapture }: TradeModalProps) 
           </div>
         )}
 
-        {/* Señales auto-capturadas */}
-        {autoCapture && Object.keys(autoCapture).length > 0 && (
-          <div style={{
-            padding: '10px 12px', borderRadius: 10,
-            background: 'rgba(16,185,129,0.05)',
-            border: '1px solid rgba(16,185,129,0.15)',
-          }}>
-            <div style={{ fontSize: 10, color: '#10b981', textTransform: 'uppercase', fontWeight: 700, marginBottom: 6 }}>
-              ✅ Señales auto-capturadas del dashboard
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-              {autoCapture.elasticityM5State  && <Badge label={`M5: ${autoCapture.elasticityM5State}`} />}
-              {autoCapture.elasticityM15State && <Badge label={`M15: ${autoCapture.elasticityM15State}`} />}
-              {autoCapture.structureState     && <Badge label={`Structure: ${autoCapture.structureState}`} />}
-              {autoCapture.rsiAtEntry         && <Badge label={`RSI: ${autoCapture.rsiAtEntry?.toFixed(1)}`} />}
-              {autoCapture.contextualWinRate  != null && <Badge label={`WR ctx: ${autoCapture.contextualWinRate}%`} />}
-              {autoCapture.divergenceAtEntry  && autoCapture.divergenceAtEntry !== 'none' && (
+        {/* Señales de Entrada (M5, M15, Estructura) */}
+        <div style={{
+          padding: '14px 16px', borderRadius: 12,
+          background: 'rgba(255,255,255,0.02)',
+          border: '1px solid rgba(255,255,255,0.06)',
+          display: 'flex', flexDirection: 'column', gap: 10
+        }}>
+          <div style={{ fontSize: 10, color: '#a78bfa', textTransform: 'uppercase', fontWeight: 700 }}>
+            📊 Señales de Entrada (Auto-capturadas / Editables)
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+            <Field label="Elasticidad M5">
+              <select value={elasticityM5State} onChange={e => setElasticityM5State(e.target.value)} style={selectStyle}>
+                <option value="">—</option>
+                <option value="GREEN">GREEN</option>
+                <option value="YELLOW">YELLOW</option>
+                <option value="RED">RED</option>
+              </select>
+            </Field>
+            <Field label="Elasticidad M15">
+              <select value={elasticityM15State} onChange={e => setElasticityM15State(e.target.value)} style={selectStyle}>
+                <option value="">—</option>
+                <option value="GREEN">GREEN</option>
+                <option value="YELLOW">YELLOW</option>
+                <option value="RED">RED</option>
+              </select>
+            </Field>
+            <Field label="Estructura">
+              <select value={structureState} onChange={e => setStructureState(e.target.value)} style={selectStyle}>
+                <option value="">—</option>
+                <option value="STRONG">STRONG</option>
+                <option value="MODERATE">MODERATE</option>
+                <option value="WEAK">WEAK</option>
+              </select>
+            </Field>
+          </div>
+          {/* Otras señales auto-capturadas no editables (como RSI, Win Rate, etc.) */}
+          {autoCapture && (autoCapture.rsiAtEntry != null || autoCapture.contextualWinRate != null || (autoCapture.divergenceAtEntry && autoCapture.divergenceAtEntry !== 'none')) && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+              {autoCapture.rsiAtEntry != null && <Badge label={`RSI: ${autoCapture.rsiAtEntry.toFixed(1)}`} />}
+              {autoCapture.contextualWinRate != null && <Badge label={`WR ctx: ${autoCapture.contextualWinRate}%`} />}
+              {autoCapture.divergenceAtEntry && autoCapture.divergenceAtEntry !== 'none' && (
                 <Badge label={`Div: ${autoCapture.divergenceAtEntry}`} />
               )}
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
         {/* Notas */}
         <Field label="Notas (opcional)">

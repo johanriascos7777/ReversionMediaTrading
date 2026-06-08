@@ -140,7 +140,7 @@ function App() {
       if (!item) return
 
       const prev = lastStateChecked.current[sym] || { final: 'RED', fused: 'RED' }
-      
+
       // Solo disparar Toast si NO es el símbolo activo actualmente en pantalla
       if (sym !== activeKey) {
         // Alerta Tipo A (fusedState GREEN)
@@ -226,7 +226,7 @@ function App() {
           width: 10, height: 10, borderRadius: '50%',
           background: wsStatus === 'connected' ? '#10b981' : (wsStatus === 'connecting' ? '#eab308' : '#dc2626'),
           boxShadow: wsStatus === 'connected' ? '0 0 10px #10b981' : (wsStatus === 'connecting' ? '0 0 10px #eab308' : '0 0 10px #dc2626'),
-        }}/>
+        }} />
         <p style={{ margin: 0, fontSize: 13, color: '#f3f4f6' }}>
           {wsStatus === 'connecting' && 'Conectando con el backend multi-símbolo...'}
           {wsStatus === 'disconnected' && 'Backend desconectado — verifica que corre en puerto 8082'}
@@ -243,16 +243,19 @@ function App() {
   const comparison =
     backtest
       ? compareSignalWithHistory(
-          { state: currentMarket.m5.state, elasticity: currentMarket.m5.elasticity },
-          backtest
-        )
+        { state: currentMarket.m5.state, elasticity: currentMarket.m5.elasticity },
+        backtest
+      )
       : null
 
   // 🧠 5. Fusión final para visualización detallada
   const fused = fuseMarketState(currentMarket.finalState, comparison)
 
   return (
+    // ── DIV PADRE AQUI!!!!!!! ──────────────────────────────────────────
     <div style={{ padding: '24px 0', maxWidth: 1200, margin: '0 auto' }}>
+
+
 
       {/* ==================================================== */}
       {/* 🔴 ALERTA CRÍTICA: AGOTAMIENTO DE LLAVES             */}
@@ -285,7 +288,7 @@ function App() {
           </div>
         </div>
       )}
-      
+
       {/* HEADER PRINCIPAL */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32, gap: 16, flexWrap: 'wrap' }}>
         <div>
@@ -310,7 +313,7 @@ function App() {
             width: 8, height: 8, borderRadius: '50%',
             background: wsStatus === 'connected' ? '#10b981' : '#ef4444',
             boxShadow: wsStatus === 'connected' ? '0 0 10px #10b981' : '0 0 10px #ef4444',
-          }}/>
+          }} />
           <span style={{ fontSize: 12, color: wsStatus === 'connected' ? '#10b981' : '#ef4444', fontFamily: 'monospace', fontWeight: 600 }}>
             {wsStatus === 'connected' ? 'BACKEND CONNECTED' : 'DISCONNECTED'} · {WS_URL}
           </span>
@@ -460,7 +463,7 @@ function App() {
                     {item.fusedState}
                   </span>
                 </div>
-                
+
                 <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'monospace', letterSpacing: '-0.5px', color: '#fff', marginBottom: 16 }}>
                   {item.m5.price.toFixed(5)}
                 </div>
@@ -489,7 +492,7 @@ function App() {
       {/* 🔍 DETALLES DE INSPECCIÓN DEL SÍMBOLO ACTIVO        */}
       {/* ==================================================== */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 24 }}>
-        
+
         {/* ENCABEZADO DE SECCIÓN DETALLES */}
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, paddingLeft: 4 }}>
           <h2 style={{ fontSize: 22, fontWeight: 800, margin: 0, letterSpacing: '-0.5px', color: '#fff' }}>
@@ -502,7 +505,7 @@ function App() {
 
         {/* GRID DE PANELS */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 24 }}>
-          
+
           {/* SEMÁFORO DE TIEMPO REAL */}
           <div className="glass-panel" style={{ margin: 0 }}>
             <h3 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 8px', color: '#fff' }}>
@@ -533,7 +536,7 @@ function App() {
 
         {/* SECCIÓN DE ESTADÍSTICA E HISTORIAL */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 24 }}>
-          
+
           {/* BACKTESTING HISTÓRICO */}
           <div className="glass-panel" style={{ margin: 0 }}>
             <h3 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 8px', color: '#fff' }}>
@@ -639,7 +642,7 @@ function App() {
 
         {/* BOTTOM TELEGRAM BOT TRIGGER */}
         <div style={{ display: 'flex', justifyContent: 'center', marginTop: 12 }}>
-          <button 
+          <button
             style={{
               background: 'rgba(59, 130, 246, 0.1)',
               border: '1px solid rgba(59, 130, 246, 0.2)',
@@ -684,7 +687,7 @@ function App() {
           {toasts.map((toast) => {
             const isTypeA = toast.type === 'A'
             return (
-              <div 
+              <div
                 key={toast.id}
                 className="toast-card"
                 style={{
@@ -695,7 +698,7 @@ function App() {
                   dismissToast(toast.id)
                 }}
               >
-                <button 
+                <button
                   className="toast-close"
                   onClick={(e) => dismissToast(toast.id, e)}
                 >

@@ -54,6 +54,12 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
 
   const [minsHolgura, setMinsHolgura] = useState(trade.minutesInHolgura != null ? String(trade.minutesInHolgura) : '')
   const [minsProfit, setMinsProfit] = useState(trade.minutesInProfit != null ? String(trade.minutesInProfit) : '')
+  const [totalMinutesOpen, setTotalMinutesOpen] = useState(trade.totalMinutesOpen != null ? String(trade.totalMinutesOpen) : '')
+
+  // Señales de entrada editables
+  const [elasticityM5State, setElasticityM5State] = useState<string>(trade.elasticityM5State ?? '')
+  const [elasticityM15State, setElasticityM15State] = useState<string>(trade.elasticityM15State ?? '')
+  const [structureState, setStructureState] = useState<string>(trade.structureState ?? '')
 
   const [notes, setNotes] = useState(trade.notes ?? '')
   const [submitting, setSubmitting] = useState(false)
@@ -150,6 +156,9 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
       mfe: mfe ? parseFloat(mfe) : undefined,
       minutesInHolgura: minsHolgura ? parseInt(minsHolgura) : undefined,
       minutesInProfit: minsProfit ? parseInt(minsProfit) : undefined,
+      elasticityM5State: (elasticityM5State || null) as any,
+      elasticityM15State: (elasticityM15State || null) as any,
+      structureState: (structureState || null) as any,
       outcome,
       // Fecha de apertura editable — convertida a ISO string
       openedAt: new Date(openedAtEdit).toISOString() as any,
@@ -158,9 +167,11 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
     if (outcome !== 'open') {
       payload.exitPrice = exitPrice ? parseFloat(exitPrice) : undefined
       payload.closeReason = closeReason
+      payload.totalMinutesOpen = totalMinutesOpen ? parseInt(totalMinutesOpen) : undefined
     } else {
       payload.exitPrice = undefined
       payload.closeReason = undefined
+      payload.totalMinutesOpen = undefined
     }
 
     await onSubmit(trade.id, payload)
@@ -223,7 +234,17 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <Field label="Par">
             <select value={symbol} onChange={e => setSymbol(e.target.value)} style={selectStyle}>
-              {['EUR/USD', 'GBP/USD', 'USD/JPY', 'USD/CAD', 'AUD/USD'].map(s => (
+              {[
+                'EUR/USD',
+                'GBP/USD',
+                'USD/JPY',
+                'USD/CAD',
+                'AUD/USD',
+                'EUR/GBP',
+                'USD/CHF',
+                'CAD/JPY',
+                'EUR/CHF'
+              ].map(s => (
                 <option key={s}>{s}</option>
               ))}
             </select>
@@ -277,7 +298,7 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
           </Field>
           <Field label="Apalancamiento">
             <select value={leverage} onChange={e => setLeverage(e.target.value)} style={selectStyle}>
-              {['10', '50', '100', '200', '500', '1000'].map(l => (
+              {['10', '50', '100', '200', '300', '500', '1000'].map(l => (
                 <option key={l} value={l}>x{l}</option>
               ))}
             </select>
@@ -295,6 +316,44 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
           <Field label="Recomendador Stop Loss">
             <input type="number" step="0.00001" value={recommendedSl} onChange={e => setRecommendedSl(e.target.value)} placeholder="Ej: 1.34100" style={inp} />
           </Field>
+        </div>
+
+        {/* Señales de Entrada (M5, M15, Estructura) */}
+        <div style={{
+          padding: '14px 16px', borderRadius: 12,
+          background: 'rgba(255,255,255,0.01)',
+          border: '1px solid rgba(255,255,255,0.04)',
+          display: 'flex', flexDirection: 'column', gap: 10
+        }}>
+          <div style={{ fontSize: 10, color: '#a78bfa', textTransform: 'uppercase', fontWeight: 700 }}>
+            📊 Señales de Entrada
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+            <Field label="Elasticidad M5">
+              <select value={elasticityM5State} onChange={e => setElasticityM5State(e.target.value)} style={selectStyle}>
+                <option value="">—</option>
+                <option value="GREEN">GREEN</option>
+                <option value="YELLOW">YELLOW</option>
+                <option value="RED">RED</option>
+              </select>
+            </Field>
+            <Field label="Elasticidad M15">
+              <select value={elasticityM15State} onChange={e => setElasticityM15State(e.target.value)} style={selectStyle}>
+                <option value="">—</option>
+                <option value="GREEN">GREEN</option>
+                <option value="YELLOW">YELLOW</option>
+                <option value="RED">RED</option>
+              </select>
+            </Field>
+            <Field label="Estructura">
+              <select value={structureState} onChange={e => setStructureState(e.target.value)} style={selectStyle}>
+                <option value="">—</option>
+                <option value="STRONG">STRONG</option>
+                <option value="MODERATE">MODERATE</option>
+                <option value="WEAK">WEAK</option>
+              </select>
+            </Field>
+          </div>
         </div>
 
         {/* Separador */}
@@ -338,9 +397,14 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
         </div>
 
         {outcome !== 'open' && (
-          <Field label="Precio de Salida *">
-            <input type="number" step="0.00001" value={exitPrice} onChange={e => setExitPrice(e.target.value)} placeholder="Ej: 1.34500" style={inp} />
-          </Field>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <Field label="Precio de Salida *">
+              <input type="number" step="0.00001" value={exitPrice} onChange={e => setExitPrice(e.target.value)} placeholder="Ej: 1.34500" style={inp} />
+            </Field>
+            <Field label="Duración total (minutos)">
+              <input type="number" step="1" value={totalMinutesOpen} onChange={e => setTotalMinutesOpen(e.target.value)} placeholder="Ej: 45" style={inp} />
+            </Field>
+          </div>
         )}
 
         {/* Métricas: MAE / MFE */}

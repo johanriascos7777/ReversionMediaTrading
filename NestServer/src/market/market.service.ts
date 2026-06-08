@@ -150,9 +150,9 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       return inicio && fin;
     }
 
-    // Lunes a Jueves: 7:00 AM – 10:00 PM
+    // Lunes a Jueves: 7:00 AM – 11:59 PM
     if (dia >= 1 && dia <= 4) {
-      return hora >= 7 && hora < 22;
+      return hora >= 7;
     }
 
     // Viernes: 7:00 AM – 12:00 PM
