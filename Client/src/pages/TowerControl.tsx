@@ -14,9 +14,10 @@ import { TradeTable }       from '../components/tower/TradeTable'
 import { AnalyticsPanel }   from '../components/tower/AnalyticsPanel'
 import { TradingRecommendation } from '../components/tower/TradingRecommendation'
 import { LaunchCockpit } from '../components/tower/LaunchCockpit'
+import { FomowatchPanel } from '../components/tower/FomowatchPanel'
 import type { CreateTradePayload } from '../hooks/useTrades'
 
-type Tab = 'analytics' | 'history'
+type Tab = 'analytics' | 'history' | 'fomowatch'
 
 export function TowerControl() {
   const [tab,          setTab]          = useState<Tab>('analytics')
@@ -99,7 +100,7 @@ export function TowerControl() {
   } : { symbol: activeSymbol }
 
   // ── Trades ────────────────────────────────────────────────────────────────
-  const { trades, analytics, analyticsMode, analyticsMinTrades, loading, createTrade, closeTrade, updateTrade, deleteTrade, fetchAnalytics } = useTrades()
+  const { trades, analytics, analyticsMode, analyticsMinTrades, fomowatch, loading, createTrade, closeTrade, updateTrade, deleteTrade, fetchAnalytics, fetchFomowatch } = useTrades()
 
   // Wrappers void para compatibilidad con los tipos de TradeTable
   const handleCloseTrade  = async (id: number, payload: import('../hooks/useTrades').CloseTradePayload) => { await closeTrade(id, payload) }
@@ -236,7 +237,7 @@ export function TowerControl() {
 
       {/* ── Tabs ───────────────────────────────────────────────────────────── */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 20 }}>
-        {([['analytics', '📊 Analytics'], ['history', '📋 Historial']] as [Tab, string][]).map(([t, label]) => (
+        {([['analytics', '📊 Analytics'], ['history', '📋 Historial'], ['fomowatch', '📡 Fomowatch']] as [Tab, string][]).map(([t, label]) => (
           <button key={t} onClick={() => setTab(t)} style={{
             padding: '8px 20px', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: tab === t ? 700 : 500,
             background: tab === t ? 'rgba(167,139,250,0.15)' : 'rgba(255,255,255,0.03)',
@@ -260,6 +261,10 @@ export function TowerControl() {
 
       {!loading && tab === 'history' && (
         <TradeTable trades={trades} onClose={handleCloseTrade} onUpdate={handleUpdateTrade} onDelete={handleDeleteTrade} />
+      )}
+
+      {!loading && tab === 'fomowatch' && (
+        <FomowatchPanel fomowatch={fomowatch} marketData={market} fetchFomowatch={fetchFomowatch} />
       )}
 
       {/* ── Modal de registro ──────────────────────────────────────────────── */}

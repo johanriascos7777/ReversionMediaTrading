@@ -9,6 +9,10 @@ import type { BackendMessage, Candle, MarketSnapshot, MarketState, FusedStateRes
 import { runBacktest } from './backtestEngine';
 import { compareSignalWithHistory } from './compareSignal';
 import { fuseMarketState } from './fuseMarketState';
+import { EntityManager } from '@mikro-orm/mysql';
+import { PendingSignal } from '../trade/pending-signal.entity';
+import { detectSession } from '../trade/trade.service';
+import { RequestContext } from '@mikro-orm/core';
 
 // --- Imports de Versión Experimental ---
 import { calculateSnapshotExp, resolveMultiTFExp, calculateElasticityForCandlesExp, pushPercentileHistoryExp, clearPercentileHistoryExp } from './marketEngineExp';
@@ -34,6 +38,8 @@ export class SymbolState {
   public previousFinalState: MarketState | null = null;
   public lastTelegramAlertTimeA = 0;
   public lastTelegramAlertTimeB = 0;
+  public lastStructureM5: any | null = null;
+  public lastStructureM15: any | null = null;
 
   // Giro de Elasticidad (Gatillo) M5
   public lastClosedElasticityM5: number | null = null;
@@ -94,13 +100,31 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
   private engineRunning = false;
   private historyLoaded = false;
   private schedulerInterval: NodeJS.Timeout | null = null;
-  private readonly exhaustedKeys = new Set<string>();
+  /**
+   * Llaves agotadas: Map<key, timestampAgotamiento>.
+   * Las llaves agotadas por límite de MINUTO (rate-limit) se auto-liberan
+   * después de 65 segundos. Solo las que alcanzan los 800 créditos totales
+   * se consideran permanentemente agotadas, pero dado que TwelveData
+   * no distingue en la respuesta, tratamos todo como rate-limit temporal
+   * para no consumir innecesariamente todo el pool en un bucle.
+   */
+  private readonly exhaustedKeys = new Map<string, number>(); // key -> timestamp agotamiento
+  private static readonly KEY_RATE_LIMIT_COOLDOWN_MS = 65_000; // 65s > 1 min de ventana TwelveData
   private readonly activeAssignments = new Map<string, string>();
   private readonly keyStats = new Map<string, {
     totalRequests: number;
     requestTimestamps: number[];
     minutelyMax: number;
   }>();
+
+  /**
+   * Bloqueo de carga de historial cuando los créditos diarios se agotan.
+   * Evita reintentos innecesarios cada 30s que consumen los créditos restantes.
+   * Se libera automáticamente después de DAILY_LIMIT_RETRY_MS (60 min).
+   */
+  private dailyCreditsExhausted = false;
+  private dailyCreditsExhaustedAt = 0;
+  private static readonly DAILY_LIMIT_RETRY_MS = 60 * 60 * 1000; // 60 minutos
 
   // Métricas
   public readonly serverMetrics = {
@@ -117,7 +141,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
   private readonly DELAY_HISTORY_SIZE = 50;
   private metricsInterval: NodeJS.Timeout | null = null;
 
-  constructor() {
+  constructor(private readonly em: EntityManager) {
     this.symbolList = this.symbol.split(',').map((s) => s.trim());
     this.apiKeyList = this.apiKey.split(',').map((k) => k.trim());
 
@@ -127,6 +151,20 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       this.serverMetrics.maxDelay = 0;
       this.dropsInCurrentMinute = 0;
     }, 60000);
+
+    // Escuchar eventos de estructura para cachearlos localmente en SymbolState
+    this.events.on('broadcast', (msg: any) => {
+      if (msg && msg.type === 'structure-snapshot') {
+        const state = this.symbolStates.get(msg.symbol);
+        if (state) {
+          if (msg.timeframe === 'M5') {
+            state.lastStructureM5 = msg;
+          } else if (msg.timeframe === 'M15') {
+            state.lastStructureM15 = msg;
+          }
+        }
+      }
+    });
   }
 
   async onModuleInit() {
@@ -348,10 +386,28 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
   }
 
   // ─── Gestión Dinámica de API Keys (Pool de 32 llaves) ────────────────────────
+
+  /**
+   * Verifica si una llave está agotada (considerando el cooldown por minuto).
+   * Las llaves se auto-liberan después de KEY_RATE_LIMIT_COOLDOWN_MS.
+   */
+  private isKeyExhausted(key: string): boolean {
+    const exhaustedAt = this.exhaustedKeys.get(key);
+    if (exhaustedAt === undefined) return false;
+    const elapsed = Date.now() - exhaustedAt;
+    if (elapsed >= MarketService.KEY_RATE_LIMIT_COOLDOWN_MS) {
+      // Auto-liberar la llave: el minuto ya pasó
+      this.exhaustedKeys.delete(key);
+      console.log(`[MarketService] ✅ Llave ...${key.slice(-6)} liberada del cooldown (${(elapsed / 1000).toFixed(0)}s transcurridos). Disponible nuevamente.`);
+      return false;
+    }
+    return true;
+  }
+
   private getAvailableApiKey(symbol: string, currentExhaustedKey?: string): string {
     if (currentExhaustedKey) {
-      this.exhaustedKeys.add(currentExhaustedKey);
-      console.log(`[MarketService] Llave ...${currentExhaustedKey.slice(-6)} marcada como agotada.`);
+      this.exhaustedKeys.set(currentExhaustedKey, Date.now());
+      console.log(`[MarketService] Llave ...${currentExhaustedKey.slice(-6)} marcada como agotada (cooldown ${MarketService.KEY_RATE_LIMIT_COOLDOWN_MS / 1000}s).`);
       this.broadcastKeysStatus();
     }
 
@@ -362,7 +418,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
 
     // 1. Buscar primera llave libre (no agotada, no asignada a otro símbolo)
     for (const key of this.apiKeyList) {
-      if (!this.exhaustedKeys.has(key) && !assignedToOthers.has(key)) {
+      if (!this.isKeyExhausted(key) && !assignedToOthers.has(key)) {
         this.activeAssignments.set(symbol, key);
         console.log(`[MarketService] [${symbol}] Llave activa asignada: ...${key.slice(-6)}`);
         this.broadcastKeysStatus();
@@ -372,7 +428,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
 
     // 2. Fallback: llave no agotada aunque compartida temporalmente
     for (const key of this.apiKeyList) {
-      if (!this.exhaustedKeys.has(key)) {
+      if (!this.isKeyExhausted(key)) {
         this.activeAssignments.set(symbol, key);
         console.warn(`[MarketService] [${symbol}] ⚠️ Llave compartida ...${key.slice(-6)} (escasez temporal)`);
         this.broadcastKeysStatus();
@@ -404,10 +460,10 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       const activeKeyMasked = activeKey ? `...${activeKey.slice(-6)}` : 'Ninguna';
       
       let status: 'active' | 'shared' | 'exhausted' = 'active';
-      if (this.exhaustedKeys.size === this.apiKeyList.length) {
+      if (this.apiKeyList.every(k => this.isKeyExhausted(k))) {
         status = 'exhausted';
       } else if (activeKey) {
-        if (this.exhaustedKeys.has(activeKey)) {
+        if (this.isKeyExhausted(activeKey)) {
           status = 'exhausted';
         } else {
           // Compartida
@@ -446,8 +502,8 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
     return {
       type: 'keys-status',
       totalKeys: this.apiKeyList.length,
-      exhaustedKeysCount: this.exhaustedKeys.size,
-      allExhausted: this.exhaustedKeys.size === this.apiKeyList.length,
+      exhaustedKeysCount: Array.from(this.exhaustedKeys.keys()).filter(k => this.isKeyExhausted(k)).length,
+      allExhausted: this.apiKeyList.every(k => this.isKeyExhausted(k)),
       assignments: assignmentsList
     } satisfies BackendMessage;
   }
@@ -601,7 +657,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
     interval: '5min' | '15min',
     outputSize: number
   ): Promise<Candle[]> {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       // Usar la key asignada dinámicamente al símbolo (pool de rotación)
       const key = this.activeAssignments.get(symbol) ?? this.apiKeyList[0] ?? '';
 
@@ -623,7 +679,20 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
             try {
               const data = JSON.parse(raw);
               if (data.status !== 'ok' || !data.values) {
-                console.error(`[History] [${symbol}] Error ${interval} de TwelveData:`, data.message || data);
+                const msg: string = data.message || '';
+                // Detectar límite diario: error permanente hasta la medianoche
+                const isDailyLimit =
+                  msg.toLowerCase().includes('run out of api credits') ||
+                  msg.toLowerCase().includes('api credits for the day') ||
+                  (msg.toLowerCase().includes('credit') && msg.toLowerCase().includes('limit being 800'));
+
+                if (isDailyLimit) {
+                  console.error(`[History] [${symbol}] 🚫 CRÉDITOS DIARIOS AGOTADOS. No se reintentará hasta dentro de 60 min. Mensaje: ${msg}`);
+                  reject(new Error('DAILY_LIMIT_EXHAUSTED'));
+                  return;
+                }
+
+                console.error(`[History] [${symbol}] Error ${interval} de TwelveData:`, msg || data);
                 resolve([]);
                 return;
               }
@@ -685,6 +754,19 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
   private async loadSymbolHistory(state: SymbolState): Promise<boolean> {
     const sym = state.symbol;
     if (state.isHistoryLoading) return false;
+
+    // Verificar si los créditos diarios están agotados globalmente
+    if (this.dailyCreditsExhausted) {
+      const elapsed = Date.now() - this.dailyCreditsExhaustedAt;
+      if (elapsed < MarketService.DAILY_LIMIT_RETRY_MS) {
+        // Silencioso: no loguear cada vez para no saturar la consola
+        return false;
+      }
+      // Han pasado 60 min, intentar de nuevo
+      console.log(`[MarketService] [${sym}] 🔄 Reintentando historial después de 60 min de bloqueo por límite diario...`);
+      this.dailyCreditsExhausted = false;
+    }
+
     state.isHistoryLoading = true;
     state.lastHistoryAttemptTime = Date.now();
 
@@ -750,8 +832,23 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
 
       state.historyLoaded = true;
       return true;
-    } catch (err) {
-      console.error(`[MarketService] [${sym}] Error inesperado cargando historial:`, err);
+    } catch (err: any) {
+      if (err?.message === 'DAILY_LIMIT_EXHAUSTED') {
+        // Bloquear reintentos de historial por 60 minutos para todos los símbolos
+        this.dailyCreditsExhausted = true;
+        this.dailyCreditsExhaustedAt = Date.now();
+        console.error(
+          `[MarketService] 🚨 LÍMITE DIARIO DE API ALCANZADO. Carga de historial bloqueada por 60 min para todos los símbolos.\n` +
+          `[MarketService] Los datos en tiempo real del WebSocket (EUR/USD) siguen activos. El historial se recargará automáticamente cuando se restablezcan los créditos.`
+        );
+        this.events.emit('broadcast', {
+          type: 'status',
+          status: 'disconnected',
+          message: '\u26a0\ufe0f Límite diario de API alcanzado (800 créditos). Historial bloqueado 60 min. Datos en vivo (WS) siguen activos.',
+        } satisfies BackendMessage);
+      } else {
+        console.error(`[MarketService] [${sym}] Error inesperado cargando historial:`, err);
+      }
       return false;
     } finally {
       state.isHistoryLoading = false;
@@ -766,11 +863,15 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
     // Si el historial de este símbolo no ha cargado con éxito, intentar cargarlo de forma asíncrona
     if (!state.historyLoaded && !state.isHistoryLoading) {
       const now = Date.now();
+      // Respetar el bloqueo por límite diario (verificado dentro de loadSymbolHistory)
+      // y el intervalo de reintento normal de 30s
       if (now - state.lastHistoryAttemptTime > 30000) {
-        console.log(`[MarketService] [${symbol}] Historial ausente/incompleto. Iniciando carga asíncrona en segundo plano...`);
-        this.loadSymbolHistory(state).catch((e) =>
-          console.error(`[MarketService] [${symbol}] Error cargando historial en segundo plano:`, e)
-        );
+        if (!this.dailyCreditsExhausted || (now - this.dailyCreditsExhaustedAt) >= MarketService.DAILY_LIMIT_RETRY_MS) {
+          console.log(`[MarketService] [${symbol}] Historial ausente/incompleto. Iniciando carga asíncrona en segundo plano...`);
+          this.loadSymbolHistory(state).catch((e) =>
+            console.error(`[MarketService] [${symbol}] Error cargando historial en segundo plano:`, e)
+          );
+        }
       }
     }
 
@@ -900,7 +1001,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
     } satisfies BackendMessage);
 
     // Alerta de Telegram autónoma tradicional
-    this.checkAndSendTelegramAlert(state, fusedStateResult, finalState, snapshotM5, snapshotM15);
+    this.checkAndSendTelegramAlert(state, fusedStateResult, finalState, snapshotM5, snapshotM15, comparison);
 
     // Alerta de Telegram autónoma experimental
     if (snapshotM5Exp && snapshotM15Exp) {
@@ -916,6 +1017,9 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
         `· Final: ${finalState} · Fused: ${fusedStateResult.state}`
       );
     }
+
+    // Correr simulación Fomowatch pasiva
+    this.runFomowatchSimulation(symbol, snapshotM5.price);
   }
 
   private async checkAndSendTelegramAlert(
@@ -923,19 +1027,21 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
     fused: FusedStateResult,
     finalState: MarketState,
     m5: MarketSnapshot,
-    m15: MarketSnapshot
+    m15: MarketSnapshot,
+    comparison: any
   ): Promise<void> {
     const now = Date.now();
     const token = process.env.TELEGRAM_BOT_TOKEN;
     const chatId = process.env.TELEGRAM_CHAT_ID;
 
     if (!token || !chatId) {
-      console.warn('[Telegram-Service] No se pudo enviar alerta autónoma: Faltan credenciales en el .env');
       state.previousFusedState = fused.state;
       state.previousFinalState = finalState;
       state.previousTriggerStateM5 = state.triggerStateM5;
       return;
     }
+
+    const direction = m5.price > m5.ema100 ? 'SELL' : 'BUY';
 
     // 🟢 Caso 1: Alerta Tipo A (Señal Confirmada e Históricamente Sólida)
     const isNewFusedGreen = state.previousFusedState !== 'GREEN' && fused.state === 'GREEN';
@@ -943,63 +1049,65 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
 
     if (isNewFusedGreen && canAlertA) {
       state.lastTelegramAlertTimeA = now;
-      const message = `[⚙️ BACKEND - Autónomo] ${state.symbol}: 🟢 ALERTA CONFIRMADA (Tipo A - Alta Probabilidad)\n\n${fused.explanation}\n\nM5: ${m5.elasticity.toFixed(2)} | M15: ${m15.elasticity.toFixed(2)}`;
-      const url = `https://api.telegram.org/bot${token}/sendMessage`;
-
-      try {
-        await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, text: message }),
-        });
-        console.log(`[Telegram-Service] [${state.symbol}] Alerta Tipo A (Confirmada) enviada con éxito`);
-      } catch (err) {
-        console.error(`[Telegram-Service] [${state.symbol}] Error enviando alerta Tipo A:`, err);
-      }
+      await this.createPendingSignalAndSendTelegram(
+        state,
+        'Tipo A',
+        direction,
+        'normal',
+        m5.price,
+        fused.state,
+        m5.state,
+        m15.state,
+        m5.elasticity,
+        m15.elasticity,
+        comparison,
+        fused.explanation
+      );
     }
 
-    // 🟡 Caso 2: Alerta Tipo B (Señal en Tiempo Real, pero sin confirmación del backtest)
+    // 🟡 Caso 2: Alerta Tipo B (Señal en Tiempo Real)
     const isNewFinalGreen = state.previousFinalState !== 'GREEN' && finalState === 'GREEN';
     const canAlertB = now - state.lastTelegramAlertTimeB > 300000; // 5 min cooldown
 
     if (isNewFinalGreen && fused.state !== 'GREEN' && canAlertB) {
       state.lastTelegramAlertTimeB = now;
-      const message = `[⚙️ BACKEND - Autónomo] ${state.symbol}: 🟡 ALERTA TIEMPO REAL (Tipo B - Moderada Probabilidad)\n\nEl precio se encuentra sobre-estirado en el corto plazo (finalState: GREEN), pero no superó el porcentaje mínimo del backtest histórico.\n\nM5: ${m5.elasticity.toFixed(2)} | M15: ${m15.elasticity.toFixed(2)}`;
-      const url = `https://api.telegram.org/bot${token}/sendMessage`;
-
-      try {
-        await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, text: message }),
-        });
-        console.log(`[Telegram-Service] [${state.symbol}] Alerta Tipo B (Tiempo Real) enviada con éxito`);
-      } catch (err) {
-        console.error(`[Telegram-Service] [${state.symbol}] Error enviando alerta Tipo B:`, err);
-      }
+      await this.createPendingSignalAndSendTelegram(
+        state,
+        'Tipo B',
+        direction,
+        'normal',
+        m5.price,
+        fused.state,
+        m5.state,
+        m15.state,
+        m5.elasticity,
+        m15.elasticity,
+        comparison,
+        'Sobre-estirado en M5/M15 (finalState: GREEN) pero sin confluencia de backtest.'
+      );
     }
 
     // 🪃 Caso 3: Alerta Tipo C (Gatillo de Agotamiento / Giro de Elasticidad)
     const isNewGiro = state.triggerStateM5 === 'giro' && state.previousTriggerStateM5 !== 'giro';
-    const canAlertTrigger = now - state.lastTelegramAlertTimeTrigger > 290000; // ~5 min cooldown (por vela de 5m)
+    const canAlertTrigger = now - state.lastTelegramAlertTimeTrigger > 290000; // ~5 min cooldown
 
     if (isNewGiro && canAlertTrigger) {
       state.lastTelegramAlertTimeTrigger = now;
       const decaimiento = (state.prevClosedElasticityM5 ?? 0) - (state.lastClosedElasticityM5 ?? 0);
-      const direction = m5.price > m5.ema100 ? 'VENTA (SELL)' : 'COMPRA (BUY)';
-      const message = `[⚙️ BACKEND - Autónomo] ${state.symbol}: 🪃 ¡GATILLO DE AGOTAMIENTO CONFIRMADO! (Tipo C)\n\nLa resortera ha cedido y el impulso se agota. Entrada sugerida en ${direction}.\n\nElasticidad Vela Anterior: ${state.prevClosedElasticityM5?.toFixed(2)}\nElasticidad Vela Cerrada: ${state.lastClosedElasticityM5?.toFixed(2)} (Decae: -${decaimiento.toFixed(2)})\n\nPrecio actual: ${m5.price.toFixed(5)} | EMA100: ${m5.ema100.toFixed(5)}`;
-      const url = `https://api.telegram.org/bot${token}/sendMessage`;
-
-      try {
-        await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, text: message }),
-        });
-        console.log(`[Telegram-Service] [${state.symbol}] Alerta Tipo C (Gatillo de Agotamiento) enviada con éxito`);
-      } catch (err) {
-        console.error(`[Telegram-Service] [${state.symbol}] Error enviando alerta Tipo C:`, err);
-      }
+      await this.createPendingSignalAndSendTelegram(
+        state,
+        'Tipo C',
+        direction,
+        'normal',
+        m5.price,
+        fused.state,
+        m5.state,
+        m15.state,
+        m5.elasticity,
+        m15.elasticity,
+        comparison,
+        `La elasticidad ha comenzado a ceder en M5 (decae -${decaimiento.toFixed(2)}).`
+      );
     }
 
     state.previousFusedState = fused.state;
@@ -1027,69 +1135,72 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    const directionLabel = m5.direction === 'BUY' ? 'COMPRA (BUY) 🟢' : 'VENTA (SELL) 🔴';
+    const direction = m5.direction;
 
-    // 1️⃣ Alerta Experimental Tipo A (Señal Confirmada e Históricamente Sólida)
+    // 1️⃣ Alerta Experimental Tipo A
     const isNewFusedGreen = state.previousFusedStateExp !== 'GREEN' && fused.state === 'GREEN';
     const canAlertA = now - state.lastTelegramAlertTimeAExp > 300000;
 
     if (isNewFusedGreen && canAlertA) {
       state.lastTelegramAlertTimeAExp = now;
-      const message = `[🧪 EXPERIMENTAL] ${state.symbol}: 🟢 ALERTA CONFIRMADA (Tipo A)\n\nSugerido: ${directionLabel}\n\n${fused.explanation}\n\nM5: ${m5.elasticity.toFixed(2)} | M15: ${m15.elasticity.toFixed(2)}`;
-      const url = `https://api.telegram.org/bot${token}/sendMessage`;
-
-      try {
-        await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, text: message }),
-        });
-        console.log(`[Telegram-Exp] [${state.symbol}] Alerta Tipo A enviada`);
-      } catch (err) {
-        console.error(`[Telegram-Exp] [${state.symbol}] Error Alerta Tipo A:`, err);
-      }
+      await this.createPendingSignalAndSendTelegram(
+        state,
+        'Tipo A',
+        direction,
+        'experimental',
+        m5.price,
+        fused.state,
+        m5.state,
+        m15.state,
+        m5.elasticity,
+        m15.elasticity,
+        comparison,
+        fused.explanation
+      );
     }
 
-    // 2️⃣ Alerta Experimental Tipo B (Señal en Tiempo Real)
+    // 2️⃣ Alerta Experimental Tipo B
     const isNewFinalGreen = state.previousFinalStateExp !== 'GREEN' && finalState === 'GREEN';
     const canAlertB = now - state.lastTelegramAlertTimeBExp > 300000;
 
     if (isNewFinalGreen && fused.state !== 'GREEN' && canAlertB) {
       state.lastTelegramAlertTimeBExp = now;
-      const message = `[🧪 EXPERIMENTAL] ${state.symbol}: 🟡 ALERTA TIEMPO REAL (Tipo B)\n\nSugerido: ${directionLabel}\n\nSobre-estirado en M5/M15 pero sin ventaja estadística en backtest.\n\nM5: ${m5.elasticity.toFixed(2)} | M15: ${m15.elasticity.toFixed(2)}`;
-      const url = `https://api.telegram.org/bot${token}/sendMessage`;
-
-      try {
-        await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, text: message }),
-        });
-        console.log(`[Telegram-Exp] [${state.symbol}] Alerta Tipo B enviada`);
-      } catch (err) {
-        console.error(`[Telegram-Exp] [${state.symbol}] Error Alerta Tipo B:`, err);
-      }
+      await this.createPendingSignalAndSendTelegram(
+        state,
+        'Tipo B',
+        direction,
+        'experimental',
+        m5.price,
+        fused.state,
+        m5.state,
+        m15.state,
+        m5.elasticity,
+        m15.elasticity,
+        comparison,
+        'Sobre-estirado en M5/M15 pero sin ventaja estadística en backtest.'
+      );
     }
 
-    // 3️⃣ Alerta Experimental Tipo C (Gatillo de Agotamiento / Giro Confirmado)
+    // 3️⃣ Alerta Experimental Tipo C
     const isNewGiro = state.triggerStateM5Exp === 'giro' && state.previousTriggerStateM5Exp !== 'giro';
     const canAlertTrigger = now - state.lastTelegramAlertTimeTriggerExp > 290000;
 
     if (isNewGiro && canAlertTrigger) {
       state.lastTelegramAlertTimeTriggerExp = now;
-      const message = `[🧪 EXPERIMENTAL] ${state.symbol}: 🪃 ¡GATILLO DE AGOTAMIENTO CONFIRMADO! (Tipo C)\n\nSugerido: ${directionLabel}\n\nLa elasticidad ha comenzado a ceder en tiempo real desde el pico detectado.\n\nPrecio actual: ${m5.price.toFixed(5)} | EMA100: ${m5.ema100.toFixed(5)}`;
-      const url = `https://api.telegram.org/bot${token}/sendMessage`;
-
-      try {
-        await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, text: message }),
-        });
-        console.log(`[Telegram-Exp] [${state.symbol}] Alerta Tipo C enviada`);
-      } catch (err) {
-        console.error(`[Telegram-Exp] [${state.symbol}] Error Alerta Tipo C:`, err);
-      }
+      await this.createPendingSignalAndSendTelegram(
+        state,
+        'Tipo C',
+        direction,
+        'experimental',
+        m5.price,
+        fused.state,
+        m5.state,
+        m15.state,
+        m5.elasticity,
+        m15.elasticity,
+        comparison,
+        'La elasticidad ha comenzado a ceder en tiempo real en M5 (Gatillo).'
+      );
     }
 
     // 4️⃣ Alerta del Semáforo de Peatón (Transición a WALK / Todas las confluencias correctas)
@@ -1098,28 +1209,253 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
 
     if (isNewWalk && canAlertPedestrian) {
       state.lastTelegramAlertTimePedestrian = now;
-      const winRatePercent = comparison ? comparison.winRate.toFixed(0) : '—';
-      const casesCount = comparison ? comparison.similarSignals : '0';
-      
-      const message = `🚦 [SEMÁFORO DE PEATÓN]\n\n¡CAMINAR (WALK) en ${state.symbol}! 🚶‍♂️💨\n\nTodas las confluencias del checklist están ALINEADAS:\n\n1. ✅ Anomalía M5+M15\n2. ✅ Ventaja del Backtest (Win Rate: ${winRatePercent}% en ${casesCount} señales similares)\n3. ✅ Giro de Elasticidad Confirmado en M5 (Pico superado)\n\n👉 Operación Sugerida: ${directionLabel}\nPrecio: ${m5.price.toFixed(5)}`;
-      const url = `https://api.telegram.org/bot${token}/sendMessage`;
-
-      try {
-        await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, text: message }),
-        });
-        console.log(`[Telegram-Exp] [${state.symbol}] Alerta Semáforo de Peatón enviada con éxito`);
-      } catch (err) {
-        console.error(`[Telegram-Exp] [${state.symbol}] Error enviando alerta Semáforo de Peatón:`, err);
-      }
+      await this.createPendingSignalAndSendTelegram(
+        state,
+        'Semáforo Peatón',
+        direction,
+        'experimental',
+        m5.price,
+        fused.state,
+        m5.state,
+        m15.state,
+        m5.elasticity,
+        m15.elasticity,
+        comparison,
+        '¡CAMINAR (WALK)! Todas las confluencias experimentales (Anomalía + Backtest + Giro) están alineadas.'
+      );
     }
 
     state.previousFusedStateExp = fused.state;
     state.previousFinalStateExp = finalState;
     state.previousTriggerStateM5Exp = state.triggerStateM5Exp;
     state.previousPedestrianLight = state.pedestrianLight;
+  }
+
+  private async createPendingSignalAndSendTelegram(
+    symbolState: SymbolState,
+    alertName: string,
+    direction: 'BUY' | 'SELL',
+    tradeMode: 'normal' | 'experimental',
+    entryPrice: number,
+    fusedState: MarketState,
+    elasticityM5State: MarketState,
+    elasticityM15State: MarketState,
+    elasticityM5Value: number,
+    elasticityM15Value: number,
+    comparison: any,
+    explanation: string
+  ): Promise<void> {
+    await RequestContext.create(this.em, async () => {
+      const token = process.env.TELEGRAM_BOT_TOKEN;
+      const chatId = process.env.TELEGRAM_CHAT_ID;
+      if (!token || !chatId) return;
+
+      try {
+        const struct = symbolState.lastStructureM5;
+        let tpPrice = 0;
+        let slPrice = 0;
+        const decimals = symbolState.symbol.includes('JPY') ? 3 : 5;
+
+        if (struct && struct.nearestSR) {
+          const entry = entryPrice;
+          const srPrice = struct.nearestSR.price;
+          const srDistance = struct.nearestSR.distance;
+          const srType = struct.nearestSR.type;
+
+          if (srDistance > 0) {
+            const atr = Math.abs(entry - srPrice) / srDistance;
+            if (direction === 'BUY') {
+              if (srType === 'resistance') {
+                tpPrice = entry + (srPrice - entry) * 0.85;
+                slPrice = entry - 1.5 * atr;
+              } else {
+                slPrice = srPrice - 0.2 * atr;
+                tpPrice = entry + 1.5 * atr;
+              }
+            } else {
+              if (srType === 'support') {
+                tpPrice = entry - (entry - srPrice) * 0.85;
+                slPrice = entry + 1.5 * atr;
+              } else {
+                slPrice = srPrice + 0.2 * atr;
+                tpPrice = entry - 1.5 * atr;
+              }
+            }
+          }
+        }
+
+        if (tpPrice === 0 || slPrice === 0) {
+          const pips = symbolState.symbol.includes('JPY') ? 0.15 : 0.0015;
+          if (direction === 'BUY') {
+            tpPrice = entryPrice + pips;
+            slPrice = entryPrice - pips;
+          } else {
+            tpPrice = entryPrice - pips;
+            slPrice = entryPrice + pips;
+          }
+        }
+
+        tpPrice = Math.round(tpPrice * Math.pow(10, decimals)) / Math.pow(10, decimals);
+        slPrice = Math.round(slPrice * Math.pow(10, decimals)) / Math.pow(10, decimals);
+
+        const signal = new PendingSignal();
+        signal.symbol = symbolState.symbol;
+        signal.direction = direction;
+        signal.tradeMode = tradeMode;
+        signal.status = 'pending';
+        signal.entryPrice = entryPrice;
+        signal.tpPrice = tpPrice;
+        signal.slPrice = slPrice;
+        signal.session = detectSession(new Date());
+
+        signal.elasticityM5State = elasticityM5State;
+        signal.elasticityM15State = elasticityM15State;
+        signal.fusedState = fusedState;
+        signal.elasticityM5Value = elasticityM5Value;
+        signal.elasticityM15Value = elasticityM15Value;
+
+        if (struct) {
+          signal.structureState = struct.structureState;
+          signal.structureSignal = struct.signal;
+          signal.rsiAtEntry = struct.rsi;
+          signal.divergenceAtEntry = struct.divergence;
+          signal.ema200SlopeAtEntry = struct.ema200Slope;
+          if (struct.nearestSR) {
+            signal.nearestSRPrice = struct.nearestSR.price;
+            signal.nearestSRType = struct.nearestSR.type;
+            signal.nearestSRStrength = struct.nearestSR.strength;
+            signal.nearestSRDistance = struct.nearestSR.distance;
+          }
+        }
+
+        signal.contextualWinRate = comparison ? comparison.winRate : null;
+        signal.contextualCases = comparison ? comparison.similarSignals : null;
+        signal.hasTypeC = alertName === 'Tipo C';
+        signal.hasPedestrianLight = alertName === 'Semáforo Peatón' || (tradeMode === 'experimental' && symbolState.pedestrianLight === 'WALK');
+        signal.openedAt = new Date();
+
+        this.em.persist(signal);
+        await this.em.flush();
+
+        const directionEmoji = direction === 'BUY' ? '🟢 COMPRA (BUY) 📈' : '🔴 VENTA (SELL) 📉';
+        const modeEmoji = tradeMode === 'experimental' ? '🧪 [EXPERIMENTAL]' : '💼 [NORMAL]';
+        
+        let messageText = `${modeEmoji} 🚨 **ALERTA DE TRADING: ${alertName}**\n\n`;
+        messageText += `Símbolo: **${symbolState.symbol}**\n`;
+        messageText += `Sugerido: **${directionEmoji}**\n`;
+        messageText += `Precio: \`${entryPrice.toFixed(5)}\`\n`;
+        messageText += `TP Sugerido: \`${tpPrice.toFixed(5)}\` | SL Sugerido: \`${slPrice.toFixed(5)}\`\n\n`;
+        
+        if (explanation) {
+          messageText += `Detalle: _${explanation}_\n\n`;
+        }
+        if (comparison) {
+          messageText += `Estadística Contextual:\n`;
+          messageText += `· Win Rate: **${comparison.winRate.toFixed(0)}%**\n`;
+          messageText += `· Casos Similares: **${comparison.similarSignals}**\n`;
+        }
+
+        const replyMarkup = {
+          inline_keyboard: [
+            [
+              { text: '✅ Registrar Trade', callback_data: `approve:${signal.id}` },
+              { text: '❌ Descartar Alerta', callback_data: `discard:${signal.id}` }
+            ]
+          ]
+        };
+
+        const url = `https://api.telegram.org/bot${token}/sendMessage`;
+        await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: messageText,
+            parse_mode: 'Markdown',
+            reply_markup: replyMarkup
+          }),
+        });
+
+        console.log(`[Pending-Signal] Alerta ${alertName} (${tradeMode}) #${signal.id} guardada y enviada a Telegram.`);
+      } catch (err) {
+        console.error(`[Pending-Signal] Error procesando señal pendiente ${alertName}:`, err);
+      }
+    });
+  }
+
+  private async runFomowatchSimulation(symbol: string, currentPrice: number): Promise<void> {
+    await RequestContext.create(this.em, async () => {
+      try {
+        const activeSignals = await this.em.getRepository(PendingSignal).find({
+          symbol,
+          status: 'discarded_active'
+        });
+
+        if (activeSignals.length === 0) return;
+
+        let hasClosedAny = false;
+
+        for (const signal of activeSignals) {
+          const totalMinutes = (Date.now() - signal.openedAt.getTime()) / 60000;
+          let shouldClose = false;
+          let exitPrice = currentPrice;
+          let statusResult = signal.status;
+
+          if (signal.direction === 'BUY') {
+            if (currentPrice >= signal.tpPrice) {
+              shouldClose = true;
+              exitPrice = signal.tpPrice;
+              statusResult = 'discarded_win';
+            } else if (currentPrice <= signal.slPrice) {
+              shouldClose = true;
+              exitPrice = signal.slPrice;
+              statusResult = 'discarded_loss';
+            } else if (totalMinutes >= 240) { // 4 horas timeout
+              shouldClose = true;
+              exitPrice = currentPrice;
+              statusResult = 'discarded_timeout';
+            }
+          } else { // SELL
+            if (currentPrice <= signal.tpPrice) {
+              shouldClose = true;
+              exitPrice = signal.tpPrice;
+              statusResult = 'discarded_win';
+            } else if (currentPrice >= signal.slPrice) {
+              shouldClose = true;
+              exitPrice = signal.slPrice;
+              statusResult = 'discarded_loss';
+            } else if (totalMinutes >= 240) { // 4 horas timeout
+              shouldClose = true;
+              exitPrice = currentPrice;
+              statusResult = 'discarded_timeout';
+            }
+          }
+
+          if (shouldClose) {
+            const pip = signal.direction === 'BUY'
+              ? exitPrice - signal.entryPrice
+              : signal.entryPrice - exitPrice;
+            
+            const pnl = (pip / signal.entryPrice) * 200 * 2.0; // apalancamiento x200, inversión $2.00
+            
+            signal.status = statusResult;
+            signal.closedAt = new Date();
+            signal.totalMinutesOpen = Math.max(1, Math.round(totalMinutes));
+            signal.pnl = Math.round(pnl * 10000) / 10000;
+            
+            this.em.persist(signal);
+            hasClosedAny = true;
+            console.log(`[Fomowatch] Alerta descartada #${signal.id} (${signal.symbol}) cerrada virtualmente como ${statusResult} (P&L: $${signal.pnl}, Minutos: ${signal.totalMinutesOpen}).`);
+          }
+        }
+
+        if (hasClosedAny) {
+          await this.em.flush();
+        }
+      } catch (err) {
+        console.error('[Fomowatch] Error en bucle de simulación pasiva:', err);
+      }
+    });
   }
 
   private recordDroppedTick(reason: string) {

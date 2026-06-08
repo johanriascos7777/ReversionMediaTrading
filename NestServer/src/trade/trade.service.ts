@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { InjectRepository } from '@mikro-orm/nestjs';
 import { EntityRepository, EntityManager } from '@mikro-orm/core';
 import { Trade } from './trade.entity';
+import { PendingSignal } from './pending-signal.entity';
 import { CreateTradeDto } from './dto/create-trade.dto';
 import { CloseTradeDto } from './dto/close-trade.dto';
 import { UpdateTradeDto } from './dto/update-trade.dto';
@@ -10,7 +11,7 @@ import { UpdateTradeDto } from './dto/update-trade.dto';
 // ─── Utilidades ───────────────────────────────────────────────────────────────
 
 /** Detecta la sesión de trading según la hora UTC */
-function detectSession(date: Date): Trade['session'] {
+export function detectSession(date: Date): Trade['session'] {
   const hour = date.getUTCHours();
   if (hour >= 23 || hour < 8) return 'asian';
   if (hour >= 8 && hour < 12) return 'european';
@@ -19,7 +20,7 @@ function detectSession(date: Date): Trade['session'] {
 }
 
 /** Calcula el precio de liquidación con y sin spread */
-function calcLiquidation(
+export function calcLiquidation(
   entry: number,
   leverage: number,
   spread: number,
@@ -455,6 +456,65 @@ export class TradeService {
     if (!trade) throw new NotFoundException(`Operación #${id} no encontrada`);
     this.em.remove(trade);
     await this.em.flush();
+  }
+
+  // ─── FOMOWATCH ───────────────────────────────────────────────────────────
+
+  async getFomowatch() {
+    const repo = this.em.getRepository(PendingSignal);
+    
+    // Alertas pendientes (esperando aprobación)
+    const pending = await repo.find({ status: 'pending' }, { orderBy: { openedAt: 'DESC' } });
+
+    // Simulaciones activas (descartadas pero en ejecución)
+    const active = await repo.find({ status: 'discarded_active' }, { orderBy: { openedAt: 'DESC' } });
+    
+    // Historial de simulaciones cerradas
+    const closed = await repo.find(
+      { status: { $in: ['discarded_win', 'discarded_loss', 'discarded_timeout'] } },
+      { orderBy: { closedAt: 'DESC' }, limit: 100 }
+    );
+
+    const wins = closed.filter(s => s.status === 'discarded_win').length;
+    const losses = closed.filter(s => s.status === 'discarded_loss').length;
+    const timeouts = closed.filter(s => s.status === 'discarded_timeout').length;
+    
+    const totalClosed = closed.length;
+    const winRate = totalClosed > 0 ? (wins / totalClosed) * 100 : 0;
+    
+    // Capital Salvado: suma del valor absoluto del P&L de las pérdidas virtuales evitadas
+    const capitalSaved = closed
+      .filter(s => s.status === 'discarded_loss')
+      .reduce((sum, s) => sum + Math.abs(Number(s.pnl || 0)), 0);
+
+    // Rejection Accuracy: % de descartes correctos (las que resultaron en pérdida o timeout)
+    const rejectionAccuracy = totalClosed > 0 
+      ? ((losses + timeouts) / totalClosed) * 100 
+      : 0;
+
+    const avgDuration = closed.length > 0
+      ? closed.reduce((sum, s) => sum + (s.totalMinutesOpen || 0), 0) / closed.length
+      : 0;
+
+    const totalPnl = closed.reduce((sum, s) => sum + Number(s.pnl || 0), 0);
+    const expectancy = totalClosed > 0 ? totalPnl / totalClosed : 0;
+
+    return {
+      pending,
+      active,
+      history: closed,
+      summary: {
+        totalDiscarded: active.length + totalClosed,
+        win: wins,
+        loss: losses,
+        timeout: timeouts,
+        winRate: Math.round(winRate * 10) / 10,
+        rejectionAccuracy: Math.round(rejectionAccuracy * 10) / 10,
+        capitalSaved: Math.round(capitalSaved * 100) / 100,
+        avgDuration: Math.round(avgDuration),
+        expectancy: Math.round(expectancy * 100) / 100,
+      }
+    };
   }
 }
 

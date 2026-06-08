@@ -85,86 +85,8 @@ export function ExperimentalDashboard() {
   const backtest = useBacktest(historical)
   const structureData = useStructureData()
 
-  // Refs para alertas Telegram del canal experimental
-  const prevExpFusedRefs = useRef<{ [symbol: string]: string | null }>({})
-  const prevExpFinalRefs = useRef<{ [symbol: string]: string | null }>({})
-  const lastExpAlertARefs = useRef<{ [symbol: string]: number }>({})
-  const lastExpAlertBRefs = useRef<{ [symbol: string]: number }>({})
-
   // Refs para toasts de símbolos no activos
   const lastExpStateChecked = useRef<{ [symbol: string]: { final: string; fused: string } }>({})
-
-  // 📡 Alertas Telegram del motor experimental
-  useEffect(() => {
-    if (!currentRaw || !exp) return
-
-    const symbol = currentRaw.symbol
-    const now = Date.now()
-
-    const prevFused = prevExpFusedRefs.current[symbol] || null
-    const prevFinal = prevExpFinalRefs.current[symbol] || null
-    const lastAlertA = lastExpAlertARefs.current[symbol] || 0
-    const lastAlertB = lastExpAlertBRefs.current[symbol] || 0
-
-    // Semáforo de Peatón WALK → Tipo A Experimental
-    const isWalk = exp.pedestrianLight === 'WALK'
-    const prevWalk = prevFused === 'WALK'
-    const canAlertA = now - lastAlertA > 300000
-
-    if (isWalk && !prevWalk && canAlertA) {
-      lastExpAlertARefs.current[symbol] = now
-      fetch(`${API_URL}/notify`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message:
-            `[🧪 EXPERIMENTAL - ${symbol}] 🚦 SEMÁFORO DE PEATÓN: CAMINAR (WALK)` +
-            `\n\nTodas las confluencias experimentales están alineadas.` +
-            `\nDirección: ${exp.m5.direction}` +
-            `\nM5 (EMA): ${exp.m5.elasticity.toFixed(2)} | M15 (EMA): ${exp.m15.elasticity.toFixed(2)}` +
-            `\nFused Experimental: ${exp.fusedState}` +
-            `\nGatillo: ${exp.triggerState}`
-        })
-      }).catch(err => console.error('[Telegram-Exp] Error Semáforo WALK:', err))
-    }
-
-    // Fused GREEN → Tipo B Experimental (confirmación histórica)
-    const isNewFusedGreen = prevFused !== 'GREEN' && exp.fusedState === 'GREEN'
-    const canAlertB = now - lastAlertB > 300000
-
-    if (isNewFusedGreen && !isWalk && canAlertB) {
-      lastExpAlertBRefs.current[symbol] = now
-      fetch(`${API_URL}/notify`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message:
-            `[🧪 EXPERIMENTAL - ${symbol}] 🟢 ALERTA CONFIRMADA EXPERIMENTAL (Tipo A)` +
-            `\n\n${exp.fusedExplanation}` +
-            `\n\nM5 (EMA): ${exp.m5.elasticity.toFixed(2)} | M15 (EMA): ${exp.m15.elasticity.toFixed(2)}`
-        })
-      }).catch(err => console.error('[Telegram-Exp] Error Tipo A Experimental:', err))
-    }
-
-    // Final GREEN sin fused GREEN → Tipo B
-    const isNewFinalGreen = prevFinal !== 'GREEN' && exp.finalState === 'GREEN'
-    if (isNewFinalGreen && exp.fusedState !== 'GREEN' && canAlertB) {
-      lastExpAlertBRefs.current[symbol] = now
-      fetch(`${API_URL}/notify`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message:
-            `[🧪 EXPERIMENTAL - ${symbol}] 🟡 ALERTA TIEMPO REAL EXPERIMENTAL (Tipo B)` +
-            `\n\nFinalState experimental en GREEN sin confirmación del backtest.` +
-            `\nM5 (EMA): ${exp.m5.elasticity.toFixed(2)} | M15 (EMA): ${exp.m15.elasticity.toFixed(2)}`
-        })
-      }).catch(err => console.error('[Telegram-Exp] Error Tipo B Experimental:', err))
-    }
-
-    prevExpFusedRefs.current[symbol] = exp.pedestrianLight === 'WALK' ? 'WALK' : exp.fusedState
-    prevExpFinalRefs.current[symbol] = exp.finalState
-  }, [currentRaw, exp])
 
   // 🔔 Toasts para pares no activos
   useEffect(() => {

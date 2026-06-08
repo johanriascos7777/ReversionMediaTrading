@@ -34,6 +34,14 @@ export class TwelveDataClient extends EventEmitter {
    */
   private wsRejected: boolean = false
 
+  /**
+   * Protección anti-bucle: timestamp del último agotamiento de llave.
+   * Tras una rotación, se espera mínimo ROTATION_COOLDOWN_MS antes de
+   * volver a llamar a poll() para evitar el bucle infinito de rotaciones.
+   */
+  private lastKeyExhaustedAt: number = 0
+  private static readonly ROTATION_COOLDOWN_MS = 62_000 // ~1 minuto (ventana de rate-limit de TwelveData)
+
   constructor(apiKey: string, symbol: string | string[]) {
     super()
     this.apiKey = apiKey
@@ -42,15 +50,28 @@ export class TwelveDataClient extends EventEmitter {
 
   /**
    * Actualiza la API Key en caliente (rotación dinámica del pool).
-   * Si el poller estaba detenido por agotamiento de créditos, lo reanuda automáticamente.
+   * Si el poller estaba detenido por agotamiento de créditos, lo reanuda
+   * con un cooldown de 62s para respetar la ventana de límite por minuto
+   * de TwelveData y evitar el bucle infinito de rotaciones.
    */
   updateApiKey(newKey: string): void {
     this.apiKey = newKey
     console.log(`[TwelveData] [${this.symbol}] API Key rotada a: ...${newKey.slice(-6)}`)
-    // Si el poller estaba detenido por agotamiento, reanudarlo con la nueva llave
+    // Si el poller estaba detenido por agotamiento, reanudarlo con cooldown
     if (this.wsRejected && !this.stopped && !this.pollInterval) {
-      console.log(`[TwelveData] [${this.symbol}] Reanudando REST Poller con la nueva API Key...`)
-      this.startRestPoller()
+      const elapsed = Date.now() - this.lastKeyExhaustedAt
+      const remaining = Math.max(0, TwelveDataClient.ROTATION_COOLDOWN_MS - elapsed)
+      console.log(
+        `[TwelveData] [${this.symbol}] Reanudando REST Poller en ${(remaining / 1000).toFixed(1)}s ` +
+        `(cooldown anti-bucle tras rotación de llave)...`
+      )
+      // Esperar el tiempo restante del cooldown antes de reiniciar para
+      // asegurar que la ventana de 1 minuto de TwelveData haya expirado.
+      setTimeout(() => {
+        if (!this.stopped && !this.pollInterval && this.wsRejected) {
+          this.startRestPoller()
+        }
+      }, remaining)
     }
   }
 
@@ -110,11 +131,11 @@ export class TwelveDataClient extends EventEmitter {
                 message.toLowerCase().includes('exhausted')
 
               if (isExhausted) {
-                console.error(`[TwelveData] [${this.symbol}] ⚠️ Créditos agotados en llave ...${this.apiKey.slice(-6)}. Deteniendo poller y rotando key...`)
-                // ─── Fix timing: detener ANTES de emitir para que updateApiKey
-                // reciba pollInterval=null y pueda reiniciar el poller limpiamente.
-                // Si se emitía primero, un ciclo pendiente del setInterval apagaba
-                // el poller que updateApiKey acababa de arrancar con la nueva llave.
+                console.error(`[TwelveData] [${this.symbol}] ⚠️ Límite de tasa alcanzado en llave ...${this.apiKey.slice(-6)}. Deteniendo poller y rotando key (cooldown 62s)...`)
+                // Registrar el momento del agotamiento para calcular el cooldown
+                this.lastKeyExhaustedAt = Date.now()
+                // Detener ANTES de emitir para que updateApiKey reciba
+                // pollInterval=null y pueda reiniciar limpiamente tras el cooldown.
                 this.stopRestPoller()
                 this.emit('key-exhausted', this.apiKey)
               } else {
@@ -132,8 +153,15 @@ export class TwelveDataClient extends EventEmitter {
       })
     }
 
-    // Ejecutar de inmediato y luego a intervalos de 10s
-    poll()
+    // ─── Primera ejecución diferida ────────────────────────────────────────
+    // Si acabamos de rotar una llave (lastKeyExhaustedAt reciente), el cooldown
+    // ya fue aplicado en updateApiKey(). Si es el primer arranque normal,
+    // esperamos 2s antes del primer poll para evitar ráfagas al iniciar.
+    // En ambos casos, el setInterval controla el ritmo de 10s.
+    const initialDelay = this.lastKeyExhaustedAt > 0 ? 0 : 2_000
+    setTimeout(() => {
+      if (!this.stopped && this.pollInterval) poll()
+    }, initialDelay)
     this.pollInterval = setInterval(poll, 10_000)
   }
 

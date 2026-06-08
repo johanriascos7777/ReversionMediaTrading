@@ -66,70 +66,8 @@ function App() {
   // 🏛️ 4. Motor de Confluencia y Estructura — paralelo al motor de elasticidad
   const structureData = useStructureData()
 
-  // 📡 Refs para Notificación de Telegram — Frontend (espejo del backend, aislado por símbolo)
-  const prevFusedStateRefs = useRef<{ [symbol: string]: string | null }>({})   // para Tipo A
-  const prevFinalStateRefs = useRef<{ [symbol: string]: string | null }>({})   // para Tipo B
-  const lastAlertTimeARefs = useRef<{ [symbol: string]: number }>({})         // cooldown Tipo A
-  const lastAlertTimeBRefs = useRef<{ [symbol: string]: number }>({})         // cooldown Tipo B
-
   // Estado previo para Toasts (notificaciones en pantalla)
   const lastStateChecked = useRef<{ [symbol: string]: { final: string; fused: string } }>({})
-
-  // 📡 Efecto de Telegram — lógica idéntica a checkAndSendTelegramAlert() del backend
-  useEffect(() => {
-    if (!currentMarket) return
-
-    const symbol = currentMarket.symbol
-    const comp = backtest
-      ? compareSignalWithHistory({ state: currentMarket.m5.state, elasticity: currentMarket.m5.elasticity }, backtest)
-      : null
-    const fusedStateRaw = fuseMarketState(currentMarket.finalState, comp)
-    const now = Date.now()
-
-    const prevFused = prevFusedStateRefs.current[symbol] || null
-    const prevFinal = prevFinalStateRefs.current[symbol] || null
-    const lastAlertA = lastAlertTimeARefs.current[symbol] || 0
-    const lastAlertB = lastAlertTimeBRefs.current[symbol] || 0
-
-    // ─── Tipo A: Señal Confirmada (fused === GREEN) ───────────────────────────
-    const isNewFusedGreen = prevFused !== 'GREEN' && fusedStateRaw.state === 'GREEN'
-    const canAlertA = now - lastAlertA > 300000 // 5 min
-
-    if (isNewFusedGreen && canAlertA) {
-      lastAlertTimeARefs.current[symbol] = now
-      fetch(`${API_URL}/notify`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message:
-            `[📱 FRONTEND - ${symbol} - Calculado en Cliente] 🟢 ALERTA CONFIRMADA (Tipo A - Alta Probabilidad)` +
-            `\n\n${fusedStateRaw.explanation}` +
-            `\n\nM5: ${currentMarket.m5.elasticity.toFixed(2)} | M15: ${currentMarket.m15.elasticity.toFixed(2)}`
-        })
-      }).catch(err => console.error(`[Telegram-Frontend] Error Tipo A para ${symbol}:`, err))
-    }
-
-    // ─── Tipo B: Señal Tiempo Real sin confirmación histórica ─────────────────
-    const isNewFinalGreen = prevFinal !== 'GREEN' && currentMarket.finalState === 'GREEN'
-    const canAlertB = now - lastAlertB > 300000 // 5 min
-
-    if (isNewFinalGreen && fusedStateRaw.state !== 'GREEN' && canAlertB) {
-      lastAlertTimeBRefs.current[symbol] = now
-      fetch(`${API_URL}/notify`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message:
-            `[📱 FRONTEND - ${symbol} - Calculado en Cliente] 🟡 ALERTA TIEMPO REAL (Tipo B - Moderada Probabilidad)` +
-            `\n\nEl precio se encuentra sobre-estirado en el corto plazo (finalState: GREEN), pero no superó el porcentaje mínimo del backtest histórico.` +
-            `\n\nM5: ${currentMarket.m5.elasticity.toFixed(2)} | M15: ${currentMarket.m15.elasticity.toFixed(2)}`
-        })
-      }).catch(err => console.error(`[Telegram-Frontend] Error Tipo B para ${symbol}:`, err))
-    }
-
-    prevFusedStateRefs.current[symbol] = fusedStateRaw.state
-    prevFinalStateRefs.current[symbol] = currentMarket.finalState
-  }, [currentMarket, backtest])
 
   // 🔔 Efecto de Global Toasts — notificaciones flotantes elegantes para pares inactivos en pantalla
   useEffect(() => {

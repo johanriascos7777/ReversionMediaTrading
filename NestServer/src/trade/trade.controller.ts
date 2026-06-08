@@ -53,6 +53,12 @@ export class TradeController {
     return this.tradeService.findAll({ symbol, outcome, session, fromDate, toDate });
   }
 
+  // ─── GET /trade/fomowatch ──────────────────────────────────────────────────
+  @Get('fomowatch')
+  getFomowatch() {
+    return this.tradeService.getFomowatch();
+  }
+
   // ─── GET /trade/analytics ─────────────────────────────────────────────────
   // Panel de analytics: win rate por sesión/señal/par, MAE/MFE, alertas
   @Get('analytics')
