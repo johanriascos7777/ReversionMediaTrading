@@ -13,8 +13,14 @@ const MIN_INTERVAL_MS = 5_000;
 export class StructureService implements OnModuleInit {
   // Último timestamp de cálculo por símbolo+timeframe
   private lastCalcTime = new Map<string, number>();
+  // Último snapshot de estructura por símbolo+timeframe
+  private lastSnapshots = new Map<string, StructureSnapshot>();
 
   constructor(private readonly marketService: MarketService) {}
+
+  getLastSnapshot(symbol: string, timeframe: 'M5' | 'M15'): StructureSnapshot | null {
+    return this.lastSnapshots.get(`${symbol}:${timeframe}`) ?? null;
+  }
 
   onModuleInit() {
     // Escuchar los broadcasts del motor de elasticidad.
@@ -61,6 +67,8 @@ export class StructureService implements OnModuleInit {
     );
 
     if (!snap) return;
+
+    this.lastSnapshots.set(key, snap);
 
     // Emitir en el mismo canal de broadcast del gateway
     // El gateway retransmite TODO lo que llega a 'broadcast' a los clientes WS

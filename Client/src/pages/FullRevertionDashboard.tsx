@@ -177,6 +177,65 @@ export function FullRevertionDashboard() {
                 <p style={{ margin: 0, fontSize: 13, color: '#9ca3af', lineHeight: 1.5 }}>
                   El motor fusionado monitoriza simultáneamente los marcos de M5 y M15. Si ambos detectan un exceso de elasticidad (GREEN) pero la EMA100 está en una tendencia fuerte (STEEP), la señal es bloqueada para protegerte del riesgo de roturas masivas de tendencia.
                 </p>
+
+                {/* Detalles de la Confluencia y Objetivos */}
+                {(status.fused.signalActive || (status.fused.bothGreen && status.fused.bothAllowed)) && (
+                  <div style={{
+                    marginTop: 16, display: 'flex', gap: 16, flexWrap: 'wrap',
+                    background: 'rgba(255,255,255,0.02)', padding: '14px 18px',
+                    borderRadius: 12, border: '1px solid rgba(255,255,255,0.04)'
+                  }}>
+                    {/* Estado del Gatillo */}
+                    <div style={{ flex: '1 1 200px' }}>
+                      <div style={{ fontSize: 10, color: '#6b7280', textTransform: 'uppercase', marginBottom: 4 }}>GATILLO DE AGOTAMIENTO</div>
+                      <span style={{
+                        fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6,
+                        color: status.m5.triggerState === 'giro' ? '#10b981' : '#f59e0b'
+                      }}>
+                        {status.m5.triggerState === 'giro' ? '⚡ GIRO CONFIRMADO (ENTRADA!)' : '🪃 ESTIRANDO RESORTERA (ESPERAR)'}
+                      </span>
+                    </div>
+
+                    {/* Confluencia Estructural */}
+                    <div style={{ flex: '1 1 200px' }}>
+                      <div style={{ fontSize: 10, color: '#6b7280', textTransform: 'uppercase', marginBottom: 4 }}>CONFLUENCIA ESTRUCTURAL</div>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        {status.m5.divergence && status.m5.divergence !== 'none' && (
+                          <span style={{
+                            fontSize: 11, padding: '2px 8px', borderRadius: 4, fontWeight: 600,
+                            background: 'rgba(167,139,250,0.12)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.2)'
+                          }}>
+                            {status.m5.divergence === 'bearish' ? '🐻 Divergencia Bajista' : '🐂 Divergencia Alcista'}
+                          </span>
+                        )}
+                        {status.m5.nearestSR && (
+                          <span style={{
+                            fontSize: 11, padding: '2px 8px', borderRadius: 4, fontWeight: 600,
+                            background: 'rgba(255,255,255,0.05)', color: '#fff', border: '1px solid rgba(255,255,255,0.08)'
+                          }}>
+                            🏰 {status.m5.nearestSR.type === 'resistance' ? 'Resistencia' : 'Soporte'} (fza {status.m5.nearestSR.strength})
+                          </span>
+                        )}
+                        {(!status.m5.divergence || status.m5.divergence === 'none') && !status.m5.nearestSR && (
+                          <span style={{ fontSize: 12, color: '#4b5563' }}>Sin confluencias secundarias</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Niveles Sugeridos */}
+                    <div style={{ flex: '1 1 200px' }}>
+                      <div style={{ fontSize: 10, color: '#6b7280', textTransform: 'uppercase', marginBottom: 4 }}>PARÁMETROS SUGERIDOS (BROKER)</div>
+                      <div style={{ display: 'flex', gap: 12, fontFamily: 'monospace', fontSize: 12 }}>
+                        <div>
+                          <span style={{ color: '#10b981', fontWeight: 700 }}>TP:</span> {status.m5.tpPrice}
+                        </div>
+                        <div>
+                          <span style={{ color: '#f43f5e', fontWeight: 700 }}>SL:</span> {status.m5.slPrice}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Indicador visual de estado */}
@@ -509,12 +568,12 @@ function TimeframeCard({ title, snap, getStateColor, getSlopeBadgeColor }: Timef
         marginTop: 'auto', paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.04)',
         display: 'flex', justifyContent: 'space-between', alignItems: 'center'
       }}>
-        <span style={{ fontSize: 12, color: '#9ca3af' }}>Estatus de Señal:</span>
+        <span style={{ fontSize: 12, color: '#9ca3af' }}>Filtro de Tendencia:</span>
         <span style={{
           fontSize: 12, fontWeight: 800,
           color: snap.signalAllowed ? '#10b981' : '#ef4444'
         }}>
-          {snap.signalAllowed ? '✅ OPERABLE' : '🚫 BLOQUEADO POR TENDENCIA'}
+          {snap.signalAllowed ? '✅ ADECUADA (SIN TENDENCIA)' : '🚫 TENDENCIA FUERTE (FILTRADO)'}
         </span>
       </div>
     </div>

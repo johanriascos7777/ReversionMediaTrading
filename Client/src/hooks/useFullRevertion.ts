@@ -20,6 +20,16 @@ export interface FullRevertionSnapshotDetail {
   emaSlopeValue: number
   slopeDirection: 'UP' | 'DOWN' | 'FLAT'
   signalAllowed: boolean
+  triggerState?: 'reposo' | 'estirando' | 'giro'
+  divergence?: 'bearish' | 'bullish' | 'none'
+  nearestSR?: {
+    price: number
+    type: 'resistance' | 'support'
+    strength: number
+    distance: number
+  } | null
+  tpPrice?: number
+  slPrice?: number
 }
 
 export interface FullRevertionBacktestDetail {

@@ -41,19 +41,20 @@ export class FullRevertionController {
 
     const bothGreen   = snapM5.state === 'GREEN' && snapM15?.state === 'GREEN';
     const bothAllowed = snapM5.signalAllowed && (snapM15?.signalAllowed ?? false);
-    const fusedActive = bothGreen && bothAllowed;
+    const triggerState = snapM5.triggerState ?? 'reposo';
 
     let recommendation: string;
-    if (fusedActive) {
-      recommendation = `🔱 SEÑAL FUSIONADA ACTIVA — M5+M15 GREEN con pendiente plana. WinRate histórico: ${backtest?.winRate ?? '?'}%. Alta convicción.`;
-    } else if (snapM5.state === 'GREEN' && snapM5.signalAllowed) {
-      recommendation = `🌊 SEÑAL M5 ACTIVA — Solo M5 en GREEN. Esperar M15 para mayor convicción. WinRate: ${backtest?.winRate ?? '?'}%`;
-    } else if (snapM15?.state === 'GREEN' && snapM15.signalAllowed) {
-      recommendation = `🌊 SEÑAL M15 ACTIVA — Solo M15 en GREEN. Esperar M5 para mayor convicción.`;
-    } else if ((snapM5.state === 'GREEN' && !snapM5.signalAllowed) || (snapM15?.state === 'GREEN' && !snapM15?.signalAllowed)) {
-      recommendation = `🚫 SEÑAL BLOQUEADA — GREEN detectado pero EMA en pendiente STEEP. La tendencia es demasiado fuerte para una reversión estructural.`;
+    let fusedActive = false;
+
+    if (triggerState === 'giro') {
+      fusedActive = true;
+      recommendation = `🔱 ¡GIRO CONFIRMADO! ENTRADA ACTIVA — M5+M15 con confluencia y pendiente permitida. WinRate histórico: ${backtest?.winRate ?? '?'}%.`;
+    } else if (triggerState === 'estirando') {
+      recommendation = `⏳ PREPARAR ENTRADA — La resortera se está estirando en zona extrema. Espera el Giro de Vela M5 (Candle Close).`;
+    } else if (bothGreen && !bothAllowed) {
+      recommendation = `🚫 SEÑAL BLOQUEADA — Confluencia M5+M15 detectada pero la EMA100 está en tendencia fuerte (STEEP).`;
     } else {
-      recommendation = `⏳ ESPERANDO — M5: ${snapM5.state} · M15: ${snapM15?.state ?? 'N/A'}. Elasticidad no alcanza umbral GREEN.`;
+      recommendation = `⏳ MODO REPOSO — Esperando confluencia (M5: ${snapM5.state} · M15: ${snapM15?.state ?? 'N/A'}).`;
     }
 
     return res.status(HttpStatus.OK).json({
@@ -81,6 +82,11 @@ export class FullRevertionController {
         emaSlopeValue:  snapM5.emaSlopeValue,
         slopeDirection: snapM5.slopeDirection,
         signalAllowed:  snapM5.signalAllowed,
+        triggerState:   snapM5.triggerState,
+        divergence:     snapM5.divergence,
+        nearestSR:      snapM5.nearestSR,
+        tpPrice:        snapM5.tpPrice,
+        slPrice:        snapM5.slPrice,
       },
 
       // ─── Detalle M15 ─────────────────────────────────────────
@@ -95,6 +101,11 @@ export class FullRevertionController {
         emaSlopeValue:  snapM15.emaSlopeValue,
         slopeDirection: snapM15.slopeDirection,
         signalAllowed:  snapM15.signalAllowed,
+        triggerState:   snapM15.triggerState,
+        divergence:     snapM15.divergence,
+        nearestSR:      snapM15.nearestSR,
+        tpPrice:        snapM15.tpPrice,
+        slPrice:        snapM15.slPrice,
       } : null,
 
       // ─── Backtest (basado en M5) ──────────────────────────────

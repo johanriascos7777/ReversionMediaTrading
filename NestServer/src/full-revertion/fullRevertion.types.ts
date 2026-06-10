@@ -5,6 +5,8 @@
  * No dependen ni modifican los tipos de market/types.ts
  */
 
+import type { DivergenceType, SRLevel } from '../structure/structure.types';
+
 export type EMASlope = 'FLAT' | 'GENTLE' | 'STEEP';
 
 export type SlopeDirection = 'UP' | 'DOWN' | 'FLAT';
@@ -32,6 +34,17 @@ export type FullRevertionSnapshot = {
   /** true = condiciones para operar; false = pendiente demasiado fuerte, señal bloqueada */
   signalAllowed:  boolean;
   timestamp:      number;
+  
+  // -- Gatillo de Exhaustión --
+  triggerState?:  'reposo' | 'estirando' | 'giro';
+  
+  // -- Confluencia Estructural --
+  divergence?:    DivergenceType;
+  nearestSR?:     SRLevel | null;
+
+  // -- Objetivos Sugeridos --
+  tpPrice?:       number;
+  slPrice?:       number;
 };
 
 /**
@@ -78,4 +91,6 @@ export type FRFusedAlertState = {
   previousM5State:     FRState | null;
   previousM15State:    FRState | null;
   lastFusedAlertTime:  number;
+  preAlertActive:      boolean;
+  lastGreenTime?:      number;
 };

@@ -18,6 +18,7 @@
 
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { MarketService } from '../market/market.service';
+import { StructureService } from '../structure/structure.service';
 import type { BackendMessage } from '../market/types';
 import {
   calculateFullRevertionSnapshot,
@@ -39,6 +40,8 @@ const ALERT_COOLDOWN_MS         = 10 * 60 * 1000;
 const FUSED_ALERT_COOLDOWN_MS   = 15 * 60 * 1000;
 // Barras a usar en el backtest Full Reversion
 const FR_BACKTEST_BARS          = 50;
+// Control de alertas individuales (false = desactivadas, solo enviar fusionadas M5+M15)
+const ENABLE_INDIVIDUAL_ALERTS  = false;
 
 @Injectable()
 export class FullRevertionService implements OnModuleInit {
@@ -54,7 +57,17 @@ export class FullRevertionService implements OnModuleInit {
   // Rate-limit de cálculo
   private lastCalcTime      = new Map<string, number>();
 
-  constructor(private readonly marketService: MarketService) {}
+  // Trackers de Elasticidad de velas cerradas (para Giro)
+  private lastClosedElasticity = new Map<string, number | null>();
+  private prevClosedElasticity = new Map<string, number | null>();
+  private lastClosedCandleTime = new Map<string, number>();
+  private triggerStates        = new Map<string, 'reposo' | 'estirando' | 'giro'>();
+  private lastGiroCandleTime   = new Map<string, number>();
+
+  constructor(
+    private readonly marketService: MarketService,
+    private readonly structureService: StructureService,
+  ) {}
 
   onModuleInit() {
     this.marketService.events.on('broadcast', (msg: BackendMessage) => {
@@ -113,25 +126,60 @@ export class FullRevertionService implements OnModuleInit {
     const snap = calculateFullRevertionSnapshot(symbol, candles, price, timeframe, timestamp);
     if (!snap) return;
 
+    // ─── ENRIQUECER SNAPSHOT CON CONFLUENCIA ESTRUCTURAL Y TP/SL ───────────
+    const structSnap = this.structureService.getLastSnapshot(symbol, timeframe);
+    if (structSnap) {
+      snap.divergence = structSnap.divergence;
+      snap.nearestSR = structSnap.nearestSR;
+    }
+
+    const decimals = symbol.includes('JPY') ? 3 : 5;
+    const isBuy = price < snap.ema100;
+    const rawSl = isBuy ? (price - 1.8 * snap.atr) : (price + 1.8 * snap.atr);
+    snap.tpPrice = Math.round(snap.ema100 * Math.pow(10, decimals)) / Math.pow(10, decimals);
+    snap.slPrice = Math.round(rawSl * Math.pow(10, decimals)) / Math.pow(10, decimals);
+    snap.triggerState = this.triggerStates.get(symbol) ?? 'reposo';
+
     this.lastSnapshots.set(calcKey, snap);
 
     // Alimentar percentil con el cierre más reciente
     const lastCandleClose = candles[candles.length - 1].close;
     pushFullRevertionPercentile(symbol, timeframe, Math.abs(lastCandleClose - snap.ema100) / snap.atr);
 
+    // Trackear elasticidades de velas cerradas solo para M5 (gatillo del giro)
+    if (timeframe === 'M5') {
+      const lastClosedCandle = candles[candles.length - 1];
+      const lastClosedTime = this.lastClosedCandleTime.get(symbol) ?? 0;
+
+      if (lastClosedCandle.time !== lastClosedTime) {
+        this.lastClosedCandleTime.set(symbol, lastClosedCandle.time);
+
+        // Rotar elasticidades cerradas
+        const prevEl = this.lastClosedElasticity.get(symbol) ?? null;
+        this.prevClosedElasticity.set(symbol, prevEl);
+
+        const currentEl = Math.abs(lastClosedCandle.close - snap.ema100) / snap.atr;
+        this.lastClosedElasticity.set(symbol, currentEl);
+      }
+    }
+
     // Backtest solo en M5
     if (timeframe === 'M5') {
       const backtest = runFullRevertionBacktest(candles, FR_BACKTEST_BARS);
       this.lastBacktests.set(symbol, backtest);
 
-      // Alerta individual M5
-      this.checkSimpleAlert(symbol, 'M5', snap, backtest);
+      // Alerta individual M5 (si están habilitadas)
+      if (ENABLE_INDIVIDUAL_ALERTS) {
+        this.checkSimpleAlert(symbol, 'M5', snap, backtest);
+      }
     }
 
-    // Alerta individual M15
+    // Alerta individual M15 (si están habilitadas)
     if (timeframe === 'M15') {
       const backtestM5 = this.lastBacktests.get(symbol) ?? null;
-      this.checkSimpleAlert(symbol, 'M15', snap, backtestM5);
+      if (ENABLE_INDIVIDUAL_ALERTS) {
+        this.checkSimpleAlert(symbol, 'M15', snap, backtestM5);
+      }
     }
 
     // Log esporádico
@@ -186,6 +234,7 @@ export class FullRevertionService implements OnModuleInit {
         previousM5State:    null,
         previousM15State:   null,
         lastFusedAlertTime: 0,
+        preAlertActive:     false,
       });
     }
 
@@ -194,18 +243,69 @@ export class FullRevertionService implements OnModuleInit {
 
     const bothGreen       = snapM5.state === 'GREEN' && snapM15.state === 'GREEN';
     const bothAllowed     = snapM5.signalAllowed && snapM15.signalAllowed;
-    const wasAlreadyFused =
-      fusedState.previousM5State  === 'GREEN' &&
-      fusedState.previousM15State === 'GREEN';
 
-    // Solo dispara si es una NUEVA condición fusionada (transición hacia GREEN+GREEN)
-    const isNewFusedGreen = bothGreen && !wasAlreadyFused;
-    const canAlert        = now - fusedState.lastFusedAlertTime > FUSED_ALERT_COOLDOWN_MS;
+    // Lógica del Gatillo:
+    // 1. Activar/Actualizar pre-alerta si M5 y M15 entran en GREEN con pendiente EMA permitida
+    if (bothGreen && bothAllowed) {
+      if (!fusedState.preAlertActive) {
+        console.log(`[FullRevertion] [${symbol}] 🪃 Pre-alerta de confluencia activada. Esperando Giro de Elasticidad...`);
+        fusedState.preAlertActive = true;
+      }
+      fusedState.lastGreenTime = now; // Guardar el último momento en zona extrema
+    } else {
+      // Si salen de la confluencia extrema, mantener la pre-alerta activa si:
+      // - Ha pasado menos de 20 minutos (1,200,000 ms) desde que se registró la confluencia
+      // - Y el precio sigue estirado por encima del umbral de seguridad de 1.2 ATR
+      const lastGreen = fusedState.lastGreenTime ?? 0;
+      const timeElapsed = now - lastGreen;
+      const stillStretched = snapM5.elasticity > 1.2;
 
-    if (isNewFusedGreen && bothAllowed && canAlert) {
-      fusedState.lastFusedAlertTime = now;
-      const backtest = this.lastBacktests.get(symbol) ?? null;
-      await this.sendFusedTelegramAlert(symbol, snapM5, snapM15, backtest);
+      if (fusedState.preAlertActive) {
+        if (timeElapsed > 20 * 60 * 1000 || !stillStretched) {
+          console.log(`[FullRevertion] [${symbol}] ⏳ Pre-alerta cancelada (cooldown de tiempo superado o precio retornó a la media).`);
+          fusedState.preAlertActive = false;
+          fusedState.lastGreenTime = 0;
+        }
+      }
+    }
+
+    const lastClosedTime = this.lastClosedCandleTime.get(symbol) ?? 0;
+    const lastGiroTime   = this.lastGiroCandleTime.get(symbol) ?? 0;
+
+    // 2. Determinar si ocurrió un Giro en la última vela cerrada M5
+    let currentTriggerState: 'reposo' | 'estirando' | 'giro' = 'reposo';
+    
+    if (lastClosedTime > 0 && lastClosedTime === lastGiroTime) {
+      // Mantener el estado de giro activo durante toda la vela del giro en el dashboard
+      currentTriggerState = 'giro';
+    } else if (fusedState.preAlertActive) {
+      const lastEl = this.lastClosedElasticity.get(symbol) ?? null;
+      const prevEl = this.prevClosedElasticity.get(symbol) ?? null;
+
+      if (lastEl !== null && prevEl !== null && lastEl < prevEl) {
+        currentTriggerState = 'giro';
+        this.lastGiroCandleTime.set(symbol, lastClosedTime); // Registrar vela donde ocurrió el giro
+      } else {
+        currentTriggerState = 'estirando';
+      }
+    }
+
+    this.triggerStates.set(symbol, currentTriggerState);
+    snapM5.triggerState = currentTriggerState;
+    snapM15.triggerState = currentTriggerState;
+
+    // 3. Disparar alerta en Telegram cuando hay 'giro' y cooldown cumplido
+    if (fusedState.preAlertActive && currentTriggerState === 'giro') {
+      const canAlert = now - fusedState.lastFusedAlertTime > FUSED_ALERT_COOLDOWN_MS;
+      if (canAlert) {
+        fusedState.lastFusedAlertTime = now;
+        fusedState.preAlertActive = false; // Resetear pre-alerta tras disparar para evitar spams en el mismo giro
+        fusedState.lastGreenTime = 0;
+        
+        console.log(`[FullRevertion] [${symbol}] 🔥 GIRO CONFIRMADO. Enviando alerta a Telegram...`);
+        const backtest = this.lastBacktests.get(symbol) ?? null;
+        await this.sendFusedTelegramAlert(symbol, snapM5, snapM15, backtest);
+      }
     }
 
     fusedState.previousM5State  = snapM5.state;
@@ -304,14 +404,36 @@ export class FullRevertionService implements OnModuleInit {
         day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit'
       });
 
+      // Confluencia Estructural
+      let divText = 'Ninguna';
+      if (snapM5.divergence === 'bearish') divText = 'Bajista RSI 🐻';
+      if (snapM5.divergence === 'bullish') divText = 'Alcista RSI 🐂';
+
+      let srText = 'Ninguno';
+      if (snapM5.nearestSR) {
+        const srTypeLabel = snapM5.nearestSR.type === 'resistance' ? 'Resistencia' : 'Soporte';
+        srText = `${srTypeLabel} en \`${snapM5.nearestSR.price.toFixed(decimals)}\` (fuerza ${snapM5.nearestSR.strength})`;
+      }
+
       // ─── Mensaje fusionado — máxima convicción ────────────────────────────
       let msg = `🔱🔱🔱🔱🔱🔱🔱🔱🔱🔱🔱🔱\n`;
       msg    += `🚨🌊 *FULL REVERSION — FUSIONADO* 🌊🚨\n`;
-      msg    += `✨ *M5 + M15 ALINEADOS — ALTA CONVICCIÓN* ✨\n`;
+      msg    += `✨ *M5 + M15 ALINEADOS — GIRO CONFIRMADO* ✨\n`;
       msg    += `🔱🔱🔱🔱🔱🔱🔱🔱🔱🔱🔱🔱\n\n`;
       msg    += `📍 *Par:* \`${symbol}\`\n`;
       msg    += `🎯 *Dirección:* ${dirEmoji}\n`;
       msg    += `💰 *Precio:* \`${priceStr}\`  ·  *EMA100:* \`${emaStr}\`\n\n`;
+
+      msg    += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+      msg    += `🪃 *Gatillo:* La resortera ha comenzado a ceder (giro confirmado en vela cerrada M5).\n\n`;
+
+      msg    += `🏰 *Confluencias Estructurales (M5):*\n`;
+      msg    += `   · Divergencia: ${divText}\n`;
+      msg    += `   · S/R Cercano: ${srText}\n\n`;
+
+      msg    += `🎯 *Parámetros Sugeridos (Broker):*\n`;
+      msg    += `   · *TP (EMA100):* \`${snapM5.tpPrice?.toFixed(decimals)}\`\n`;
+      msg    += `   · *SL (1.8 ATR):* \`${snapM5.slPrice?.toFixed(decimals)}\`\n\n`;
 
       msg    += `━━━━━━━━━━━━━━━━━━━━━━\n`;
       msg    += `📊 *Estado Multi-Timeframe:*\n`;
@@ -331,8 +453,8 @@ export class FullRevertionService implements OnModuleInit {
 
       msg    += `━━━━━━━━━━━━━━━━━━━━━━\n`;
       msg    += `🔍 *¿Por qué esta es la señal más fuerte?*\n`;
-      msg    += `   ✅ M5 sobreestirado _y_ sin tendencia fuerte\n`;
-      msg    += `   ✅ M15 sobreestirado _y_ sin tendencia fuerte\n`;
+      msg    += `   ✅ M5 sobreestirado + Giro confirmado\n`;
+      msg    += `   ✅ M15 sobreestirado + Pendiente permitida\n`;
       msg    += `   ✅ El precio tiene presión de reversión en AMBOS marcos\n`;
       msg    += `   🚫 No es un simple pullback en tendencia\n\n`;
 
