@@ -10,6 +10,7 @@ import App from './App'
 import { TowerControl } from './pages/TowerControl'
 import { HolguraCalculator } from './pages/HolguraCalculator'
 import { ExperimentalDashboard } from './pages/ExperimentalDashboard'
+import { FullRevertionDashboard } from './pages/FullRevertionDashboard'
 
 // ─── Barra de navegación global ──────────────────────────────────────────────
 
@@ -40,6 +41,7 @@ function NavBar() {
 
       {/* Links */}
       <NavLink to="/" label="📊 Dashboard" active={currentPath === '/'} />
+      <NavLink to="/full-revertion" label="🌊 Reversión Completa" active={currentPath === '/full-revertion'} />
       <NavLink to="/tower-control" label="🗼 Torre de Control" active={currentPath === '/tower-control'} />
       <NavLink to="/holgura-calculator" label="🧮 Calculadora de Holgura" active={currentPath === '/holgura-calculator'} />
       <NavLink to="/experimental" label="🧪 Experimental" active={currentPath === '/experimental'} />
@@ -78,6 +80,7 @@ export function AppRouter() {
       <div style={{ paddingTop: 44 }}>
         <Routes>
           <Route path="/" element={<App />} />
+          <Route path="/full-revertion" element={<FullRevertionDashboard />} />
           <Route path="/tower-control" element={<TowerControl />} />
           <Route path="/holgura-calculator" element={<HolguraCalculator />} />
           <Route path="/experimental" element={<ExperimentalDashboard />} />
