@@ -41,6 +41,20 @@ export type ApiKeysPoolStatusMessage = {
     minutelyRate: number;
     minutelyMax: number;
   }[];
+  exhaustedKeys?: {
+    keyMasked: string;
+    cooldownRemaining: number;
+  }[];
+  poolDetails?: {
+    index: number;
+    keyMasked: string;
+    status: 'active' | 'shared' | 'rate-limit' | 'daily-limit';
+    requestsCount: number;
+    minutelyRate: number;
+    minutelyMax: number;
+    cooldownRemaining: number;
+    assignedSymbol: string | null;
+  }[];
 }
 
 export type KeysExhaustedAlertMessage = {

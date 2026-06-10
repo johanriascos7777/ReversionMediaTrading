@@ -2,6 +2,8 @@ import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { EventEmitter } from 'events';
 import https from 'https';
 import http from 'http';
+import * as fs from 'fs';
+import * as path from 'path';
 import { TwelveDataClient } from './twelveDataClient';
 import { CandleBuilder } from './candleBuilder';
 import { calculateSnapshot, resolveMultiTF, calculateElasticityForCandles, pushPercentileHistory, clearPercentileHistory } from './marketEngine';
@@ -109,7 +111,53 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
    * para no consumir innecesariamente todo el pool en un bucle.
    */
   private readonly exhaustedKeys = new Map<string, number>(); // key -> timestamp agotamiento
+  private readonly dailyLimitExhaustedKeys = new Set<string>();
+  private lastResetDay = new Date().getUTCDate();
   private static readonly KEY_RATE_LIMIT_COOLDOWN_MS = 65_000; // 65s > 1 min de ventana TwelveData
+
+  private checkDailyReset(): void {
+    const today = new Date().getUTCDate();
+    if (today !== this.lastResetDay) {
+      this.dailyLimitExhaustedKeys.clear();
+      this.saveDailyExhaustedKeys(); // Limpiar el archivo de persistencia
+      this.lastResetDay = today;
+      console.log('[MarketService] ☀️ Nuevo día UTC detectado. Restableciendo límites de créditos diarios de todas las llaves API.');
+    }
+  }
+
+  private loadDailyExhaustedKeys(): void {
+    const filePath = path.join(process.cwd(), 'exhausted_keys.json');
+    try {
+      if (fs.existsSync(filePath)) {
+        const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        if (data.date === new Date().getUTCDate() && Array.isArray(data.keys)) {
+          for (const key of data.keys) {
+            this.dailyLimitExhaustedKeys.add(key);
+          }
+          console.log(`[MarketService] 💾 Cargadas ${this.dailyLimitExhaustedKeys.size} llaves agotadas diarias desde persistencia.`);
+        } else {
+          // Si es otro día, borrar el archivo
+          fs.unlinkSync(filePath);
+        }
+      }
+    } catch (e) {
+      console.error('[MarketService] Error cargando llaves agotadas persistidas:', e);
+    }
+  }
+
+  private saveDailyExhaustedKeys(): void {
+    const filePath = path.join(process.cwd(), 'exhausted_keys.json');
+    try {
+      const data = {
+        date: new Date().getUTCDate(),
+        keys: Array.from(this.dailyLimitExhaustedKeys)
+      };
+      fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+    } catch (e) {
+      console.error('[MarketService] Error guardando llaves agotadas persistidas:', e);
+    }
+  }
+
   private readonly activeAssignments = new Map<string, string>();
   private readonly keyStats = new Map<string, {
     totalRequests: number;
@@ -117,14 +165,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
     minutelyMax: number;
   }>();
 
-  /**
-   * Bloqueo de carga de historial cuando los créditos diarios se agotan.
-   * Evita reintentos innecesarios cada 30s que consumen los créditos restantes.
-   * Se libera automáticamente después de DAILY_LIMIT_RETRY_MS (60 min).
-   */
-  private dailyCreditsExhausted = false;
-  private dailyCreditsExhaustedAt = 0;
-  private static readonly DAILY_LIMIT_RETRY_MS = 60 * 60 * 1000; // 60 minutos
+  // Ya no usamos bloqueo global de créditos diarios, rotamos la llave por símbolo.
 
   // Métricas
   public readonly serverMetrics = {
@@ -165,6 +206,9 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
         }
       }
     });
+
+    // Cargar llaves agotadas diariamente desde la persistencia
+    this.loadDailyExhaustedKeys();
   }
 
   async onModuleInit() {
@@ -343,8 +387,15 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
         });
 
         // Rotar key automáticamente si se agotan los créditos
-        client.on('key-exhausted', (exhaustedKey: string) => {
-          console.warn(`[MarketService] [${sym}] Llave agotada: ...${exhaustedKey.slice(-6)}. Rotando...`);
+        client.on('key-exhausted', (exhaustedKey: string, type?: 'rate' | 'daily') => {
+          if (type === 'daily') {
+            this.dailyLimitExhaustedKeys.add(exhaustedKey);
+            this.saveDailyExhaustedKeys(); // Persistir
+            console.warn(`[MarketService] [${sym}] Llave ...${exhaustedKey.slice(-6)} marcada como AGOTADA DIARIA. Rotando...`);
+          } else {
+            this.exhaustedKeys.set(exhaustedKey, Date.now());
+            console.warn(`[MarketService] [${sym}] Llave ...${exhaustedKey.slice(-6)} marcada como AGOTADA TEMPORAL (rate-limit). Rotando...`);
+          }
           const newKey = this.getAvailableApiKey(sym, exhaustedKey);
           client.updateApiKey(newKey);
 
@@ -406,8 +457,10 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
 
   private getAvailableApiKey(symbol: string, currentExhaustedKey?: string): string {
     if (currentExhaustedKey) {
-      this.exhaustedKeys.set(currentExhaustedKey, Date.now());
-      console.log(`[MarketService] Llave ...${currentExhaustedKey.slice(-6)} marcada como agotada (cooldown ${MarketService.KEY_RATE_LIMIT_COOLDOWN_MS / 1000}s).`);
+      if (!this.dailyLimitExhaustedKeys.has(currentExhaustedKey)) {
+        this.exhaustedKeys.set(currentExhaustedKey, Date.now());
+        console.log(`[MarketService] Llave ...${currentExhaustedKey.slice(-6)} marcada como agotada temporal (cooldown ${MarketService.KEY_RATE_LIMIT_COOLDOWN_MS / 1000}s).`);
+      }
       this.broadcastKeysStatus();
     }
 
@@ -416,9 +469,19 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
     const myCurrentKey = this.activeAssignments.get(symbol);
     if (myCurrentKey) assignedToOthers.delete(myCurrentKey);
 
-    // 1. Buscar primera llave libre (no agotada, no asignada a otro símbolo)
-    for (const key of this.apiKeyList) {
-      if (!this.isKeyExhausted(key) && !assignedToOthers.has(key)) {
+    // Priorizar llaves ordenándolas según uso de créditos y métricas por minuto (de menor a mayor uso)
+    const sortedKeys = [...this.apiKeyList].sort((a, b) => {
+      const statsA = this.keyStats.get(a) || { totalRequests: 0, minutelyMax: 0 };
+      const statsB = this.keyStats.get(b) || { totalRequests: 0, minutelyMax: 0 };
+      if (statsA.minutelyMax !== statsB.minutelyMax) {
+        return statsA.minutelyMax - statsB.minutelyMax;
+      }
+      return statsA.totalRequests - statsB.totalRequests;
+    });
+
+    // 1. Buscar primera llave libre (no rate-limit agotada, no daily agotada, no asignada a otro símbolo)
+    for (const key of sortedKeys) {
+      if (!this.isKeyExhausted(key) && !this.dailyLimitExhaustedKeys.has(key) && !assignedToOthers.has(key)) {
         this.activeAssignments.set(symbol, key);
         console.log(`[MarketService] [${symbol}] Llave activa asignada: ...${key.slice(-6)}`);
         this.broadcastKeysStatus();
@@ -426,9 +489,9 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    // 2. Fallback: llave no agotada aunque compartida temporalmente
-    for (const key of this.apiKeyList) {
-      if (!this.isKeyExhausted(key)) {
+    // 2. Fallback: llave no agotada (ni rate, ni daily) aunque compartida temporalmente
+    for (const key of sortedKeys) {
+      if (!this.isKeyExhausted(key) && !this.dailyLimitExhaustedKeys.has(key)) {
         this.activeAssignments.set(symbol, key);
         console.warn(`[MarketService] [${symbol}] ⚠️ Llave compartida ...${key.slice(-6)} (escasez temporal)`);
         this.broadcastKeysStatus();
@@ -436,7 +499,17 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    // 3. Fallback absoluto (todas agotadas — situación crítica)
+    // 3. Fallback: usar una llave en cooldown temporal (no daily agotada)
+    for (const key of sortedKeys) {
+      if (!this.dailyLimitExhaustedKeys.has(key)) {
+        this.activeAssignments.set(symbol, key);
+        console.warn(`[MarketService] [${symbol}] ⚠️ Usando llave en cooldown temporal ...${key.slice(-6)}`);
+        this.broadcastKeysStatus();
+        return key;
+      }
+    }
+
+    // 4. Fallback absoluto (todas agotadas — situación crítica)
     console.error(`[MarketService] [${symbol}] ❌ CRÍTICO: Todas las ${this.apiKeyList.length} llaves están agotadas.`);
     
     // Alerta de agotamiento absoluto para el frontend
@@ -454,19 +527,81 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
    * Obtiene el estado actual detallado de todas las llaves API y sus estadísticas de uso.
    */
   public getKeysPoolStatus(): BackendMessage {
+    this.checkDailyReset();
     const now = Date.now();
+
+    // Mapeo inverso de llaves activas a símbolos
+    const keyToSymbol = new Map<string, string>();
+    for (const [sym, key] of this.activeAssignments.entries()) {
+      keyToSymbol.set(key, sym);
+    }
+
+    // Construir la lista completa de todas las 35 llaves del pool
+    const poolDetailsList = this.apiKeyList.map((key, index) => {
+      const keyMasked = `...${key.slice(-6)}`;
+      const assignedSymbol = keyToSymbol.get(key) || null;
+
+      let status: 'active' | 'shared' | 'rate-limit' | 'daily-limit' = 'active';
+      let cooldownRemaining = 0;
+
+      if (this.dailyLimitExhaustedKeys.has(key)) {
+        status = 'daily-limit';
+      } else {
+        const exhaustedAt = this.exhaustedKeys.get(key);
+        if (exhaustedAt !== undefined) {
+          const remaining = MarketService.KEY_RATE_LIMIT_COOLDOWN_MS - (now - exhaustedAt);
+          if (remaining > 0) {
+            status = 'rate-limit';
+            cooldownRemaining = Math.ceil(remaining / 1000);
+          } else {
+            this.exhaustedKeys.delete(key);
+          }
+        }
+      }
+
+      if (status === 'active' && assignedSymbol) {
+        const sharingCount = Array.from(this.activeAssignments.values()).filter(k => k === key).length;
+        if (sharingCount > 1) {
+          status = 'shared';
+        }
+      }
+
+      let totalRequests = 0;
+      let minutelyRate = 0;
+      let minutelyMax = 0;
+
+      if (this.keyStats.has(key)) {
+        const stats = this.keyStats.get(key)!;
+        stats.requestTimestamps = stats.requestTimestamps.filter(ts => now - ts <= 60000);
+        totalRequests = stats.totalRequests;
+        minutelyRate = stats.requestTimestamps.length;
+        minutelyMax = stats.minutelyMax;
+      }
+
+      return {
+        index: index + 1,
+        keyMasked,
+        status,
+        requestsCount: totalRequests,
+        minutelyRate,
+        minutelyMax,
+        cooldownRemaining,
+        assignedSymbol
+      };
+    });
+
+    // Assignments per symbol (for active currency cards)
     const assignmentsList = this.symbolList.map(sym => {
       const activeKey = this.activeAssignments.get(sym);
       const activeKeyMasked = activeKey ? `...${activeKey.slice(-6)}` : 'Ninguna';
       
       let status: 'active' | 'shared' | 'exhausted' = 'active';
-      if (this.apiKeyList.every(k => this.isKeyExhausted(k))) {
+      if (this.apiKeyList.every(k => this.isKeyExhausted(k) || this.dailyLimitExhaustedKeys.has(k))) {
         status = 'exhausted';
       } else if (activeKey) {
-        if (this.isKeyExhausted(activeKey)) {
+        if (this.isKeyExhausted(activeKey) || this.dailyLimitExhaustedKeys.has(activeKey)) {
           status = 'exhausted';
         } else {
-          // Compartida
           const sharingSymbolsCount = Array.from(this.activeAssignments.values()).filter(k => k === activeKey).length;
           if (sharingSymbolsCount > 1) {
             status = 'shared';
@@ -474,16 +609,13 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
         }
       }
 
-      // Obtener estadísticas de la llave
       let totalRequests = 0;
       let minutelyRate = 0;
       let minutelyMax = 0;
 
       if (activeKey && this.keyStats.has(activeKey)) {
         const stats = this.keyStats.get(activeKey)!;
-        // Limpiar expirados al consultar
         stats.requestTimestamps = stats.requestTimestamps.filter(ts => now - ts <= 60000);
-        
         totalRequests = stats.totalRequests;
         minutelyRate = stats.requestTimestamps.length;
         minutelyMax = stats.minutelyMax;
@@ -499,12 +631,24 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       };
     });
 
+    const exhaustedKeysCount = poolDetailsList.filter(k => k.status === 'rate-limit' || k.status === 'daily-limit').length;
+    const allExhausted = poolDetailsList.every(k => k.status === 'rate-limit' || k.status === 'daily-limit');
+
+    const exhaustedKeysDetails = poolDetailsList
+      .filter(k => k.status === 'rate-limit')
+      .map(k => ({
+        keyMasked: k.keyMasked,
+        cooldownRemaining: k.cooldownRemaining
+      }));
+
     return {
       type: 'keys-status',
       totalKeys: this.apiKeyList.length,
-      exhaustedKeysCount: Array.from(this.exhaustedKeys.keys()).filter(k => this.isKeyExhausted(k)).length,
-      allExhausted: this.apiKeyList.every(k => this.isKeyExhausted(k)),
-      assignments: assignmentsList
+      exhaustedKeysCount,
+      allExhausted,
+      assignments: assignmentsList,
+      exhaustedKeys: exhaustedKeysDetails,
+      poolDetails: poolDetailsList
     } satisfies BackendMessage;
   }
 
@@ -687,13 +831,29 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
                   (msg.toLowerCase().includes('credit') && msg.toLowerCase().includes('limit being 800'));
 
                 if (isDailyLimit) {
-                  console.error(`[History] [${symbol}] 🚫 CRÉDITOS DIARIOS AGOTADOS. No se reintentará hasta dentro de 60 min. Mensaje: ${msg}`);
+                  console.error(`[History] [${symbol}] 🚫 CRÉDITOS DIARIOS AGOTADOS en llave actual. Mensaje: ${msg}`);
+                  this.dailyLimitExhaustedKeys.add(key);
+                  this.saveDailyExhaustedKeys(); // Persistir
+                  this.getAvailableApiKey(symbol, key); // Rotar llave
+                  this.broadcastKeysStatus();
                   reject(new Error('DAILY_LIMIT_EXHAUSTED'));
                   return;
                 }
 
-                console.error(`[History] [${symbol}] Error ${interval} de TwelveData:`, msg || data);
-                resolve([]);
+                const isRateLimit = msg.toLowerCase().includes('rate limit') || msg.toLowerCase().includes('too many requests') || msg.toLowerCase().includes('per minute limit');
+                if (isRateLimit) {
+                  console.warn(`[History] [${symbol}] Límite por minuto alcanzado. Rotando llave...`);
+                  this.exhaustedKeys.set(key, Date.now());
+                  this.getAvailableApiKey(symbol, key); // Rotar llave
+                  this.broadcastKeysStatus();
+                  reject(new Error('RATE_LIMIT'));
+                  return;
+                }
+
+                console.error(`[History] [${symbol}] Error ${interval} de TwelveData (Rotando llave):`, msg || data);
+                this.getAvailableApiKey(symbol, key); // Rotar llave
+                this.broadcastKeysStatus();
+                reject(new Error('API_ERROR'));
                 return;
               }
               const candles: Candle[] = [...data.values].reverse().map((c: any) => ({
@@ -755,100 +915,90 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
     const sym = state.symbol;
     if (state.isHistoryLoading) return false;
 
-    // Verificar si los créditos diarios están agotados globalmente
-    if (this.dailyCreditsExhausted) {
-      const elapsed = Date.now() - this.dailyCreditsExhaustedAt;
-      if (elapsed < MarketService.DAILY_LIMIT_RETRY_MS) {
-        // Silencioso: no loguear cada vez para no saturar la consola
-        return false;
-      }
-      // Han pasado 60 min, intentar de nuevo
-      console.log(`[MarketService] [${sym}] 🔄 Reintentando historial después de 60 min de bloqueo por límite diario...`);
-      this.dailyCreditsExhausted = false;
-    }
-
     state.isHistoryLoading = true;
     state.lastHistoryAttemptTime = Date.now();
 
     try {
-      console.log(`[MarketService] [${sym}] Intentando cargar historial...`);
-      const histM5 = await this.fetchHistoricalCandles(sym, '5min', HISTORY_OUTPUT);
-      
-      // Breve pausa para no saturar la API
-      await new Promise((r) => setTimeout(r, 2000));
-      
-      const histM15 = await this.fetchHistoricalCandles(sym, '15min', HISTORY_OUTPUT);
+      let attempts = 0;
+      const maxAttempts = 15; // Intentar hasta 15 llaves de inmediato
 
-      if (histM5.length === 0 || histM15.length === 0) {
-        console.warn(`[MarketService] [${sym}] Carga de historial fallida (velas vacías). Se reintentará después.`);
-        return false;
+      while (attempts < maxAttempts) {
+        try {
+          console.log(`[MarketService] [${sym}] Intentando cargar historial (intento ${attempts + 1})...`);
+          const histM5 = await this.fetchHistoricalCandles(sym, '5min', HISTORY_OUTPUT);
+          
+          // Breve pausa para no saturar la API
+          await new Promise((r) => setTimeout(r, 1000));
+          
+          const histM15 = await this.fetchHistoricalCandles(sym, '15min', HISTORY_OUTPUT);
+
+          if (histM5.length === 0 || histM15.length === 0) {
+            console.warn(`[MarketService] [${sym}] Carga de historial fallida (velas vacías).`);
+            return false;
+          }
+
+          // Si todo está bien, limpiar constructores actuales e inyectar el historial completo
+          state.builderM5.clear();
+          state.builderM15.clear();
+
+          // Limpiar también el percentil en el motor
+          clearPercentileHistory(sym, 'M5');
+          clearPercentileHistory(sym, 'M15');
+
+          // --- Versión Experimental ---
+          clearPercentileHistoryExp(sym, 'M5');
+          clearPercentileHistoryExp(sym, 'M15');
+
+          state.historicalM5 = histM5;
+          state.historicalM15 = histM15;
+
+          this.warmUpBuilder(sym, state.builderM5, state.historicalM5);
+          this.warmUpBuilder(sym, state.builderM15, state.historicalM15);
+
+          state.lastBacktestM5 = runBacktest(state.historicalM5, { emaPeriod: 100, maxBarsToRevert: 20 });
+          state.lastBacktestM5Exp = runBacktestExp(state.historicalM5, { emaPeriod: 100, maxBarsToRevert: 20 });
+          console.log(
+            `[MarketService] [${sym}] Historial cargado con éxito en segundo plano. Backtest M5 recalculado: WinRate: ${state.lastBacktestM5.winRate}% · Exp WinRate: ${state.lastBacktestM5Exp.winRate}%`
+          );
+
+          // Calcular snapshot inicial con el último precio del historial cargado
+          const lastPrice = state.historicalM5[state.historicalM5.length - 1].close;
+          const ts = state.historicalM5[state.historicalM5.length - 1].time;
+          const snap5 = calculateSnapshot(sym, state.builderM5.getCandles(), lastPrice, 'M5', ts);
+          const snap15 = calculateSnapshot(sym, state.builderM15.getCandles(), lastPrice, 'M15', ts);
+
+          if (snap5 && snap15) {
+            state.lastSnapshotM5 = snap5;
+            state.lastSnapshotM15 = snap15;
+            console.log(
+              `[MarketService] [${sym}] Snapshot inicial recalculado: M5: ${snap5.elasticity.toFixed(3)} ${snap5.state} · M15: ${snap15.elasticity.toFixed(3)} ${snap15.state}`
+            );
+          }
+
+          // --- Versión Experimental ---
+          const snap5Exp = calculateSnapshotExp(sym, state.builderM5.getCandles(), lastPrice, 'M5', ts);
+          const snap15Exp = calculateSnapshotExp(sym, state.builderM15.getCandles(), lastPrice, 'M15', ts);
+          if (snap5Exp && snap15Exp) {
+            state.lastSnapshotM5Exp = snap5Exp;
+            state.lastSnapshotM15Exp = snap15Exp;
+          }
+
+          state.historyLoaded = true;
+          return true;
+        } catch (err: any) {
+          attempts++;
+          if (err?.message === 'DAILY_LIMIT_EXHAUSTED' || err?.message === 'RATE_LIMIT' || err?.message === 'API_ERROR') {
+            console.warn(`[MarketService] [${sym}] Intento ${attempts} falló por límite/error de llave. Reintentando de inmediato con la siguiente llave...`);
+            // Esperar un instante corto para no abusar del servidor en ráfaga
+            await new Promise((r) => setTimeout(r, 300));
+          } else {
+            console.error(`[MarketService] [${sym}] Error inesperado cargando historial:`, err);
+            return false;
+          }
+        }
       }
 
-      // Si todo está bien, limpiar constructores actuales e inyectar el historial completo
-      state.builderM5.clear();
-      state.builderM15.clear();
-
-      // Limpiar también el percentil en el motor
-      clearPercentileHistory(sym, 'M5');
-      clearPercentileHistory(sym, 'M15');
-
-      // --- Versión Experimental ---
-      clearPercentileHistoryExp(sym, 'M5');
-      clearPercentileHistoryExp(sym, 'M15');
-
-      state.historicalM5 = histM5;
-      state.historicalM15 = histM15;
-
-      this.warmUpBuilder(sym, state.builderM5, state.historicalM5);
-      this.warmUpBuilder(sym, state.builderM15, state.historicalM15);
-
-      state.lastBacktestM5 = runBacktest(state.historicalM5, { emaPeriod: 100, maxBarsToRevert: 20 });
-      state.lastBacktestM5Exp = runBacktestExp(state.historicalM5, { emaPeriod: 100, maxBarsToRevert: 20 });
-      console.log(
-        `[MarketService] [${sym}] Historial cargado con éxito en segundo plano. Backtest M5 recalculado: WinRate: ${state.lastBacktestM5.winRate}% · Exp WinRate: ${state.lastBacktestM5Exp.winRate}%`
-      );
-
-      // Calcular snapshot inicial con el último precio del historial cargado
-      const lastPrice = state.historicalM5[state.historicalM5.length - 1].close;
-      const ts = state.historicalM5[state.historicalM5.length - 1].time;
-      const snap5 = calculateSnapshot(sym, state.builderM5.getCandles(), lastPrice, 'M5', ts);
-      const snap15 = calculateSnapshot(sym, state.builderM15.getCandles(), lastPrice, 'M15', ts);
-
-      if (snap5 && snap15) {
-        state.lastSnapshotM5 = snap5;
-        state.lastSnapshotM15 = snap15;
-        console.log(
-          `[MarketService] [${sym}] Snapshot inicial recalculado: M5: ${snap5.elasticity.toFixed(3)} ${snap5.state} · M15: ${snap15.elasticity.toFixed(3)} ${snap15.state}`
-        );
-      }
-
-      // --- Versión Experimental ---
-      const snap5Exp = calculateSnapshotExp(sym, state.builderM5.getCandles(), lastPrice, 'M5', ts);
-      const snap15Exp = calculateSnapshotExp(sym, state.builderM15.getCandles(), lastPrice, 'M15', ts);
-      if (snap5Exp && snap15Exp) {
-        state.lastSnapshotM5Exp = snap5Exp;
-        state.lastSnapshotM15Exp = snap15Exp;
-      }
-
-      state.historyLoaded = true;
-      return true;
-    } catch (err: any) {
-      if (err?.message === 'DAILY_LIMIT_EXHAUSTED') {
-        // Bloquear reintentos de historial por 60 minutos para todos los símbolos
-        this.dailyCreditsExhausted = true;
-        this.dailyCreditsExhaustedAt = Date.now();
-        console.error(
-          `[MarketService] 🚨 LÍMITE DIARIO DE API ALCANZADO. Carga de historial bloqueada por 60 min para todos los símbolos.\n` +
-          `[MarketService] Los datos en tiempo real del WebSocket (EUR/USD) siguen activos. El historial se recargará automáticamente cuando se restablezcan los créditos.`
-        );
-        this.events.emit('broadcast', {
-          type: 'status',
-          status: 'disconnected',
-          message: '\u26a0\ufe0f Límite diario de API alcanzado (800 créditos). Historial bloqueado 60 min. Datos en vivo (WS) siguen activos.',
-        } satisfies BackendMessage);
-      } else {
-        console.error(`[MarketService] [${sym}] Error inesperado cargando historial:`, err);
-      }
+      console.warn(`[MarketService] [${sym}] Se agotaron los intentos de inmediato (${maxAttempts}) para cargar historial.`);
       return false;
     } finally {
       state.isHistoryLoading = false;
@@ -863,15 +1013,12 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
     // Si el historial de este símbolo no ha cargado con éxito, intentar cargarlo de forma asíncrona
     if (!state.historyLoaded && !state.isHistoryLoading) {
       const now = Date.now();
-      // Respetar el bloqueo por límite diario (verificado dentro de loadSymbolHistory)
-      // y el intervalo de reintento normal de 30s
+      // Reintentar cada 30s con la llave asignada
       if (now - state.lastHistoryAttemptTime > 30000) {
-        if (!this.dailyCreditsExhausted || (now - this.dailyCreditsExhaustedAt) >= MarketService.DAILY_LIMIT_RETRY_MS) {
-          console.log(`[MarketService] [${symbol}] Historial ausente/incompleto. Iniciando carga asíncrona en segundo plano...`);
-          this.loadSymbolHistory(state).catch((e) =>
-            console.error(`[MarketService] [${symbol}] Error cargando historial en segundo plano:`, e)
-          );
-        }
+        console.log(`[MarketService] [${symbol}] Historial ausente/incompleto. Iniciando carga asíncrona en segundo plano...`);
+        this.loadSymbolHistory(state).catch((e) =>
+          console.error(`[MarketService] [${symbol}] Error cargando historial en segundo plano:`, e)
+        );
       }
     }
 
@@ -1315,7 +1462,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
         signal.elasticityM15Value = elasticityM15Value;
 
         if (struct) {
-          signal.structureState = struct.structureState;
+          signal.structureState = alertName === 'Tipo A' ? 'STRONG' : struct.structureState;
           signal.structureSignal = struct.signal;
           signal.rsiAtEntry = struct.rsi;
           signal.divergenceAtEntry = struct.divergence;
@@ -1326,6 +1473,8 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
             signal.nearestSRStrength = struct.nearestSR.strength;
             signal.nearestSRDistance = struct.nearestSR.distance;
           }
+        } else if (alertName === 'Tipo A') {
+          signal.structureState = 'STRONG';
         }
 
         signal.contextualWinRate = comparison ? comparison.winRate : null;

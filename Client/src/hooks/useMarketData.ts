@@ -61,11 +61,27 @@ export type ApiKeyAssignment = {
   minutelyMax: number
 }
 
+export type PoolKeyDetails = {
+  index: number
+  keyMasked: string
+  status: 'active' | 'shared' | 'rate-limit' | 'daily-limit'
+  requestsCount: number
+  minutelyRate: number
+  minutelyMax: number
+  cooldownRemaining: number
+  assignedSymbol: string | null
+}
+
 export type ApiKeysPoolStatus = {
   totalKeys: number
   exhaustedKeysCount: number
   allExhausted: boolean
   assignments: ApiKeyAssignment[]
+  poolDetails?: PoolKeyDetails[]
+  exhaustedKeys?: {
+    keyMasked: string
+    cooldownRemaining: number
+  }[]
 }
 
 type BackendMessage =
@@ -103,6 +119,11 @@ type BackendMessage =
       exhaustedKeysCount: number;
       allExhausted: boolean;
       assignments: ApiKeyAssignment[];
+      exhaustedKeys?: {
+        keyMasked: string;
+        cooldownRemaining: number;
+      }[];
+      poolDetails?: PoolKeyDetails[];
     }
   | {
       type: 'keys-exhausted-alert';
@@ -195,7 +216,9 @@ export function useMarketData(): {
             totalKeys: msg.totalKeys,
             exhaustedKeysCount: msg.exhaustedKeysCount,
             allExhausted: msg.allExhausted,
-            assignments: msg.assignments
+            assignments: msg.assignments,
+            exhaustedKeys: msg.exhaustedKeys,
+            poolDetails: msg.poolDetails
           })
           if (!msg.allExhausted) {
             setExhaustAlert(null)

@@ -124,20 +124,24 @@ export class TwelveDataClient extends EventEmitter {
             } else if (data.status === 'error') {
               const code = data.code
               const message: string = data.message || ''
-              const isExhausted =
-                code === 429 ||
-                message.toLowerCase().includes('limit') ||
-                message.toLowerCase().includes('credit') ||
-                message.toLowerCase().includes('exhausted')
+              
+              const isDailyLimit =
+                message.toLowerCase().includes('run out of api credits') ||
+                message.toLowerCase().includes('api credits for the day') ||
+                (message.toLowerCase().includes('credit') && message.toLowerCase().includes('limit being 800'));
 
-              if (isExhausted) {
-                console.error(`[TwelveData] [${this.symbol}] ⚠️ Límite de tasa alcanzado en llave ...${this.apiKey.slice(-6)}. Deteniendo poller y rotando key (cooldown 62s)...`)
-                // Registrar el momento del agotamiento para calcular el cooldown
+              const isRateLimit = code === 429 || message.toLowerCase().includes('rate limit') || message.toLowerCase().includes('too many requests');
+
+              if (isDailyLimit) {
+                console.error(`[TwelveData] [${this.symbol}] 🚫 CRÉDITOS DIARIOS AGOTADOS en llave ...${this.apiKey.slice(-6)}. Deteniendo poller y rotando key...`)
                 this.lastKeyExhaustedAt = Date.now()
-                // Detener ANTES de emitir para que updateApiKey reciba
-                // pollInterval=null y pueda reiniciar limpiamente tras el cooldown.
                 this.stopRestPoller()
-                this.emit('key-exhausted', this.apiKey)
+                this.emit('key-exhausted', this.apiKey, 'daily')
+              } else if (isRateLimit || message.toLowerCase().includes('limit') || message.toLowerCase().includes('credit') || message.toLowerCase().includes('exhausted')) {
+                console.error(`[TwelveData] [${this.symbol}] ⚠️ Límite de tasa alcanzado en llave ...${this.apiKey.slice(-6)}. Deteniendo poller y rotando key (cooldown 62s)...`)
+                this.lastKeyExhaustedAt = Date.now()
+                this.stopRestPoller()
+                this.emit('key-exhausted', this.apiKey, 'rate')
               } else {
                 console.error(`[TwelveData] [${this.symbol}] Error REST Poller:`, message || raw)
               }
