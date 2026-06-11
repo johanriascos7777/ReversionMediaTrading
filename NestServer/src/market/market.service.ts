@@ -238,8 +238,8 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
 
   // ─── Programador de Horario Operativo ────────────────────────────────────────
   // Domingo  : 7:30 PM – Lunes 1:30 AM COT (19:30 – 01:30) (Aumentado 2 hrs)
-  // Lun–Jue  : 7:00 AM – 11:59 PM COT (07:00 – 24:00)
-  // Viernes  : 7:00 AM – 12:00 PM COT (07:00 – 12:00)
+  // Lun–Jue  : 6:00 AM – 11:59 PM COT (06:00 – 24:00)
+  // Viernes  : 6:00 AM – 12:00 PM COT (06:00 – 12:00)
   // Sábado   : Siempre cerrado
   // NOTA: Usamos COT (UTC-5) explícitamente para que funcione igual en
   //       servidores en la nube (Render/UTC) y en máquina local.
@@ -258,21 +258,25 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       return hora > 19 || (hora === 19 && min >= 30);
     }
 
-    // Lunes: sesión extendida hasta la 1:30 AM (extensión del domingo), y luego 7:00 AM en adelante
+    // Lunes: sesión de madrugada (extensión de domingo) hasta la 1:30 AM, y luego 6:00 AM en adelante
     if (dia === 1) {
       const extensionDomingo = hora === 0 || (hora === 1 && min < 30);
-      const sesionEstandar = hora >= 7;
+      const sesionEstandar = hora >= 6;
       return extensionDomingo || sesionEstandar;
     }
 
-    // Martes a Jueves: 7:00 AM en adelante
+    // Martes a Jueves: sesión de madrugada (extensión del día anterior) hasta la 1:30 AM, y luego 6:00 AM en adelante
     if (dia >= 2 && dia <= 4) {
-      return hora >= 7;
+      const extensionDiaAnterior = hora === 0 || (hora === 1 && min < 30);
+      const sesionEstandar = hora >= 6;
+      return extensionDiaAnterior || sesionEstandar;
     }
 
-    // Viernes: 7:00 AM – 12:00 PM
+    // Viernes: sesión de madrugada (extensión del jueves) hasta la 1:30 AM, y sesión estándar 6:00 AM – 12:00 PM
     if (dia === 5) {
-      return hora >= 7 && hora < 12;
+      const extensionDiaAnterior = hora === 0 || (hora === 1 && min < 30);
+      const sesionEstandar = hora >= 6 && hora < 12;
+      return extensionDiaAnterior || sesionEstandar;
     }
 
     // Sábado: siempre cerrado
@@ -426,7 +430,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       this.events.emit('broadcast', {
         type: 'status',
         status: 'disconnected',
-        message: 'Sistema dormido fuera de horario operativo (Dom 7:30PM–11:30PM · Lun–Jue 7AM–10PM · Vie 7AM–12PM COT)',
+        message: 'Sistema dormido fuera de horario operativo (Dom 7:30PM–11:30PM · Lun–Jue 6AM–10PM · Vie 6AM–12PM COT)',
       } satisfies BackendMessage);
 
     } else if (!operational && !this.engineRunning) {

@@ -56,6 +56,7 @@ export class TradeService {
     trade.direction = dto.direction;
     trade.tradeType = dto.tradeType;
     trade.tradeMode = dto.tradeMode ?? 'normal';
+    trade.accountType = dto.accountType ?? 'demo';
     if (dto.hasTypeC !== undefined) trade.hasTypeC = dto.hasTypeC;
     if (trade.tradeMode === 'experimental' && dto.hasPedestrianLight !== undefined) {
       trade.hasPedestrianLight = dto.hasPedestrianLight;
@@ -144,6 +145,7 @@ export class TradeService {
     if (dto.direction !== undefined) trade.direction = dto.direction;
     if (dto.tradeType !== undefined) trade.tradeType = dto.tradeType;
     if (dto.tradeMode !== undefined) trade.tradeMode = dto.tradeMode;
+    if (dto.accountType !== undefined) trade.accountType = dto.accountType;
     if (dto.hasTypeC !== undefined) trade.hasTypeC = dto.hasTypeC;
     if (trade.tradeMode === 'experimental' && dto.hasPedestrianLight !== undefined) {
       trade.hasPedestrianLight = dto.hasPedestrianLight;
@@ -318,10 +320,13 @@ export class TradeService {
 
   // ─── ANALYTICS ───────────────────────────────────────────────────────────
 
-  async getAnalytics(tradeMode?: string, minTrades: number = 3) {
+  async getAnalytics(tradeMode?: string, minTrades: number = 3, accountType?: string) {
     const where: Record<string, any> = {};
     if (tradeMode === 'normal' || tradeMode === 'experimental') {
       where['tradeMode'] = tradeMode;
+    }
+    if (accountType === 'demo' || accountType === 'real') {
+      where['accountType'] = accountType;
     }
     const all = await this.tradeRepo.find(
       where as any,

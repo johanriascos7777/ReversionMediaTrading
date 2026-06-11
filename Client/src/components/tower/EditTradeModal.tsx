@@ -4,7 +4,7 @@
  * Permite calcular de forma automática el "tiempo en holgura" transcurrido desde la apertura.
  */
 import { useState, useEffect } from 'react'
-import type { Trade, TradeDirection, TradeType, TradeOutcome, CloseReason, TradeMode } from '../../hooks/useTrades'
+import type { Trade, TradeDirection, TradeType, TradeOutcome, CloseReason, TradeMode, AccountType } from '../../hooks/useTrades'
 import { API_URL } from '@/config/env'
 
 export const parseScreenshotUrls = (val: any): string[] => {
@@ -66,6 +66,7 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
 
   const [notes, setNotes] = useState(trade.notes ?? '')
   const [tradeMode, setTradeMode] = useState<TradeMode>(trade.tradeMode ?? 'normal')
+  const [accountType, setAccountType] = useState<AccountType>(trade.accountType ?? 'demo')
   const [submitting, setSubmitting] = useState(false)
 
   // Fecha/hora de apertura editable
@@ -150,6 +151,7 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
       direction,
       tradeType,
       tradeMode,
+      accountType,
       entryPrice: parseFloat(entryPrice),
       leverage: parseInt(leverage),
       spread: parseFloat(spread),
@@ -313,6 +315,28 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
                 textTransform: 'capitalize',
               }}>
                 {m === 'experimental' ? '🧪 Experimental' : '💼 Normal'}
+              </button>
+            ))}
+          </div>
+        </Field>
+
+        {/* Tipo de Cuenta (Demo vs. Real) */}
+        <Field label="Tipo de Cuenta">
+          <div style={{ display: 'flex', gap: 8 }}>
+            {(['demo', 'real'] as AccountType[]).map(a => (
+              <button key={a} type="button" onClick={() => setAccountType(a)} style={{
+                flex: 1, padding: '8px 0', borderRadius: 8, cursor: 'pointer',
+                fontSize: 12, fontWeight: accountType === a ? 700 : 500,
+                background: accountType === a
+                  ? (a === 'real' ? 'rgba(16,185,129,0.2)' : 'rgba(167,139,250,0.2)')
+                  : 'rgba(255,255,255,0.03)',
+                color: accountType === a ? (a === 'real' ? '#10b981' : '#a78bfa') : '#6b7280',
+                border: accountType === a
+                  ? `1px solid ${a === 'real' ? '#10b981' : '#a78bfa'}30`
+                  : '1px solid rgba(255,255,255,0.06)',
+                textTransform: 'capitalize',
+              }}>
+                {a === 'real' ? '👑 Real' : '🎮 Demo'}
               </button>
             ))}
           </div>

@@ -1,6 +1,6 @@
 import type {
   TradeDirection, TradeType, TradingSession,
-  ElasticityState, StructureState, DivergenceType, TrendDirection, TradeMode,
+  ElasticityState, StructureState, DivergenceType, TrendDirection, TradeMode, AccountType,
 } from '../trade.entity';
 
 export class CreateTradeDto {
@@ -9,6 +9,7 @@ export class CreateTradeDto {
   direction!: TradeDirection;
   tradeType!: TradeType;
   tradeMode?: TradeMode;
+  accountType?: AccountType;
   hasTypeC?: boolean | null;
   hasPedestrianLight?: boolean | null;
 

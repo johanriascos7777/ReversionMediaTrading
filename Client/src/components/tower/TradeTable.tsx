@@ -38,6 +38,7 @@ export function TradeTable({ trades, onClose, onUpdate, onDelete }: Props) {
   const [filterSymbol, setFilterSymbol] = useState('all')
   const [filterOutcome, setFilterOutcome] = useState('all')
   const [filterSession, setFilterSession] = useState('all')
+  const [filterAccountType, setFilterAccountType] = useState('all')
   const [closingTrade, setClosingTrade] = useState<Trade | null>(null)
   const [editingTrade, setEditingTrade] = useState<Trade | null>(null)
   const [lightboxUrls, setLightboxUrls] = useState<string[]>([])
@@ -62,11 +63,13 @@ export function TradeTable({ trades, onClose, onUpdate, onDelete }: Props) {
   const symbols = ['all', ...Array.from(new Set(trades.map(t => t.symbol)))]
   const outcomes = ['all', 'open', 'win', 'loss', 'breakeven']
   const sessions = ['all', 'asian', 'european', 'american', 'pacific']
+  const accountTypes = ['all', 'demo', 'real']
 
   const filtered = trades.filter(t => {
     if (filterSymbol !== 'all' && t.symbol !== filterSymbol) return false
     if (filterOutcome !== 'all' && t.outcome !== filterOutcome) return false
     if (filterSession !== 'all' && t.session !== filterSession) return false
+    if (filterAccountType !== 'all' && t.accountType !== filterAccountType) return false
     return true
   })
 
@@ -88,6 +91,7 @@ export function TradeTable({ trades, onClose, onUpdate, onDelete }: Props) {
         <FilterSelect label="Par" value={filterSymbol} onChange={setFilterSymbol} options={symbols} />
         <FilterSelect label="Estado" value={filterOutcome} onChange={setFilterOutcome} options={outcomes} />
         <FilterSelect label="Sesión" value={filterSession} onChange={setFilterSession} options={sessions} />
+        <FilterSelect label="Cuenta" value={filterAccountType} onChange={setFilterAccountType} options={accountTypes} />
         <span style={{ marginLeft: 'auto', fontSize: 11, color: '#6b7280', alignSelf: 'center' }}>
           {filtered.length} operaciones
         </span>
@@ -98,7 +102,7 @@ export function TradeTable({ trades, onClose, onUpdate, onDelete }: Props) {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
           <thead>
             <tr style={{ background: 'rgba(255,255,255,0.03)' }}>
-              {['#', 'Par', 'Fecha', 'Dir', 'Entrada', 'Salida', 'P&L', 'Lev', 'Sesión', 'M5', 'M15', 'Structure', 'Tipo C', '🚶 Semáforo', 'RSI', 'Tipo', 'Modo', 'Duración', 'Estado', 'Acc'].map(h => (
+              {['#', 'Par', 'Cuenta', 'Fecha', 'Dir', 'Entrada', 'Salida', 'P&L', 'Lev', 'Sesión', 'M5', 'M15', 'Structure', 'Tipo C', '🚶 Semáforo', 'RSI', 'Tipo', 'Modo', 'Duración', 'Estado', 'Acc'].map(h => (
                 <Th key={h}>{h}</Th>
               ))}
             </tr>
@@ -106,7 +110,7 @@ export function TradeTable({ trades, onClose, onUpdate, onDelete }: Props) {
           <tbody>
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={20} style={{ textAlign: 'center', padding: '32px 0', color: '#4b5563', fontSize: 12 }}>
+                <td colSpan={21} style={{ textAlign: 'center', padding: '32px 0', color: '#4b5563', fontSize: 12 }}>
                   Sin operaciones registradas
                 </td>
               </tr>
@@ -140,6 +144,17 @@ export function TradeTable({ trades, onClose, onUpdate, onDelete }: Props) {
                         )
                       })()}
                     </div>
+                  </Td>
+                  <Td>
+                    {t.accountType === 'real' ? (
+                      <span style={{ color: '#fbbf24', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <span>👑</span> <span style={{ fontSize: 10 }}>Real</span>
+                      </span>
+                    ) : (
+                      <span style={{ color: '#38bdf8', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <span>🎮</span> <span style={{ fontSize: 10 }}>Demo</span>
+                      </span>
+                    )}
                   </Td>
                   <Td mono style={{ color: '#9ca3af', fontSize: 10 }}>{formatDate(t.openedAt)}</Td>
                   <Td>
@@ -187,7 +202,7 @@ export function TradeTable({ trades, onClose, onUpdate, onDelete }: Props) {
                   <Td style={{ textTransform: 'capitalize' }}>{t.tradeType}</Td>
                   <Td>
                     {t.tradeMode === 'experimental' ? (
-                      <span style={{ color: '#a78bfa', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
+                       <span style={{ color: '#a78bfa', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
                         <span>🧪</span> <span style={{ fontSize: 10 }}>Exp</span>
                       </span>
                     ) : (

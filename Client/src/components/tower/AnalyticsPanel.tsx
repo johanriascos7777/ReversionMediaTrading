@@ -8,10 +8,11 @@ interface Props {
   analytics: Analytics | null
   analyticsMode: string
   analyticsMinTrades: number
-  fetchAnalytics: (tradeMode?: string, minTrades?: number) => Promise<void>
+  analyticsAccountType: string
+  fetchAnalytics: (tradeMode?: string, minTrades?: number, accountType?: string) => Promise<void>
 }
 
-export function AnalyticsPanel({ analytics, analyticsMode, analyticsMinTrades, fetchAnalytics }: Props) {
+export function AnalyticsPanel({ analytics, analyticsMode, analyticsMinTrades, analyticsAccountType, fetchAnalytics }: Props) {
   if (!analytics) {
     return (
       <div style={{
@@ -64,6 +65,46 @@ export function AnalyticsPanel({ analytics, analyticsMode, analyticsMinTrades, f
                 color: analyticsMode === m ? '#fff' : '#6b7280',
                 border: 'none',
                 boxShadow: analyticsMode === m ? '0 4px 12px rgba(124,58,237,0.2)' : 'none',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Selector de Tipo de Cuenta */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        background: 'rgba(255,255,255,0.02)',
+        border: '1px solid rgba(255,255,255,0.05)',
+        padding: '6px 12px',
+        borderRadius: 12,
+        marginBottom: 4,
+        flexWrap: 'wrap',
+        gap: 8,
+      }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+          💳 Tipo de Cuenta
+        </span>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {([['all', '💼 Todas'], ['demo', '🎮 Demo'], ['real', '👑 Real']] as const).map(([a, label]) => (
+            <button
+              key={a}
+              onClick={() => fetchAnalytics(undefined, undefined, a)}
+              style={{
+                padding: '6px 14px',
+                borderRadius: 8,
+                cursor: 'pointer',
+                fontSize: 11,
+                fontWeight: analyticsAccountType === a ? 700 : 500,
+                background: analyticsAccountType === a ? 'linear-gradient(135deg, #7c3aed, #a78bfa)' : 'transparent',
+                color: analyticsAccountType === a ? '#fff' : '#6b7280',
+                border: 'none',
+                boxShadow: analyticsAccountType === a ? '0 4px 12px rgba(124,58,237,0.2)' : 'none',
                 transition: 'all 0.15s ease',
               }}
             >

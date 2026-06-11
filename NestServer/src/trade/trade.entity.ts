@@ -11,6 +11,7 @@ export type StructureState = 'STRONG' | 'MODERATE' | 'WEAK';
 export type DivergenceType = 'bearish' | 'bullish' | 'none';
 export type TrendDirection = 'up' | 'down' | 'flat';
 export type TradeMode = 'normal' | 'experimental';
+export type AccountType = 'demo' | 'real';
 
 @Entity()
 export class Trade {
@@ -30,6 +31,9 @@ export class Trade {
 
   @Property({ length: 15, default: 'normal', fieldName: 'trade_mode' })
   tradeMode: TradeMode = 'normal';
+
+  @Property({ length: 8, default: 'demo', fieldName: 'account_type' })
+  accountType: AccountType = 'demo';
 
   @Property({ type: 'boolean', nullable: true, fieldName: 'has_type_c' })
   hasTypeC?: boolean | null;

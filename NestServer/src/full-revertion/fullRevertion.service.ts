@@ -71,7 +71,9 @@ export class FullRevertionService implements OnModuleInit {
   onModuleInit() {
     this.marketService.events.on('broadcast', (msg: BackendMessage) => {
       if (msg.type !== 'snapshot') return;
-      this.onSnapshot(msg.symbol, msg.m5.timestamp, msg.m5.price);
+      setImmediate(() => {
+        this.onSnapshot(msg.symbol, msg.m5.timestamp, msg.m5.price);
+      });
     });
 
     console.log('[FullReversionService] ✅ Inicializado — escuchando snapshots (M5 · M15 · Fusión).');
@@ -279,6 +281,26 @@ export class FullRevertionService implements OnModuleInit {
     if (fusedState.preAlertActive && currentTriggerState === 'giro') {
       const canAlert = now - fusedState.lastFusedAlertTime > FUSED_ALERT_COOLDOWN_MS;
       if (canAlert) {
+        // Verificar si se ha enviado una alerta Tipo A o Tipo C recientemente en el motor base (últimos 15 min)
+        const symbolState = (this.marketService as any).symbolStates?.get(symbol);
+        if (symbolState) {
+          const lastA = symbolState.lastTelegramAlertTimeA ?? 0;
+          const lastAExp = symbolState.lastTelegramAlertTimeAExp ?? 0;
+          const lastC = symbolState.lastTelegramAlertTimeTrigger ?? 0;
+          const lastCExp = symbolState.lastTelegramAlertTimeTriggerExp ?? 0;
+
+          const baseAlertWindow = 15 * 60 * 1000; // 15 minutos
+          const hasRecentA = (now - lastA) < baseAlertWindow;
+          const hasRecentAExp = (now - lastAExp) < baseAlertWindow;
+          const hasRecentC = (now - lastC) < baseAlertWindow;
+          const hasRecentCExp = (now - lastCExp) < baseAlertWindow;
+
+          if (!hasRecentA && !hasRecentAExp && !hasRecentC && !hasRecentCExp) {
+            console.log(`[FullRevertion] [${symbol}] Alerta fusionada omitida: sin alertas Tipo A ni Tipo C recientes en el motor base.`);
+            return;
+          }
+        }
+
         fusedState.lastFusedAlertTime = now;
         fusedState.preAlertActive = false; // resetear pre-alerta
         
@@ -370,76 +392,12 @@ export class FullRevertionService implements OnModuleInit {
     try {
       const isAboveEMA  = snapM5.price > snapM5.ema100;
       const direction   = isAboveEMA ? 'SELL' : 'BUY';
-      const dirEmoji    = direction === 'BUY' ? '🟢 COMPRA (BUY) 📈' : '🔴 VENTA (SELL) 📉';
       const decimals    = symbol.includes('JPY') ? 3 : 5;
       const priceStr    = snapM5.price.toFixed(decimals);
-      const emaStr      = snapM5.ema100.toFixed(decimals);
 
-      const slopeLabelM5  = snapM5.emaSlope  === 'FLAT' ? '✅ PLANA'  : '⚠️ SUAVE';
-      const slopeLabelM15 = snapM15.emaSlope === 'FLAT' ? '✅ PLANA'  : '⚠️ SUAVE';
-
-      const winRateEmoji  = backtest && backtest.winRate >= 70 ? '🔥🔥🔥' : backtest && backtest.winRate >= 55 ? '🔥🔥' : '🔥';
-      const timeStr = new Date().toLocaleString('es-CO', {
-        timeZone: 'America/Bogota', year: 'numeric', month: 'short',
-        day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit'
-      });
-
-      // Confluencia Estructural
-      let divText = 'Ninguna';
-      if (snapM5.divergence === 'bearish') divText = 'Bajista RSI 🐻';
-      if (snapM5.divergence === 'bullish') divText = 'Alcista RSI 🐂';
-
-      let srText = 'Ninguno';
-      if (snapM5.nearestSR) {
-        const srTypeLabel = snapM5.nearestSR.type === 'resistance' ? 'Resistencia' : 'Soporte';
-        srText = `${srTypeLabel} en \`${snapM5.nearestSR.price.toFixed(decimals)}\` (fuerza ${snapM5.nearestSR.strength})`;
-      }
-
-      // ─── Mensaje fusionado — máxima convicción ────────────────────────────
       let msg = `🔱🔱🔱🔱🔱🔱🔱🔱🔱🔱🔱🔱\n`;
       msg    += `🚨🌊 *FULL REVERSION — FUSIONADO* 🌊🚨\n`;
-      msg    += `✨ *M5 + M15 ALINEADOS — GIRO CONFIRMADO* ✨\n`;
-      msg    += `🔱🔱🔱🔱🔱🔱🔱🔱🔱🔱🔱🔱\n\n`;
-      msg    += `📍 *Par:* \`${symbol}\`\n`;
-      msg    += `🎯 *Dirección:* ${dirEmoji}\n`;
-      msg    += `💰 *Precio:* \`${priceStr}\`  ·  *EMA100:* \`${emaStr}\`\n\n`;
-
-      msg    += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-      msg    += `🪃 *Gatillo:* La resortera ha comenzado a ceder (giro confirmado en vela cerrada M5).\n\n`;
-
-      msg    += `🏰 *Confluencias Estructurales (M5):*\n`;
-      msg    += `   · Divergencia: ${divText}\n`;
-      msg    += `   · S/R Cercano: ${srText}\n\n`;
-
-      msg    += `🎯 *Parámetros Sugeridos (Broker):*\n`;
-      msg    += `   · *TP (EMA100):* \`${snapM5.tpPrice?.toFixed(decimals)}\`\n`;
-      msg    += `   · *SL (1.8 ATR):* \`${snapM5.slPrice?.toFixed(decimals)}\`\n\n`;
-
-      msg    += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-      msg    += `📊 *Estado Multi-Timeframe:*\n`;
-      msg    += `   🕐 *M5* — Elasticidad: \`${snapM5.elasticity.toFixed(3)}\` _(P${snapM5.percentile.toFixed(0)}%)_ 🟢 GREEN\n`;
-      msg    += `      Pendiente: ${slopeLabelM5} \`${Math.abs(snapM5.emaSlopeValue).toFixed(3)} ATR/10b\`\n\n`;
-      msg    += `   🕑 *M15* — Elasticidad: \`${snapM15.elasticity.toFixed(3)}\` _(P${snapM15.percentile.toFixed(0)}%)_ 🟢 GREEN\n`;
-      msg    += `      Pendiente: ${slopeLabelM15} \`${Math.abs(snapM15.emaSlopeValue).toFixed(3)} ATR/10b\`\n\n`;
-
-      if (backtest) {
-        msg  += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-        msg  += `${winRateEmoji} *Backtest Full Reversion (${FR_BACKTEST_BARS}b):*\n`;
-        msg  += `   · Win Rate con filtro: \`${backtest.winRate}%\`\n`;
-        msg  += `   · Señales permitidas: \`${backtest.allowedSignals}\`\n`;
-        msg  += `   · Bloqueadas por tendencia: \`${backtest.filteredBySlope}\`\n`;
-        msg  += `   · Promedio al cruce completo: \`${backtest.avgBarsToRevert} barras M5\`\n\n`;
-      }
-
-      msg    += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-      msg    += `🔍 *¿Por qué esta es la señal más fuerte?*\n`;
-      msg    += `   ✅ M5 sobreestirado + Giro confirmado\n`;
-      msg    += `   ✅ M15 sobreestirado + Pendiente permitida\n`;
-      msg    += `   ✅ El precio tiene presión de reversión en AMBOS marcos\n`;
-      msg    += `   🚫 No es un simple pullback en tendencia\n\n`;
-
-      msg    += `⏱ _${timeStr} COT_\n`;
-      msg    += `🔱🔱🔱🔱🔱🔱🔱🔱🔱🔱🔱🔱`;
+      msg    += `REVISA TU DASHBOARD... SYMBOLO ${symbol}`;
 
       await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
         method: 'POST',
@@ -447,7 +405,7 @@ export class FullRevertionService implements OnModuleInit {
         body: JSON.stringify({ chat_id: chatId, text: msg, parse_mode: 'Markdown' }),
       });
 
-      console.log(`[FullRevertion] 🔱 Alerta FUSIONADA M5+M15 enviada: ${symbol} | ${direction} @ ${priceStr}`);
+      console.log(`[FullRevertion] 🔱 Alerta FUSIONADA M5+M15 enviada: ${symbol} | ${direction} @ ${priceStr} (M15: ${snapM15.state}, BT: ${backtest?.winRate ?? 0}%)`);
     } catch (err) {
       console.error('[FullRevertion] ❌ Error alerta fusionada:', err);
     }
