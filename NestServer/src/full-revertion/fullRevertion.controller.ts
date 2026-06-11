@@ -41,16 +41,11 @@ export class FullRevertionController {
 
     const bothGreen   = snapM5.state === 'GREEN' && snapM15?.state === 'GREEN';
     const bothAllowed = snapM5.signalAllowed && (snapM15?.signalAllowed ?? false);
-    const triggerState = snapM5.triggerState ?? 'reposo';
+    const fusedActive = bothGreen && bothAllowed;
 
     let recommendation: string;
-    let fusedActive = false;
-
-    if (triggerState === 'giro') {
-      fusedActive = true;
-      recommendation = `🔱 ¡GIRO CONFIRMADO! ENTRADA ACTIVA — M5+M15 con confluencia y pendiente permitida. WinRate histórico: ${backtest?.winRate ?? '?'}%.`;
-    } else if (triggerState === 'estirando') {
-      recommendation = `⏳ PREPARAR ENTRADA — La resortera se está estirando en zona extrema. Espera el Giro de Vela M5 (Candle Close).`;
+    if (fusedActive) {
+      recommendation = `🔱 SEÑAL FUSIONADA ACTIVA — M5+M15 GREEN con pendiente plana. WinRate histórico: ${backtest?.winRate ?? '?'}%. Alta convicción.`;
     } else if (bothGreen && !bothAllowed) {
       recommendation = `🚫 SEÑAL BLOQUEADA — Confluencia M5+M15 detectada pero la EMA100 está en tendencia fuerte (STEEP).`;
     } else {
@@ -60,7 +55,6 @@ export class FullRevertionController {
     return res.status(HttpStatus.OK).json({
       symbol,
       updatedAt: new Date(snapM5.timestamp).toISOString(),
-      auditedSignals: this.frService.getAuditedSignals(),
 
       // ─── Fusión multi-TF ─────────────────────────────────────
       fused: {

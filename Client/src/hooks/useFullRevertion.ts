@@ -30,12 +30,6 @@ export interface FullRevertionSnapshotDetail {
   } | null
   tpPrice?: number
   slPrice?: number
-  ema50?: number
-  elasticity50?: number
-  tp50Price?: number
-  stochK?: number
-  stochD?: number
-  cci?: number
 }
 
 export interface FullRevertionBacktestDetail {
@@ -48,35 +42,9 @@ export interface FullRevertionBacktestDetail {
   events?: any[]
 }
 
-export type AuditVerdict = 'VIP' | 'APPROVED' | 'WARNING' | 'REJECTED';
-
-export interface AuditedSignal {
-  id: string
-  symbol: string
-  direction: 'BUY' | 'SELL'
-  alertName: string
-  price: number
-  timestamp: number
-  verdict: AuditVerdict
-  verdictText: string
-  emaSlope: string
-  emaSlopeValue: number
-  elasticityM5: number
-  divergence: string
-  nearestSR: string
-  tpPrice: number
-  slPrice: number
-  ema50?: number
-  tp50Price?: number
-  stochK?: number
-  stochD?: number
-  cci?: number
-}
-
 export interface FullRevertionStatusResponse {
   symbol: string
   updatedAt: string
-  auditedSignals?: AuditedSignal[]
   fused: {
     bothGreen: boolean
     bothAllowed: boolean
@@ -90,18 +58,16 @@ export interface FullRevertionStatusResponse {
   recommendation: string
 }
 
-export function useFullRevertion(activeSymbol: string, pollIntervalMs = 5000, mode: 'standard' | 'reforced' = 'standard') {
+export function useFullRevertion(activeSymbol: string, pollIntervalMs = 5000) {
   const [symbols, setSymbols] = useState<string[]>([])
   const [status, setStatus] = useState<FullRevertionStatusResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const prefix = mode === 'reforced' ? '/full-revertion-reforced' : '/full-revertion';
-
   // 1. Cargar lista de símbolos disponibles
   const fetchSymbols = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}${prefix}/symbols`)
+      const res = await fetch(`${API_URL}/full-revertion/symbols`)
       if (!res.ok) throw new Error(`Status ${res.status}`)
       const data = await res.json()
       if (data && Array.isArray(data.symbols)) {
@@ -110,13 +76,13 @@ export function useFullRevertion(activeSymbol: string, pollIntervalMs = 5000, mo
     } catch (err: any) {
       console.error('[useFullRevertion] Error cargando símbolos:', err)
     }
-  }, [prefix])
+  }, [])
 
   // 2. Cargar estado de un símbolo específico
   const fetchStatus = useCallback(async (sym: string) => {
     if (!sym) return
     try {
-      const res = await fetch(`${API_URL}${prefix}/status?symbol=${encodeURIComponent(sym)}`)
+      const res = await fetch(`${API_URL}/full-revertion/status?symbol=${encodeURIComponent(sym)}`)
       if (!res.ok) {
         if (res.status === 404) {
           setStatus(null)
@@ -130,7 +96,7 @@ export function useFullRevertion(activeSymbol: string, pollIntervalMs = 5000, mo
     } catch (err: any) {
       setError(err.message || 'Error cargando estado')
     }
-  }, [prefix])
+  }, [])
 
   // Carga inicial de símbolos
   useEffect(() => {
@@ -149,7 +115,7 @@ export function useFullRevertion(activeSymbol: string, pollIntervalMs = 5000, mo
     }, pollIntervalMs)
 
     return () => clearInterval(interval)
-  }, [activeSymbol, fetchStatus, pollIntervalMs, mode])
+  }, [activeSymbol, fetchStatus, pollIntervalMs])
 
   const refetch = useCallback(() => {
     if (!activeSymbol) return

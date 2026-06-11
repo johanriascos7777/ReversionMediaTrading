@@ -45,15 +45,9 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
       try {
         await this.pollUpdates();
       } catch (err) {
-        const isRateLimit = err.message && err.message.includes('429');
-        if (isRateLimit) {
-          console.warn('[Telegram-Bot] Rate limit exceeded (HTTP 429). Waiting 30 seconds before retrying to respect Telegram API rules...');
-          await new Promise(resolve => setTimeout(resolve, 30000));
-        } else {
-          console.error('[Telegram-Bot] Polling error:', err);
-          // Wait 5 seconds before retrying on general crash
-          await new Promise(resolve => setTimeout(resolve, 5000));
-        }
+        console.error('[Telegram-Bot] Polling error:', err);
+        // Wait 5 seconds before retrying on crash
+        await new Promise(resolve => setTimeout(resolve, 5000));
       }
     }
   }

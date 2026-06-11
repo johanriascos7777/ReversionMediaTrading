@@ -25,12 +25,12 @@ import type {
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
-const EMA_PERIOD = 100;
-const ATR_PERIOD = 14;
-const SLOPE_LOOKBACK = 10;   // barras hacia atrás para medir el movimiento de la EMA
-const SLOPE_FLAT_ATR = 0.5;  // |slopeATRUnits| < 0.5  → FLAT
+const EMA_PERIOD       = 100;
+const ATR_PERIOD       = 14;
+const SLOPE_LOOKBACK   = 10;   // barras hacia atrás para medir el movimiento de la EMA
+const SLOPE_FLAT_ATR   = 0.5;  // |slopeATRUnits| < 0.5  → FLAT
 const SLOPE_GENTLE_ATR = 1.0;  // |slopeATRUnits| < 1.0  → GENTLE, >= 1.0 = STEEP
-const PERCENTILE_GREEN = 80;
+const PERCENTILE_GREEN  = 80;
 const PERCENTILE_YELLOW = 60;
 
 // ─── EMA (Exponential Moving Average) ────────────────────────────────────────
@@ -192,32 +192,32 @@ function resolveState(elasticity: number, percentile: number): FRState {
  * Devuelve null si no hay suficientes velas para calcular EMA100 + slope.
  */
 export function calculateFullRevertionSnapshot(
-  symbol: string,
-  candles: Candle[],
-  price: number,
+  symbol:    string,
+  candles:   Candle[],
+  price:     number,
   timeframe: 'M5' | 'M15',
   timestamp: number
 ): FullRevertionSnapshot | null {
   // Necesitamos EMA_PERIOD + SLOPE_LOOKBACK + ATR_PERIOD barras mínimo
   if (candles.length < EMA_PERIOD + SLOPE_LOOKBACK + 2) return null;
 
-  const closes = candles.map(c => c.close);
-  const ema100 = calculateEMA(closes, EMA_PERIOD);
-  const atr = calculateATR(candles, ATR_PERIOD);
+  const closes  = candles.map(c => c.close);
+  const ema100  = calculateEMA(closes, EMA_PERIOD);
+  const atr     = calculateATR(candles, ATR_PERIOD);
   if (atr === 0) return null;
 
   const elasticity = Math.abs(price - ema100) / atr;
 
   // Calcular serie EMA completa para medir slope
-  const emaSeries = calculateEMASeries(closes, EMA_PERIOD);
-  const lastEMAIdx = closes.length - 1;
+  const emaSeries   = calculateEMASeries(closes, EMA_PERIOD);
+  const lastEMAIdx  = closes.length - 1;
   const slopeResult = calculateEMASlope(emaSeries, lastEMAIdx, atr);
 
   const signalAllowed = slopeResult.slope !== 'STEEP';
 
-  const engine = getPercentileEngine(symbol, timeframe);
+  const engine    = getPercentileEngine(symbol, timeframe);
   const percentile = engine.rank(elasticity);
-  const state = resolveState(elasticity, percentile);
+  const state     = resolveState(elasticity, percentile);
 
   return {
     symbol,
@@ -228,8 +228,8 @@ export function calculateFullRevertionSnapshot(
     elasticity,
     percentile,
     state,
-    emaSlope: slopeResult.slope,
-    emaSlopeValue: slopeResult.value,
+    emaSlope:       slopeResult.slope,
+    emaSlopeValue:  slopeResult.value,
     slopeDirection: slopeResult.direction,
     signalAllowed,
     timestamp,
@@ -247,8 +247,8 @@ export function calculateFullRevertionSnapshot(
  * - Ventana por defecto: 50 barras (≈ 4 horas en M5).
  */
 export function runFullRevertionBacktest(
-  candles: Candle[],
-  maxBarsToRevert: number = 50
+  candles:          Candle[],
+  maxBarsToRevert:  number = 50
 ): FullRevertionBacktestResult {
   const events: FRBacktestEvent[] = [];
 
@@ -256,18 +256,18 @@ export function runFullRevertionBacktest(
   const minCandles = EMA_PERIOD + SLOPE_LOOKBACK + maxBarsToRevert + 5;
   if (candles.length < minCandles) {
     return {
-      totalSignals: 0,
-      allowedSignals: 0,
-      wins: 0,
-      winRate: 0,
+      totalSignals:    0,
+      allowedSignals:  0,
+      wins:            0,
+      winRate:         0,
       filteredBySlope: 0,
       avgBarsToRevert: 0,
-      events: [],
+      events:          [],
     };
   }
 
   // Calcular la serie EMA completa de una sola vez (eficiente)
-  const closes = candles.map(c => c.close);
+  const closes    = candles.map(c => c.close);
   const emaSeries = calculateEMASeries(closes, EMA_PERIOD);
 
   const localPercentile = new FullRevertionPercentileEngine(200);
@@ -291,18 +291,18 @@ export function runFullRevertionBacktest(
     const atr = atrCount > 0 ? atrSum / atrCount : 0.0001;
     if (atr === 0) continue;
 
-    const ema = emaSeries[i];
+    const ema      = emaSeries[i];
     const elasticity = Math.abs(candle.close - ema) / atr;
 
     localPercentile.push(elasticity);
     const percentile = localPercentile.rank(elasticity);
-    const state = resolveState(elasticity, percentile);
+    const state      = resolveState(elasticity, percentile);
 
     // Solo nos interesan los momentos donde había señal GREEN
     if (state !== 'GREEN') continue;
 
     // Calcular pendiente en este punto histórico
-    const slopeResult = calculateEMASlope(emaSeries, i, atr);
+    const slopeResult    = calculateEMASlope(emaSeries, i, atr);
     const blockedBySlope = slopeResult.slope === 'STEEP';
 
     // Buscar cruce completo: precio CIERRA al otro lado de la EMA
@@ -315,17 +315,17 @@ export function runFullRevertionBacktest(
 
       // Cruce completo: el cierre de la futura vela cruza la EMA
       // (no solo el low/high como en el backtest estándar)
-      const crossedDown = isAboveEMA && future.close < futureEMA;
-      const crossedUp = !isAboveEMA && future.close > futureEMA;
+      const crossedDown = isAboveEMA  && future.close < futureEMA;
+      const crossedUp   = !isAboveEMA && future.close > futureEMA;
 
       if (crossedDown || crossedUp) {
         events.push({
-          entryIndex: i,
-          exitIndex: i + j,
-          barsToRevert: j,
+          entryIndex:     i,
+          exitIndex:      i + j,
+          barsToRevert:   j,
           elasticity,
-          emaSlope: slopeResult.slope,
-          slopeValue: slopeResult.value,
+          emaSlope:       slopeResult.slope,
+          slopeValue:     slopeResult.value,
           blockedBySlope,
         });
         reverted = true;
@@ -335,12 +335,12 @@ export function runFullRevertionBacktest(
 
     if (!reverted) {
       events.push({
-        entryIndex: i,
-        exitIndex: -1,
-        barsToRevert: maxBarsToRevert,
+        entryIndex:     i,
+        exitIndex:      -1,
+        barsToRevert:   maxBarsToRevert,
         elasticity,
-        emaSlope: slopeResult.slope,
-        slopeValue: slopeResult.value,
+        emaSlope:       slopeResult.slope,
+        slopeValue:     slopeResult.value,
         blockedBySlope,
       });
     }
@@ -348,17 +348,17 @@ export function runFullRevertionBacktest(
 
   // ─── Métricas ─────────────────────────────────────────────────────────────
 
-  const totalSignals = events.length;
+  const totalSignals    = events.length;
   const filteredBySlope = events.filter(e => e.blockedBySlope).length;
-  const allowedEvents = events.filter(e => !e.blockedBySlope);
-  const allowedSignals = allowedEvents.length;
-  const wins = allowedEvents.filter(e => e.exitIndex !== -1);
+  const allowedEvents   = events.filter(e => !e.blockedBySlope);
+  const allowedSignals  = allowedEvents.length;
+  const wins            = allowedEvents.filter(e => e.exitIndex !== -1);
 
   return {
     totalSignals,
     allowedSignals,
-    wins: wins.length,
-    winRate: allowedSignals === 0 ? 0 : Math.round((wins.length / allowedSignals) * 100),
+    wins:            wins.length,
+    winRate:         allowedSignals === 0 ? 0 : Math.round((wins.length / allowedSignals) * 100),
     filteredBySlope,
     avgBarsToRevert: wins.length === 0 ? 0 : Math.round(wins.reduce((s, e) => s + e.barsToRevert, 0) / wins.length),
     events,
