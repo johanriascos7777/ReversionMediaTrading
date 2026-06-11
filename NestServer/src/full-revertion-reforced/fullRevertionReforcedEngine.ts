@@ -1,16 +1,8 @@
 /**
- * fullRevertionEngine.ts
+ * fullRevertionReforcedEngine.ts
  *
- * Motor matemático del módulo Full Reversion.
- * 100% funciones puras, sin estado global, sin dependencias de NestJS.
- *
- * Diferencias clave frente al motor de elasticidad estándar:
- *   1. Calcula la PENDIENTE de la EMA100 (slope) en unidades de ATR.
- *   2. Bloquea señales cuando la pendiente es STEEP (tendencia fuerte).
- *   3. Backtest con ventana más amplia (50 barras por defecto).
- *   4. "Win" se cuenta solo cuando el precio CIERRA al otro lado de la EMA,
- *      no cuando simplemente la toca — esto distingue reversiones reales
- *      de simples pullbacks.
+ * Motor matemático para Full Reversion Reinforced.
+ * Incluye EMA50, Stochastic (13,3,3) y CCI (14).
  */
 
 import type { Candle } from '../market/types';
@@ -18,19 +10,19 @@ import type {
   EMASlope,
   SlopeDirection,
   FRState,
-  FullRevertionSnapshot,
-  FullRevertionBacktestResult,
+  FullRevertionReforcedSnapshot,
+  FullRevertionReforcedBacktestResult,
   FRBacktestEvent,
-} from './fullRevertion.types';
+} from './fullRevertionReforced.types';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
-const EMA_PERIOD = 100;
-const ATR_PERIOD = 14;
-const SLOPE_LOOKBACK = 10;   // barras hacia atrás para medir el movimiento de la EMA
-const SLOPE_FLAT_ATR = 0.5;  // |slopeATRUnits| < 0.5  → FLAT
-const SLOPE_GENTLE_ATR = 1.0;  // |slopeATRUnits| < 1.0  → GENTLE, >= 1.0 = STEEP
-const PERCENTILE_GREEN = 80;
+const EMA_PERIOD       = 100;
+const ATR_PERIOD       = 14;
+const SLOPE_LOOKBACK   = 10;
+const SLOPE_FLAT_ATR   = 0.5;
+const SLOPE_GENTLE_ATR = 1.0;
+const PERCENTILE_GREEN  = 80;
 const PERCENTILE_YELLOW = 60;
 
 // ─── EMA (Exponential Moving Average) ────────────────────────────────────────
@@ -48,10 +40,6 @@ function calculateEMA(closes: number[], period: number): number {
   return ema;
 }
 
-/**
- * Calcula la serie de EMA para un array de cierres, devuelve array de misma longitud.
- * Útil para calcular el slope en cualquier punto histórico.
- */
 function calculateEMASeries(closes: number[], period: number): number[] {
   const result: number[] = new Array(closes.length).fill(0);
   if (closes.length < period) return result;
@@ -83,15 +71,6 @@ function calculateATR(candles: Candle[], period: number): number {
 
 // ─── EMA Slope Calculator ──────────────────────────────────────────────────────
 
-/**
- * Calcula la pendiente de la EMA100 en el punto actual.
- *
- * La pendiente se mide como la diferencia entre la EMA100 actual
- * y la EMA100 hace SLOPE_LOOKBACK barras, normalizada por el ATR.
- *
- * Retorna el valor en "unidades ATR por SLOPE_LOOKBACK barras".
- * Ej: 0.8 significa que la EMA se ha movido 0.8 ATR en las últimas 10 barras.
- */
 function calculateEMASlope(
   emaSeries: number[],
   currentIndex: number,
@@ -129,7 +108,65 @@ function calculateEMASlope(
   return { value: slopeATRUnits, slope, direction };
 }
 
-// ─── Percentile Engine (ventana deslizante, sin estado global) ────────────────
+// ─── Stochastic & CCI Oscillators ──────────────────────────────────────────
+
+export function calculateStochastic(
+  candles: Candle[],
+  kPeriod: number = 13,
+  dPeriod: number = 3,
+  slowing: number = 3
+): { k: number; d: number } {
+  if (candles.length < kPeriod + dPeriod + slowing) {
+    return { k: 50, d: 50 };
+  }
+
+  const rawK: number[] = [];
+  for (let i = candles.length - (dPeriod + slowing + 5); i < candles.length; i++) {
+    const slice = candles.slice(i - kPeriod + 1, i + 1);
+    if (slice.length < kPeriod) continue;
+    const lows = slice.map(c => c.low);
+    const highs = slice.map(c => c.high);
+    const lowestLow = Math.min(...lows);
+    const highestHigh = Math.max(...highs);
+    const currentClose = candles[i].close;
+    const range = highestHigh - lowestLow;
+    const kVal = range === 0 ? 50 : ((currentClose - lowestLow) / range) * 100;
+    rawK.push(kVal);
+  }
+
+  const smoothedK: number[] = [];
+  for (let i = slowing - 1; i < rawK.length; i++) {
+    const sum = rawK.slice(i - slowing + 1, i + 1).reduce((s, v) => s + v, 0);
+    smoothedK.push(sum / slowing);
+  }
+
+  if (smoothedK.length < dPeriod) {
+    return { k: 50, d: 50 };
+  }
+  const lastK = smoothedK[smoothedK.length - 1];
+  const lastD = smoothedK.slice(-dPeriod).reduce((s, v) => s + v, 0) / dPeriod;
+
+  return { k: lastK, d: lastD };
+}
+
+export function calculateCCI(candles: Candle[], period: number = 14): number {
+  if (candles.length < period) return 0;
+
+  const typicalPrices = candles.map(c => (c.high + c.low + c.close) / 3);
+  const lastTPs = typicalPrices.slice(-period);
+  const smaTP = lastTPs.reduce((s, v) => s + v, 0) / period;
+
+  const meanDevSum = lastTPs.reduce((sum, tp) => sum + Math.abs(tp - smaTP), 0);
+  const meanDeviation = meanDevSum / period;
+
+  if (meanDeviation === 0) return 0;
+
+  const currentTP = typicalPrices[typicalPrices.length - 1];
+  const cci = (currentTP - smaTP) / (0.015 * meanDeviation);
+  return cci;
+}
+
+// ─── Percentile Engine ────────────────────────────────────────────────────────
 
 export class FullRevertionPercentileEngine {
   private window: number[] = [];
@@ -156,11 +193,10 @@ export class FullRevertionPercentileEngine {
   }
 }
 
-// Mapa de instancias por símbolo+timeframe (estado en memoria del proceso)
 const percentileMap = new Map<string, FullRevertionPercentileEngine>();
 
 function getPercentileEngine(symbol: string, timeframe: 'M5' | 'M15'): FullRevertionPercentileEngine {
-  const key = `fr:${symbol}:${timeframe}`;
+  const key = `fr-reforced:${symbol}:${timeframe}`;
   let engine = percentileMap.get(key);
   if (!engine) {
     engine = new FullRevertionPercentileEngine(200);
@@ -173,12 +209,6 @@ export function pushFullRevertionPercentile(symbol: string, timeframe: 'M5' | 'M
   getPercentileEngine(symbol, timeframe).push(elasticity);
 }
 
-export function clearFullRevertionPercentile(symbol: string, timeframe: 'M5' | 'M15'): void {
-  getPercentileEngine(symbol, timeframe).clear();
-}
-
-// ─── State Resolver ───────────────────────────────────────────────────────────
-
 function resolveState(elasticity: number, percentile: number): FRState {
   if (percentile >= PERCENTILE_GREEN) return 'GREEN';
   if (percentile >= PERCENTILE_YELLOW) return 'YELLOW';
@@ -187,37 +217,37 @@ function resolveState(elasticity: number, percentile: number): FRState {
 
 // ─── Snapshot en Tiempo Real ─────────────────────────────────────────────────
 
-/**
- * Calcula el snapshot Full Reversion para el precio actual.
- * Devuelve null si no hay suficientes velas para calcular EMA100 + slope.
- */
 export function calculateFullRevertionSnapshot(
-  symbol: string,
-  candles: Candle[],
-  price: number,
+  symbol:    string,
+  candles:   Candle[],
+  price:     number,
   timeframe: 'M5' | 'M15',
   timestamp: number
-): FullRevertionSnapshot | null {
-  // Necesitamos EMA_PERIOD + SLOPE_LOOKBACK + ATR_PERIOD barras mínimo
+): FullRevertionReforcedSnapshot | null {
   if (candles.length < EMA_PERIOD + SLOPE_LOOKBACK + 2) return null;
 
-  const closes = candles.map(c => c.close);
-  const ema100 = calculateEMA(closes, EMA_PERIOD);
-  const atr = calculateATR(candles, ATR_PERIOD);
+  const closes  = candles.map(c => c.close);
+  const ema100  = calculateEMA(closes, EMA_PERIOD);
+  const ema50   = calculateEMA(closes, 50);
+  const atr     = calculateATR(candles, ATR_PERIOD);
   if (atr === 0) return null;
 
   const elasticity = Math.abs(price - ema100) / atr;
+  const elasticity50 = Math.abs(price - ema50) / atr;
 
-  // Calcular serie EMA completa para medir slope
-  const emaSeries = calculateEMASeries(closes, EMA_PERIOD);
-  const lastEMAIdx = closes.length - 1;
+  const emaSeries   = calculateEMASeries(closes, EMA_PERIOD);
+  const lastEMAIdx  = closes.length - 1;
   const slopeResult = calculateEMASlope(emaSeries, lastEMAIdx, atr);
 
   const signalAllowed = slopeResult.slope !== 'STEEP';
 
-  const engine = getPercentileEngine(symbol, timeframe);
+  const engine    = getPercentileEngine(symbol, timeframe);
   const percentile = engine.rank(elasticity);
-  const state = resolveState(elasticity, percentile);
+  const state     = resolveState(elasticity, percentile);
+
+  // Calcular Osciladores
+  const stoch = calculateStochastic(candles, 13, 3, 3);
+  const cciVal = calculateCCI(candles, 14);
 
   return {
     symbol,
@@ -228,45 +258,40 @@ export function calculateFullRevertionSnapshot(
     elasticity,
     percentile,
     state,
-    emaSlope: slopeResult.slope,
-    emaSlopeValue: slopeResult.value,
+    emaSlope:       slopeResult.slope,
+    emaSlopeValue:  slopeResult.value,
     slopeDirection: slopeResult.direction,
     signalAllowed,
     timestamp,
+    ema50,
+    elasticity50,
+    stochK:         stoch.k,
+    stochD:         stoch.d,
+    cci:            cciVal,
   };
 }
 
-// ─── Backtest Full Reversion ─────────────────────────────────────────────────
+// ─── Backtest ────────────────────────────────────────────────────────────────
 
-/**
- * Backtest del motor Full Reversion sobre un array de velas históricas.
- *
- * Diferencia fundamental frente al backtest estándar:
- * - "Win" = el precio CIERRA al otro lado de la EMA (cruce completo), no solo la toca.
- * - Se registra si la señal hubiera sido bloqueada por pendiente STEEP.
- * - Ventana por defecto: 50 barras (≈ 4 horas en M5).
- */
 export function runFullRevertionBacktest(
-  candles: Candle[],
-  maxBarsToRevert: number = 50
-): FullRevertionBacktestResult {
+  candles:          Candle[],
+  maxBarsToRevert:  number = 50
+): FullRevertionReforcedBacktestResult {
   const events: FRBacktestEvent[] = [];
 
-  // Necesitamos suficientes velas
   const minCandles = EMA_PERIOD + SLOPE_LOOKBACK + maxBarsToRevert + 5;
   if (candles.length < minCandles) {
     return {
-      totalSignals: 0,
-      allowedSignals: 0,
-      wins: 0,
-      winRate: 0,
+      totalSignals:    0,
+      allowedSignals:  0,
+      wins:            0,
+      winRate:         0,
       filteredBySlope: 0,
       avgBarsToRevert: 0,
-      events: [],
+      events:          [],
     };
   }
 
-  // Calcular la serie EMA completa de una sola vez (eficiente)
   const closes = candles.map(c => c.close);
   const emaSeries = calculateEMASeries(closes, EMA_PERIOD);
 
@@ -275,7 +300,6 @@ export function runFullRevertionBacktest(
   for (let i = EMA_PERIOD + SLOPE_LOOKBACK; i < candles.length - maxBarsToRevert; i++) {
     const candle = candles[i];
 
-    // ATR14 rolling en el punto i
     const atrStart = Math.max(1, i - ATR_PERIOD + 1);
     let atrSum = 0, atrCount = 0;
     for (let k = atrStart; k <= i; k++) {
@@ -291,21 +315,18 @@ export function runFullRevertionBacktest(
     const atr = atrCount > 0 ? atrSum / atrCount : 0.0001;
     if (atr === 0) continue;
 
-    const ema = emaSeries[i];
+    const ema      = emaSeries[i];
     const elasticity = Math.abs(candle.close - ema) / atr;
 
     localPercentile.push(elasticity);
     const percentile = localPercentile.rank(elasticity);
-    const state = resolveState(elasticity, percentile);
+    const state      = resolveState(elasticity, percentile);
 
-    // Solo nos interesan los momentos donde había señal GREEN
     if (state !== 'GREEN') continue;
 
-    // Calcular pendiente en este punto histórico
-    const slopeResult = calculateEMASlope(emaSeries, i, atr);
+    const slopeResult    = calculateEMASlope(emaSeries, i, atr);
     const blockedBySlope = slopeResult.slope === 'STEEP';
 
-    // Buscar cruce completo: precio CIERRA al otro lado de la EMA
     let reverted = false;
     const isAboveEMA = candle.close > ema;
 
@@ -313,19 +334,17 @@ export function runFullRevertionBacktest(
       const future = candles[i + j];
       const futureEMA = emaSeries[i + j];
 
-      // Cruce completo: el cierre de la futura vela cruza la EMA
-      // (no solo el low/high como en el backtest estándar)
-      const crossedDown = isAboveEMA && future.close < futureEMA;
-      const crossedUp = !isAboveEMA && future.close > futureEMA;
+      const crossedDown = isAboveEMA  && future.close < futureEMA;
+      const crossedUp   = !isAboveEMA && future.close > futureEMA;
 
       if (crossedDown || crossedUp) {
         events.push({
-          entryIndex: i,
-          exitIndex: i + j,
-          barsToRevert: j,
+          entryIndex:     i,
+          exitIndex:      i + j,
+          barsToRevert:   j,
           elasticity,
-          emaSlope: slopeResult.slope,
-          slopeValue: slopeResult.value,
+          emaSlope:       slopeResult.slope,
+          slopeValue:     slopeResult.value,
           blockedBySlope,
         });
         reverted = true;
@@ -335,30 +354,28 @@ export function runFullRevertionBacktest(
 
     if (!reverted) {
       events.push({
-        entryIndex: i,
-        exitIndex: -1,
-        barsToRevert: maxBarsToRevert,
+        entryIndex:     i,
+        exitIndex:      -1,
+        barsToRevert:   maxBarsToRevert,
         elasticity,
-        emaSlope: slopeResult.slope,
-        slopeValue: slopeResult.value,
+        emaSlope:       slopeResult.slope,
+        slopeValue:     slopeResult.value,
         blockedBySlope,
       });
     }
   }
 
-  // ─── Métricas ─────────────────────────────────────────────────────────────
-
-  const totalSignals = events.length;
+  const totalSignals    = events.length;
   const filteredBySlope = events.filter(e => e.blockedBySlope).length;
-  const allowedEvents = events.filter(e => !e.blockedBySlope);
-  const allowedSignals = allowedEvents.length;
-  const wins = allowedEvents.filter(e => e.exitIndex !== -1);
+  const allowedEvents   = events.filter(e => !e.blockedBySlope);
+  const allowedSignals  = allowedEvents.length;
+  const wins            = allowedEvents.filter(e => e.exitIndex !== -1);
 
   return {
     totalSignals,
     allowedSignals,
-    wins: wins.length,
-    winRate: allowedSignals === 0 ? 0 : Math.round((wins.length / allowedSignals) * 100),
+    wins:            wins.length,
+    winRate:         allowedSignals === 0 ? 0 : Math.round((wins.length / allowedSignals) * 100),
     filteredBySlope,
     avgBarsToRevert: wins.length === 0 ? 0 : Math.round(wins.reduce((s, e) => s + e.barsToRevert, 0) / wins.length),
     events,

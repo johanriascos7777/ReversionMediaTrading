@@ -1,27 +1,18 @@
 /**
- * fullRevertion.controller.ts
+ * fullRevertionReforced.controller.ts
  *
- * GET /full-revertion/status?symbol=AUD/USD
- *   → Estado completo: M5, M15 y fusión multi-TF
- *
- * GET /full-revertion/symbols
- *   → Lista de símbolos con datos disponibles
+ * GET /full-revertion-reforced/status?symbol=AUD/USD
+ * GET /full-revertion-reforced/symbols
  */
 
 import { Controller, Get, Query, Res, HttpStatus } from '@nestjs/common';
 import * as express from 'express';
-import { FullRevertionService } from './fullRevertion.service';
+import { FullRevertionReforcedService } from './fullRevertionReforced.service';
 
-@Controller('full-revertion')
-export class FullRevertionController {
-  constructor(private readonly frService: FullRevertionService) {}
+@Controller('full-revertion-reforced')
+export class FullRevertionReforcedController {
+  constructor(private readonly frService: FullRevertionReforcedService) {}
 
-  /**
-   * GET /full-revertion/status?symbol=AUD/USD
-   *
-   * Devuelve el estado actual del motor Full Reversion para un símbolo.
-   * Incluye snapshot M5, snapshot M15, backtest y el estado fusionado multi-TF.
-   */
   @Get('status')
   getStatus(
     @Query('symbol') symbol: string = 'EUR/USD',
@@ -35,7 +26,7 @@ export class FullRevertionController {
       return res.status(HttpStatus.NOT_FOUND).json({
         status:  'no_data',
         symbol,
-        message: `No hay snapshot Full Reversion disponible para ${symbol}. El motor necesita al menos 115 velas históricas cargadas.`,
+        message: `No hay snapshot Full Reversion Reforzado disponible para ${symbol}.`,
       });
     }
 
@@ -48,11 +39,11 @@ export class FullRevertionController {
 
     if (triggerState === 'giro') {
       fusedActive = true;
-      recommendation = `🔱 ¡GIRO CONFIRMADO! ENTRADA ACTIVA — M5+M15 con confluencia y pendiente permitida. WinRate histórico: ${backtest?.winRate ?? '?'}%.`;
+      recommendation = `🔱 ¡GIRO CONFIRMADO REFORZADO! ENTRADA ACTIVA — M5+M15 con confluencia y pendiente permitida. WinRate histórico: ${backtest?.winRate ?? '?'}%.`;
     } else if (triggerState === 'estirando') {
-      recommendation = `⏳ PREPARAR ENTRADA — La resortera se está estirando en zona extrema. Espera el Giro de Vela M5 (Candle Close).`;
+      recommendation = `⏳ PREPARAR ENTRADA REFORZADA — Resortera en zona extrema M5/M15. Espera Giro M5.`;
     } else if (bothGreen && !bothAllowed) {
-      recommendation = `🚫 SEÑAL BLOQUEADA — Confluencia M5+M15 detectada pero la EMA100 está en tendencia fuerte (STEEP).`;
+      recommendation = `🚫 SEÑAL BLOQUEADA REFORZADA — Confluencia detectada pero la EMA100 está en tendencia fuerte (STEEP).`;
     } else {
       recommendation = `⏳ MODO REPOSO — Esperando confluencia (M5: ${snapM5.state} · M15: ${snapM15?.state ?? 'N/A'}).`;
     }
@@ -62,7 +53,6 @@ export class FullRevertionController {
       updatedAt: new Date(snapM5.timestamp).toISOString(),
       auditedSignals: this.frService.getAuditedSignals(),
 
-      // ─── Fusión multi-TF ─────────────────────────────────────
       fused: {
         bothGreen,
         bothAllowed,
@@ -71,7 +61,6 @@ export class FullRevertionController {
         m15State:     snapM15?.state ?? null,
       },
 
-      // ─── Detalle M5 ──────────────────────────────────────────
       m5: {
         price:          snapM5.price,
         ema100:         snapM5.ema100,
@@ -88,9 +77,14 @@ export class FullRevertionController {
         nearestSR:      snapM5.nearestSR,
         tpPrice:        snapM5.tpPrice,
         slPrice:        snapM5.slPrice,
+        ema50:          snapM5.ema50,
+        elasticity50:   snapM5.elasticity50,
+        tp50Price:      snapM5.tp50Price,
+        stochK:         snapM5.stochK,
+        stochD:         snapM5.stochD,
+        cci:            snapM5.cci,
       },
 
-      // ─── Detalle M15 ─────────────────────────────────────────
       m15: snapM15 ? {
         price:          snapM15.price,
         ema100:         snapM15.ema100,
@@ -107,9 +101,14 @@ export class FullRevertionController {
         nearestSR:      snapM15.nearestSR,
         tpPrice:        snapM15.tpPrice,
         slPrice:        snapM15.slPrice,
+        ema50:          snapM15.ema50,
+        elasticity50:   snapM15.elasticity50,
+        tp50Price:      snapM15.tp50Price,
+        stochK:         snapM15.stochK,
+        stochD:         snapM15.stochD,
+        cci:            snapM15.cci,
       } : null,
 
-      // ─── Backtest (basado en M5) ──────────────────────────────
       backtest: backtest ? {
         totalSignals:    backtest.totalSignals,
         allowedSignals:  backtest.allowedSignals,
@@ -124,9 +123,6 @@ export class FullRevertionController {
     });
   }
 
-  /**
-   * GET /full-revertion/symbols
-   */
   @Get('symbols')
   getSymbols(@Res() res: express.Response) {
     const symbols = this.frService.getAllSymbols();

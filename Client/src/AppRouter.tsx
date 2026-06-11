@@ -13,6 +13,7 @@ import { ExperimentalDashboard } from './pages/ExperimentalDashboard'
 import { FullRevertionDashboard } from './pages/FullRevertionDashboard'
 import { TradingRecommendations } from './pages/TradingRecommendations'
 import { IdealSchedule } from './pages/IdealSchedule'
+import { TelegramDocumentation } from './pages/TelegramDocumentation'
 
 // ─── Barra de navegación global ──────────────────────────────────────────────
 
@@ -46,6 +47,7 @@ function NavBar() {
       <NavLink to="/full-revertion" label="🌊 Reversión Completa" active={currentPath === '/full-revertion'} />
       <NavLink to="/horario-ideal" label="🎯 Horario Ideal" active={currentPath === '/horario-ideal'} />
       <NavLink to="/recomendaciones" label="📖 Recomendaciones" active={currentPath === '/recomendaciones'} />
+      <NavLink to="/documentacion" label="🔔 Alertas Telegram" active={currentPath === '/documentacion'} />
       <NavLink to="/tower-control" label="🗼 Torre de Control" active={currentPath === '/tower-control'} />
       <NavLink to="/holgura-calculator" label="🧮 Calculadora de Holgura" active={currentPath === '/holgura-calculator'} />
       <NavLink to="/experimental" label="🧪 Experimental" active={currentPath === '/experimental'} />
@@ -88,6 +90,7 @@ export function AppRouter() {
           <Route path="/horario-ideal" element={<IdealSchedule />} />
           <Route path="/recomendaciones" element={<TradingRecommendations />} />
           <Route path="/recoemndaciones" element={<TradingRecommendations />} />
+          <Route path="/documentacion" element={<TelegramDocumentation />} />
           <Route path="/tower-control" element={<TowerControl />} />
           <Route path="/holgura-calculator" element={<HolguraCalculator />} />
           <Route path="/experimental" element={<ExperimentalDashboard />} />

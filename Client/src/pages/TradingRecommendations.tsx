@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 export function TradingRecommendations() {
   const [currentTime, setCurrentTime] = useState(new Date())
   const [activeTab, setActiveTab] = useState<'checklist' | 'pullbacks' | 'candles' | 'testimonies'>('checklist')
+  const [simScenario, setSimScenario] = useState<'expansion' | 'contraction' | 'crossover'>('contraction')
 
   // Actualizar la hora local/COT cada segundo
   useEffect(() => {
@@ -1031,6 +1032,487 @@ export function TradingRecommendations() {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+
+        {/* ── SECCIÓN: SIMULADOR INTERACTIVO DE PENDIENTES Y CONTRACCIÓN DE EMAS ── */}
+        <div className="premium-card" style={{
+          background: 'linear-gradient(135deg, rgba(0, 240, 255, 0.03) 0%, rgba(16, 185, 129, 0.02) 50%, rgba(15,15,25,0.9) 100%)',
+          border: '1px solid rgba(0, 240, 255, 0.15)',
+          borderRadius: 24,
+          padding: '36px',
+          marginTop: 36,
+          boxShadow: '0 12px 40px rgba(0,0,0,0.6), 0 0 30px rgba(0, 240, 255, 0.02)',
+          backdropFilter: 'blur(16px)',
+        }}>
+          {/* Cabecera del Simulador */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 28 }}>
+            <span style={{ fontSize: 32 }}>🔮</span>
+            <div>
+              <h2 style={{
+                margin: 0,
+                fontSize: 22,
+                fontWeight: 900,
+                letterSpacing: '-0.5px',
+                background: 'linear-gradient(135deg, #00f0ff, #10b981)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+              }}>
+                SIMULADOR INTERACTIVO DE DINÁMICAS EMA 50 & EMA 100
+              </h2>
+              <p style={{ margin: '4px 0 0', fontSize: 13, color: '#9ca3af' }}>
+                Entiende visualmente cómo interactúa el precio con la EMA 50 (Celeste 🔵) y la EMA 100 (Verde 🟢) para identificar oportunidades reales y evitar trampas de tendencia.
+              </p>
+            </div>
+          </div>
+
+          {/* Selector de Escenarios del Simulador */}
+          <div style={{
+            display: 'flex',
+            gap: 12,
+            marginBottom: 28,
+            flexWrap: 'wrap',
+          }}>
+            {[
+              { id: 'contraction', label: '🟢 Estrangulamiento (Contracción) · OPERAR', borderActive: 'rgba(16, 185, 129, 0.4)', bgActive: 'rgba(16, 185, 129, 0.15)', glow: 'rgba(16, 185, 129, 0.1)' },
+              { id: 'expansion', label: '⚠️ Abanico Abierto (Expansión) · EVITAR', borderActive: 'rgba(244, 63, 94, 0.4)', bgActive: 'rgba(244, 63, 94, 0.12)', glow: 'rgba(244, 63, 94, 0.1)' },
+              { id: 'crossover', label: '🚨 Cruces Falsos (Crossover Traps) · EVITAR', borderActive: 'rgba(251, 191, 36, 0.4)', bgActive: 'rgba(251, 191, 36, 0.12)', glow: 'rgba(251, 191, 36, 0.1)' },
+            ].map((scen) => {
+              const isActive = simScenario === scen.id
+              return (
+                <button
+                  key={scen.id}
+                  onClick={() => setSimScenario(scen.id as any)}
+                  style={{
+                    background: isActive ? scen.bgActive : 'rgba(255,255,255,0.02)',
+                    border: isActive ? `1px solid ${scen.borderActive}` : '1px solid rgba(255,255,255,0.06)',
+                    color: isActive ? '#fff' : '#9ca3af',
+                    borderRadius: 12,
+                    padding: '12px 20px',
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                    boxShadow: isActive ? `0 0 15px ${scen.glow}` : 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isActive) {
+                      e.currentTarget.style.background = 'rgba(255,255,255,0.05)'
+                      e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isActive) {
+                      e.currentTarget.style.background = 'rgba(255,255,255,0.02)'
+                      e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)'
+                    }
+                  }}
+                >
+                  {scen.label}
+                </button>
+              )
+            })}
+          </div>
+
+          {/* Área Principal del Simulador (Gráfico + Diagnóstico) */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))',
+            gap: 28,
+            alignItems: 'stretch',
+          }}>
+            {/* Lienzo SVG Animado */}
+            <div style={{
+              background: 'rgba(7, 7, 15, 0.95)',
+              border: '1px solid rgba(255,255,255,0.06)',
+              borderRadius: 20,
+              padding: 20,
+              position: 'relative',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'center',
+              boxShadow: 'inset 0 0 20px rgba(0,0,0,0.8)',
+              overflow: 'hidden',
+              minHeight: 320,
+            }}>
+              {/* Leyenda en Gráfico */}
+              <div style={{
+                position: 'absolute',
+                top: 16,
+                left: 16,
+                display: 'flex',
+                gap: 12,
+                fontSize: 11,
+                fontWeight: 700,
+                color: '#9ca3af',
+                background: 'rgba(255,255,255,0.01)',
+                padding: '6px 12px',
+                borderRadius: 8,
+                border: '1px solid rgba(255,255,255,0.04)',
+              }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#00f0ff' }}></span> EMA 50
+                </span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981' }}></span> EMA 100
+                </span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#fbbf24' }}></span> Precio (Velas)
+                </span>
+              </div>
+
+              {/* Marca de agua de Escenario */}
+              <div style={{
+                position: 'absolute',
+                top: 16,
+                right: 16,
+                fontSize: 10,
+                fontWeight: 800,
+                fontFamily: 'monospace',
+                letterSpacing: 1,
+                color: simScenario === 'contraction' ? '#10b981' : simScenario === 'expansion' ? '#f43f5e' : '#fbbf24',
+                textTransform: 'uppercase',
+                background: 'rgba(255,255,255,0.01)',
+                padding: '4px 8px',
+                borderRadius: 6,
+                border: `1px solid ${simScenario === 'contraction' ? 'rgba(16, 185, 129, 0.2)' : simScenario === 'expansion' ? 'rgba(244, 63, 94, 0.2)' : 'rgba(251, 191, 36, 0.2)'}`,
+              }}>
+                {simScenario === 'contraction' ? 'Compresión Lateral' : simScenario === 'expansion' ? 'Tendencia Activa' : 'Fase Cruce / Momentum'}
+              </div>
+
+              {/* El Renderizado SVG */}
+              <svg viewBox="0 0 500 300" style={{ width: '100%', height: 'auto', overflow: 'visible' }}>
+                <defs>
+                  {/* Gradiente para sombreado entre EMAs en expansión */}
+                  <linearGradient id="expansionGlow" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="rgba(244, 63, 94, 0.08)" />
+                    <stop offset="100%" stopColor="rgba(244, 63, 94, 0.0)" />
+                  </linearGradient>
+                  {/* Gradiente para contracción */}
+                  <linearGradient id="contractionGlow" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%" stopColor="rgba(16, 185, 129, 0.0)" />
+                    <stop offset="50%" stopColor="rgba(16, 185, 129, 0.05)" />
+                    <stop offset="100%" stopColor="rgba(16, 185, 129, 0.0)" />
+                  </linearGradient>
+                  {/* Filtros de Glow */}
+                  <filter id="glow-cyan" x="-20%" y="-20%" width="140%" height="140%">
+                    <feGaussianBlur stdDeviation="3" result="blur" />
+                    <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                  </filter>
+                  <filter id="glow-green" x="-20%" y="-20%" width="140%" height="140%">
+                    <feGaussianBlur stdDeviation="3" result="blur" />
+                    <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                  </filter>
+                  <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#10b981" />
+                  </marker>
+                </defs>
+
+                {/* Grilla de Fondo */}
+                <g opacity="0.08">
+                  <path d="M 0,50 L 500,50 M 0,100 L 500,100 M 0,150 L 500,150 M 0,200 L 500,200 M 0,250 L 500,250" stroke="#fff" strokeWidth="1" strokeDasharray="3,3" />
+                  <path d="M 50,0 L 50,300 M 100,0 L 100,300 M 150,0 L 150,300 M 200,0 L 200,300 M 250,0 L 250,300 M 300,0 L 300,300 M 350,0 L 350,300 M 400,0 L 400,300 M 450,0 L 450,300" stroke="#fff" strokeWidth="1" strokeDasharray="3,3" />
+                </g>
+
+                {/* 1. ESCENARIO DE EXPANSIÓN (ABANICO ABIERTO) */}
+                {simScenario === 'expansion' && (
+                  <g>
+                    {/* Sombra de Expansión (Relleno entre EMAs) */}
+                    <path d="M 50,70 Q 150,95 250,130 T 450,230 L 450,310 Q 350,250 250,185 T 50,90 Z" fill="url(#expansionGlow)" />
+                    
+                    {/* EMA 100 (Verde) */}
+                    <path d="M 50,70 Q 150,95 250,130 T 450,230" fill="none" stroke="#10b981" strokeWidth="3" opacity="0.75" />
+                    
+                    {/* EMA 50 (Celeste) */}
+                    <path d="M 50,90 Q 150,130 250,185 T 450,310" fill="none" stroke="#00f0ff" strokeWidth="3" filter="url(#glow-cyan)" />
+
+                    {/* Línea de guía y rebote en EMA 50 */}
+                    <circle cx="155" cy="132" r="6" fill="rgba(244, 63, 94, 0.4)" stroke="#f43f5e" strokeWidth="1.5" />
+                    <circle cx="275" cy="182" r="6" fill="rgba(244, 63, 94, 0.4)" stroke="#f43f5e" strokeWidth="1.5" />
+                    <circle cx="395" cy="252" r="6" fill="rgba(244, 63, 94, 0.4)" stroke="#f43f5e" strokeWidth="1.5" />
+
+                    <text x="165" y="125" fill="#f43f5e" fontSize="9" fontWeight="800" fontFamily="monospace">REBOTE EMA 50 (TENDENCIA ACTIVA)</text>
+                    <text x="285" y="175" fill="#f43f5e" fontSize="9" fontWeight="800" fontFamily="monospace">REBOTE EN CONTRA-TENDENCIA</text>
+                    
+                    {/* Velas Japonesas (Downtrend riding EMA 50) */}
+                    {[
+                      { x: 75, open: 105, close: 115, high: 98, low: 120, color: '#f43f5e' },
+                      { x: 115, open: 115, close: 125, high: 112, low: 130, color: '#f43f5e' },
+                      { x: 155, open: 125, close: 120, high: 115, low: 132, color: '#10b981' }, // green retracement to EMA50
+                      { x: 195, open: 120, close: 145, high: 118, low: 150, color: '#f43f5e' },
+                      { x: 235, open: 145, close: 175, high: 140, low: 180, color: '#f43f5e' },
+                      { x: 275, open: 175, close: 168, high: 165, low: 182, color: '#10b981' }, // green retracement to EMA50
+                      { x: 315, open: 168, close: 210, high: 165, low: 215, color: '#f43f5e' },
+                      { x: 355, open: 210, close: 245, high: 205, low: 250, color: '#f43f5e' },
+                      { x: 395, open: 245, close: 238, high: 235, low: 252, color: '#10b981' }, // green retracement to EMA50
+                      { x: 435, open: 238, close: 290, high: 232, low: 295, color: '#f43f5e' },
+                    ].map((c, i) => (
+                      <g key={i}>
+                        {/* Sombra / Mecha */}
+                        <line x1={c.x} y1={c.high} x2={c.x} y2={c.low} stroke={c.color} strokeWidth="1.5" />
+                        {/* Cuerpo de la vela */}
+                        <rect
+                          x={c.x - 5}
+                          y={Math.min(c.open, c.close)}
+                          width="10"
+                          height={Math.max(2, Math.abs(c.open - c.close))}
+                          fill={c.color}
+                          stroke={c.color}
+                          strokeWidth="1"
+                          rx="1"
+                        />
+                      </g>
+                    ))}
+                    
+                    {/* Alerta de peligro */}
+                    <rect x="230" y="20" width="230" height="32" rx="6" fill="rgba(244,63,94,0.12)" stroke="rgba(244,63,94,0.3)" />
+                    <text x="240" y="40" fill="#f43f5e" fontSize="10.5" fontWeight="bold">⚠️ ERROR COMÚN: Comprar aquí es suicida</text>
+                  </g>
+                )}
+
+                {/* 2. ESCENARIO DE CONTRACCIÓN (ESTRANGULAMIENTO) */}
+                {simScenario === 'contraction' && (
+                  <g>
+                    {/* Sombra de Contracción (Relleno horizontal) */}
+                    <rect x="50" y="140" width="400" height="20" fill="url(#contractionGlow)" />
+                    
+                    {/* EMA 100 (Verde) - Wavy Horizontal */}
+                    <path d="M 50,150 Q 100,155 150,148 T 250,152 T 350,149 T 450,150" fill="none" stroke="#10b981" strokeWidth="3" filter="url(#glow-green)" />
+                    
+                    {/* EMA 50 (Celeste) - Wavy Horizontal */}
+                    <path d="M 50,148 Q 100,145 150,153 T 250,147 T 350,152 T 450,152" fill="none" stroke="#00f0ff" strokeWidth="2.5" opacity="0.9" />
+
+                    {/* Cajas de confluencia y gatillo */}
+                    <circle cx="195" cy="220" r="10" fill="none" stroke="#10b981" strokeWidth="2" strokeDasharray="3,3" />
+                    <text x="180" y="248" fill="#10b981" fontSize="9.5" fontWeight="800" fontFamily="monospace">⚡ GIRO M5 (MARTILLO)</text>
+                    <path d="M 195,210 L 195,165" stroke="#10b981" strokeWidth="1.5" strokeDasharray="3,3" />
+                    
+                    <circle cx="395" cy="80" r="10" fill="none" stroke="#10b981" strokeWidth="2" strokeDasharray="3,3" />
+                    <text x="365" y="60" fill="#10b981" fontSize="9.5" fontWeight="800" fontFamily="monospace">⚡ GIRO M5 (PIN BAR)</text>
+                    <path d="M 395,90 L 395,135" stroke="#10b981" strokeWidth="1.5" strokeDasharray="3,3" />
+
+                    <text x="210" y="185" fill="#a78bfa" fontSize="10" fontWeight="bold">Reversión limpia a la media 🎯</text>
+                    <text x="280" y="115" fill="#a78bfa" fontSize="10" fontWeight="bold">Reversión limpia a la media 🎯</text>
+
+                    {/* Velas Japonesas (Sideways volatility, deviation and clean reversion) */}
+                    {[
+                      { x: 75, open: 150, close: 155, high: 147, low: 158, color: '#10b981' },
+                      { x: 115, open: 155, close: 190, high: 152, low: 192, color: '#10b981' }, // upward stretch
+                      { x: 155, open: 190, close: 220, high: 185, low: 222, color: '#10b981' }, // extreme stretch
+                      { x: 195, open: 220, close: 200, high: 235, low: 198, color: '#f43f5e' }, // Pinbar reversal (long upper wick)
+                      { x: 235, open: 200, close: 152, high: 205, low: 150, color: '#f43f5e' }, // sharp reversion to mean
+                      { x: 275, open: 152, close: 148, high: 145, low: 155, color: '#f43f5e' },
+                      { x: 315, open: 148, close: 115, high: 150, low: 112, color: '#f43f5e' }, // downward stretch
+                      { x: 355, open: 115, close: 85, high: 120, low: 80, color: '#f43f5e' }, // extreme downward stretch
+                      { x: 395, open: 85, close: 105, high: 108, low: 72, color: '#10b981' }, // Hammer reversal (long lower wick)
+                      { x: 435, open: 105, close: 148, high: 100, low: 152, color: '#10b981' }, // sharp reversion to mean
+                    ].map((c, i) => (
+                      <g key={i}>
+                        <line x1={c.x} y1={c.high} x2={c.x} y2={c.low} stroke={c.color} strokeWidth="1.5" />
+                        <rect
+                          x={c.x - 5}
+                          y={Math.min(c.open, c.close)}
+                          width="10"
+                          height={Math.max(2, Math.abs(c.open - c.close))}
+                          fill={c.color}
+                          stroke={c.color}
+                          strokeWidth="1"
+                          rx="1"
+                        />
+                      </g>
+                    ))}
+                    
+                    {/* Alerta de éxito */}
+                    <rect x="230" y="20" width="230" height="32" rx="6" fill="rgba(16,185,129,0.12)" stroke="rgba(16,185,129,0.3)" />
+                    <text x="240" y="40" fill="#10b981" fontSize="10.5" fontWeight="bold">✅ ESCENARIO SANTO GRIAL: Alta Elasticidad</text>
+                  </g>
+                )}
+
+                {/* 3. ESCENARIO DE CROSSOVER (CRUCES FALSOS) */}
+                {simScenario === 'crossover' && (
+                  <g>
+                    {/* EMA 100 (Verde) - Smooth Downward Slope */}
+                    <path d="M 50,100 Q 150,120 250,150 T 450,200" fill="none" stroke="#10b981" strokeWidth="3" opacity="0.75" />
+                    
+                    {/* EMA 50 (Celeste) - Crosses from Above to Below */}
+                    <path d="M 50,75 Q 150,110 250,165 T 450,265" fill="none" stroke="#00f0ff" strokeWidth="3" filter="url(#glow-cyan)" />
+
+                    {/* El punto de Cruce */}
+                    <circle cx="215" cy="142" r="8" fill="rgba(251, 191, 36, 0.4)" stroke="#fbbf24" strokeWidth="1.5" />
+                    <text x="180" y="125" fill="#fbbf24" fontSize="10" fontWeight="900" fontFamily="monospace">🚨 CRUCE DE EMAS (DEAD CROSS)</text>
+                    
+                    {/* Falsa señal de compra */}
+                    <rect x="235" y="195" width="220" height="36" rx="6" fill="rgba(244,63,94,0.12)" stroke="rgba(244,63,94,0.3)" />
+                    <text x="242" y="210" fill="#f43f5e" fontSize="9" fontWeight="bold">Trampa: El precio sigue bajando</text>
+                    <text x="242" y="222" fill="#9ca3af" fontSize="8" fontWeight="bold">La inercia del cruce invalida la reversión</text>
+
+                    {/* Velas Japonesas (Bearish crossover trap) */}
+                    {[
+                      { x: 75, open: 80, close: 95, high: 75, low: 98, color: '#f43f5e' },
+                      { x: 115, open: 95, close: 110, high: 92, low: 115, color: '#f43f5e' },
+                      { x: 155, open: 110, close: 135, high: 108, low: 140, color: '#f43f5e' }, // cross happening
+                      { x: 195, open: 135, close: 165, high: 130, low: 170, color: '#f43f5e' }, // price goes far below EMAs
+                      { x: 235, open: 165, close: 155, high: 150, low: 172, color: '#10b981' }, // retail buys the deviation (retracement attempt)
+                      { x: 275, open: 155, close: 150, high: 148, low: 160, color: '#10b981' }, // small pause
+                      { x: 315, open: 150, close: 200, high: 148, low: 205, color: '#f43f5e' }, // Trap sprung: price drops violently!
+                      { x: 355, open: 200, close: 230, high: 195, low: 235, color: '#f43f5e' }, // further drop
+                      { x: 395, open: 230, close: 225, high: 222, low: 238, color: '#10b981' }, // another weak buy
+                      { x: 435, open: 225, close: 270, high: 220, low: 275, color: '#f43f5e' }, // continuing drop
+                    ].map((c, i) => (
+                      <g key={i}>
+                        <line x1={c.x} y1={c.high} x2={c.x} y2={c.low} stroke={c.color} strokeWidth="1.5" />
+                        <rect
+                          x={c.x - 5}
+                          y={Math.min(c.open, c.close)}
+                          width="10"
+                          height={Math.max(2, Math.abs(c.open - c.close))}
+                          fill={c.color}
+                          stroke={c.color}
+                          strokeWidth="1"
+                          rx="1"
+                        />
+                      </g>
+                    ))}
+                    
+                    {/* Alerta de peligro general */}
+                    <rect x="230" y="20" width="230" height="32" rx="6" fill="rgba(251,191,36,0.12)" stroke="rgba(251,191,36,0.3)" />
+                    <text x="240" y="40" fill="#fbbf24" fontSize="10.5" fontWeight="bold">⚠️ CRUCE INICIADO: Impulso Direccional</text>
+                  </g>
+                )}
+              </svg>
+            </div>
+
+            {/* Panel de Diagnóstico Técnico */}
+            <div style={{
+              background: 'rgba(255, 255, 255, 0.01)',
+              border: `1px solid ${
+                simScenario === 'contraction' 
+                  ? 'rgba(16, 185, 129, 0.25)' 
+                  : simScenario === 'expansion' 
+                    ? 'rgba(244, 63, 94, 0.25)' 
+                    : 'rgba(251, 191, 36, 0.25)'
+              }`,
+              borderRadius: 20,
+              padding: 24,
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              boxShadow: `0 8px 32px rgba(0, 0, 0, 0.4), inset 0 0 20px ${
+                simScenario === 'contraction' 
+                  ? 'rgba(16, 185, 129, 0.02)' 
+                  : simScenario === 'expansion' 
+                    ? 'rgba(244, 63, 94, 0.02)' 
+                    : 'rgba(251, 191, 36, 0.02)'
+              }`,
+            }}>
+              {/* Veredicto Principal */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                  <span style={{ fontSize: 11, fontWeight: 800, color: '#9ca3af', fontFamily: 'monospace' }}>DIAGNÓSTICO TÁCTICO</span>
+                  <span style={{
+                    padding: '6px 12px',
+                    borderRadius: 8,
+                    fontSize: 11,
+                    fontWeight: 900,
+                    fontFamily: 'monospace',
+                    letterSpacing: 0.5,
+                    color: '#fff',
+                    background: simScenario === 'contraction' ? '#10b981' : simScenario === 'expansion' ? '#f43f5e' : '#d97706',
+                    boxShadow: `0 0 10px ${simScenario === 'contraction' ? 'rgba(16,185,129,0.3)' : simScenario === 'expansion' ? 'rgba(244,63,94,0.3)' : 'rgba(217,119,6,0.3)'}`,
+                  }}>
+                    {simScenario === 'contraction' ? '✅ REVERSIÓN PERMITIDA' : simScenario === 'expansion' ? '🚫 REVERSIÓN BLOQUEADA' : '⚠️ ALERTA SUSPENDIDA'}
+                  </span>
+                </div>
+
+                {/* Contenido Dinámico según Escenario */}
+                {simScenario === 'expansion' && (
+                  <div>
+                    <h3 style={{ margin: '0 0 8px', fontSize: 18, fontWeight: 800, color: '#f43f5e' }}>Abanico Abierto (Expansión)</h3>
+                    <p style={{ margin: '0 0 16px', fontSize: 13, color: '#d1d5db', lineHeight: 1.6 }}>
+                      Ocurre cuando hay una tendencia fuerte y constante. La <strong>EMA 50 (Celeste)</strong> y la <strong>EMA 100 (Verde)</strong> divergen, abriendo espacio entre ellas como un abanico. El precio no vuelve a la media de mediano plazo (EMA 100); en su lugar, rebota constantemente en la EMA 50 y continúa su carrera.
+                    </p>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 12.5, color: '#9ca3af' }}>
+                      <div>
+                        <strong style={{ color: '#fff' }}>💥 Comportamiento de las medias:</strong> La distancia vertical entre EMA 50 y EMA 100 aumenta en cada vela. Ambas tienen un ángulo inclinado similar.
+                      </div>
+                      <div>
+                        <strong style={{ color: '#fff' }}>☠️ La trampa del trader retail:</strong> Ver que el precio cae o sube mucho en M5 y vender/comprar asumiendo "agotamiento". La inercia del abanico arrastra el precio en tu contra, dejándote atrapado en flotante negativo.
+                      </div>
+                      <div style={{ background: 'rgba(244, 63, 94, 0.05)', padding: '10px 14px', borderRadius: 10, borderLeft: '3px solid #f43f5e', color: '#fca5a5', marginTop: 6 }}>
+                        💡 <strong>Regla del Manual:</strong> Si el Slope en el panel marca <strong>STEEP</strong>, no busques reversiones. El algoritmo de Full Reversion desactivará automáticamente las alertas para evitar pérdidas.
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {simScenario === 'contraction' && (
+                  <div>
+                    <h3 style={{ margin: '0 0 8px', fontSize: 18, fontWeight: 800, color: '#10b981' }}>Estrangulamiento (Contracción)</h3>
+                    <p style={{ margin: '0 0 16px', fontSize: 13, color: '#d1d5db', lineHeight: 1.6 }}>
+                      El escenario ideal del trader de reversión. Las medias <strong>EMA 50</strong> y <strong>EMA 100</strong> se encuentran planas, horizontales y muy juntas o entrelazadas. No hay una dirección predominante en el mercado. El precio oscila a ambos lados y, al estirarse con fuerza (alta elasticidad), regresa rápidamente al centro.
+                    </p>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 12.5, color: '#9ca3af' }}>
+                      <div>
+                        <strong style={{ color: '#fff' }}>🛡️ Comportamiento de las medias:</strong> La distancia entre EMA 50 y 100 está en mínimos (estrangulamiento). Su pendiente es cercana a cero (<strong>FLAT</strong> en el panel).
+                      </div>
+                      <div>
+                        <strong style={{ color: '#fff' }}>🏹 El gatillo del francotirador:</strong> Cuando el precio rompa violentamente y se estire de las medias, espera a que el indicador marque color <strong>GREEN</strong> (elasticidad extrema) y que la vela de 5 minutos cierre dejando una mecha de rechazo (Pin Bar / Martillo).
+                      </div>
+                      <div style={{ background: 'rgba(16, 185, 129, 0.05)', padding: '10px 14px', borderRadius: 10, borderLeft: '3px solid #10b981', color: '#a7f3d0', marginTop: 6 }}>
+                        👑 <strong>Confluencia VIP:</strong> Si este estrangulamiento ocurre sobre un soporte o resistencia institucional de fuerza &gt;= 3 con una divergencia RSI, la probabilidad de éxito de la reversión a la media supera el 85%.
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {simScenario === 'crossover' && (
+                  <div>
+                    <h3 style={{ margin: '0 0 8px', fontSize: 18, fontWeight: 800, color: '#fbbf24' }}>Cruces Falsos (Crossover Traps)</h3>
+                    <p style={{ margin: '0 0 16px', fontSize: 13, color: '#d1d5db', lineHeight: 1.6 }}>
+                      Ocurre cuando la <strong>EMA 50 (Celeste)</strong> cruza a través de la <strong>EMA 100 (Verde)</strong> (Cruce de Oro o Cruce de la Muerte). Este cruce genera una fuerte inyección de volumen institucional que inicia una nueva tendencia. Operar una reversión en este punto exacto es un error crítico.
+                    </p>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 12.5, color: '#9ca3af' }}>
+                      <div>
+                        <strong style={{ color: '#fff' }}>⚠️ Comportamiento de las medias:</strong> La EMA 50 corta de forma limpia a la EMA 100. El precio a menudo retrocede levemente justo después del cruce, lo que confunde a los traders haciéndoles creer que habrá reversión.
+                      </div>
+                      <div>
+                        <strong style={{ color: '#fff' }}>🛑 Por qué es una trampa:</strong> Ese retroceso inicial no es una reversión a la media; es un test de soporte/resistencia antes de acelerar en la dirección del cruce. El precio continuará con fuerza en el sentido del cruce y romperá tu Stop Loss.
+                      </div>
+                      <div style={{ background: 'rgba(251, 191, 36, 0.05)', padding: '10px 14px', borderRadius: 10, borderLeft: '3px solid #fbbf24', color: '#fde68a', marginTop: 6 }}>
+                        💡 <strong>Consejo Profesional:</strong> Nunca operes una señal de contra-tendencia en el momento exacto en que la EMA 50 está cruzando la EMA 100. Espera a que la tendencia se desarrolle por completo o el mercado regrese a fase de contracción.
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Botón de Acción / Recordatorio */}
+              <div style={{
+                marginTop: 24,
+                borderTop: '1px solid rgba(255,255,255,0.06)',
+                paddingTop: 16,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                fontSize: 12,
+                color: simScenario === 'contraction' ? '#10b981' : simScenario === 'expansion' ? '#f43f5e' : '#fbbf24',
+              }}>
+                <span style={{ fontSize: 18 }}>💡</span>
+                <span style={{ fontWeight: 600 }}>
+                  {simScenario === 'contraction' 
+                    ? 'Busca confluencia del RSI en zonas extremas para entrar con lotaje completo.'
+                    : simScenario === 'expansion'
+                      ? 'Ignora las señales del Semáforo Viejo en este par. Espera a que la pendiente se aplane.'
+                      : 'El cruce confirma inercia. Espera al menos 15-20 velas a que se desarrolle la tendencia.'}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
 
