@@ -26,3 +26,6 @@ dist-ssr
 *storybook.log
 storybook-static
 .env
+
+# Ignorar estado temporal de llaves agotadas de Twelve Data
+NestServer/exhausted_keys.json
