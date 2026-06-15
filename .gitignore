@@ -29,3 +29,6 @@ storybook-static
 
 # Ignorar estado temporal de llaves agotadas de Twelve Data
 NestServer/exhausted_keys.json
+
+# Ignorar la caché temporal de MikroORM
+NestServer/temp/

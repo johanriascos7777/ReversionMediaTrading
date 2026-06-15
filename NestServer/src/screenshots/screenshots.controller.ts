@@ -2,7 +2,7 @@
  * screenshots.controller.ts
  * Endpoints para subir y eliminar screenshots de una operación.
  *
- * POST   /trade/:id/screenshots        → sube 1-5 imágenes, retorna URLs
+ * POST   /trade/:id/screenshots        → sube 1-30 imágenes, retorna URLs
  * DELETE /trade/:id/screenshots        → elimina una imagen (key en body)
  */
 import {
@@ -24,9 +24,9 @@ export class ScreenshotsController {
     private readonly tradeScreenshotService: TradeScreenshotService,
   ) {}
 
-  /** Sube hasta 5 imágenes y las agrega al array screenshotUrls del trade */
+  /** Sube hasta 30 imágenes y las agrega al array screenshotUrls del trade */
   @Post()
-  @UseInterceptors(FilesInterceptor('files', 5, { storage: memoryStorage() }))
+  @UseInterceptors(FilesInterceptor('files', 30, { storage: memoryStorage() }))
   async upload(
     @Param('id', ParseIntPipe) id: number,
     @UploadedFiles() files: Express.Multer.File[],

@@ -75,6 +75,8 @@ export interface Trade {
   outcome: TradeOutcome
   notes?: string
   screenshotUrls?: string[]
+  isImportant?: boolean
+  favoriteScreenshotUrl?: string
 }
 
 export interface CreateTradePayload {
@@ -115,6 +117,8 @@ export interface CreateTradePayload {
   // Fecha/hora de apertura personalizada (ISO string); si no viene, el server usa now
   openedAt?: string
   notes?: string
+  isImportant?: boolean
+  favoriteScreenshotUrl?: string
 }
 
 export interface CloseTradePayload {

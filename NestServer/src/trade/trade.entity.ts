@@ -161,6 +161,12 @@ export class Trade {
   @Property({ type: 'text', nullable: true })
   notes?: string;
 
+  @Property({ type: 'boolean', default: false, fieldName: 'is_important' })
+  isImportant: boolean = false;
+
+  @Property({ type: 'text', nullable: true, fieldName: 'favorite_screenshot_url' })
+  favoriteScreenshotUrl?: string;
+
   // ─── Screenshots (URLs de imágenes en S3) ────────────────────────────────
   @Property({ type: 'text', nullable: true, fieldName: 'screenshot_urls' })
   screenshotUrlsRaw?: string;

@@ -60,4 +60,7 @@ export class UpdateTradeDto {
   openedAt?: string;
 
   notes?: string;
+
+  isImportant?: boolean;
+  favoriteScreenshotUrl?: string;
 }

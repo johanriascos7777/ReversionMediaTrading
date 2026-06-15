@@ -54,22 +54,22 @@ export class SymbolState {
   public lastSnapshotM5Exp: any = null;
   public lastSnapshotM15Exp: any = null;
   public lastBacktestM5Exp: any = null;
-  
+
   public previousFusedStateExp: MarketState | null = null;
   public previousFinalStateExp: MarketState | null = null;
-  
+
   public lastClosedElasticityM5Exp: number | null = null;
   public prevClosedElasticityM5Exp: number | null = null;
-  
+
   public triggerStateM5Exp: 'reposo' | 'estirando' | 'giro' = 'reposo';
   public previousTriggerStateM5Exp: 'reposo' | 'estirando' | 'giro' = 'reposo';
   public maxLiveElasticityExp = 0;
-  
+
   public lastTelegramAlertTimeAExp = 0;
   public lastTelegramAlertTimeBExp = 0;
   public lastTelegramAlertTimeTriggerExp = 0;
   public lastTelegramAlertTimePedestrian = 0;
-  
+
   public pedestrianLight: 'STOP' | 'WALK' = 'STOP';
   public previousPedestrianLight: 'STOP' | 'WALK' = 'STOP';
 
@@ -249,9 +249,9 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
     const COT_OFFSET_MS = -5 * 60 * 60 * 1000; // UTC-5
     const ahoraCOT = new Date(ahoraUTC + COT_OFFSET_MS);
 
-    const dia  = ahoraCOT.getUTCDay();     // 0=Dom, 1=Lun, ..., 6=Sáb en COT
+    const dia = ahoraCOT.getUTCDay();     // 0=Dom, 1=Lun, ..., 6=Sáb en COT
     const hora = ahoraCOT.getUTCHours();   // Hora en COT
-    const min  = ahoraCOT.getUTCMinutes(); // Minutos en COT
+    const min = ahoraCOT.getUTCMinutes(); // Minutos en COT
 
     // Domingo: sesión apertura de mercado (7:30 PM COT en adelante)
     if (dia === 0) {
@@ -515,7 +515,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
 
     // 4. Fallback absoluto (todas agotadas — situación crítica)
     console.error(`[MarketService] [${symbol}] ❌ CRÍTICO: Todas las ${this.apiKeyList.length} llaves están agotadas.`);
-    
+
     // Alerta de agotamiento absoluto para el frontend
     this.events.emit('broadcast', {
       type: 'keys-exhausted-alert',
@@ -598,7 +598,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
     const assignmentsList = this.symbolList.map(sym => {
       const activeKey = this.activeAssignments.get(sym);
       const activeKeyMasked = activeKey ? `...${activeKey.slice(-6)}` : 'Ninguna';
-      
+
       let status: 'active' | 'shared' | 'exhausted' = 'active';
       if (this.apiKeyList.every(k => this.isKeyExhausted(k) || this.dailyLimitExhaustedKeys.has(k))) {
         status = 'exhausted';
@@ -661,7 +661,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
    */
   private incrementKeyRequest(key: string): void {
     if (!key) return;
-    
+
     if (!this.keyStats.has(key)) {
       this.keyStats.set(key, {
         totalRequests: 0,
@@ -672,13 +672,13 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
 
     const stats = this.keyStats.get(key)!;
     stats.totalRequests++;
-    
+
     const now = Date.now();
     stats.requestTimestamps.push(now);
-    
+
     // Limpiar peticiones de más de 60 segundos
     stats.requestTimestamps = stats.requestTimestamps.filter(ts => now - ts <= 60000);
-    
+
     // Actualizar máximo
     if (stats.requestTimestamps.length > stats.minutelyMax) {
       stats.minutelyMax = stats.requestTimestamps.length;
@@ -702,9 +702,9 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
         const finalState = resolveMultiTF(state.lastSnapshotM5, state.lastSnapshotM15);
         const comparison = state.lastBacktestM5
           ? compareSignalWithHistory(
-              { state: state.lastSnapshotM5.state, elasticity: state.lastSnapshotM5.elasticity },
-              state.lastBacktestM5
-            )
+            { state: state.lastSnapshotM5.state, elasticity: state.lastSnapshotM5.elasticity },
+            state.lastBacktestM5
+          )
           : null;
         const fusedStateResult = fuseMarketState(finalState, comparison);
 
@@ -715,9 +715,9 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
 
         const comparisonExp = state.lastSnapshotM5Exp && state.lastSnapshotM15Exp && state.lastBacktestM5Exp
           ? compareSignalWithHistoryExp(
-              { state: state.lastSnapshotM5Exp.state, elasticity: state.lastSnapshotM5Exp.elasticity, direction: state.lastSnapshotM5Exp.direction },
-              state.lastBacktestM5Exp
-            )
+            { state: state.lastSnapshotM5Exp.state, elasticity: state.lastSnapshotM5Exp.elasticity, direction: state.lastSnapshotM5Exp.direction },
+            state.lastBacktestM5Exp
+          )
           : null;
 
         const fusedStateResultExp = state.lastSnapshotM5Exp && state.lastSnapshotM15Exp
@@ -764,9 +764,9 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       const finalState = resolveMultiTF(state.lastSnapshotM5, state.lastSnapshotM15);
       const comparison = state.lastBacktestM5
         ? compareSignalWithHistory(
-            { state: state.lastSnapshotM5.state, elasticity: state.lastSnapshotM5.elasticity },
-            state.lastBacktestM5
-          )
+          { state: state.lastSnapshotM5.state, elasticity: state.lastSnapshotM5.elasticity },
+          state.lastBacktestM5
+        )
         : null;
       const fusedStateResult = fuseMarketState(finalState, comparison);
 
@@ -930,10 +930,10 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
         try {
           console.log(`[MarketService] [${sym}] Intentando cargar historial (intento ${attempts + 1})...`);
           const histM5 = await this.fetchHistoricalCandles(sym, '5min', HISTORY_OUTPUT);
-          
+
           // Breve pausa para no saturar la API
           await new Promise((r) => setTimeout(r, 1000));
-          
+
           const histM15 = await this.fetchHistoricalCandles(sym, '15min', HISTORY_OUTPUT);
 
           if (histM5.length === 0 || histM15.length === 0) {
@@ -1054,9 +1054,9 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
 
     const comparison = state.lastBacktestM5
       ? compareSignalWithHistory(
-          { state: snapshotM5.state, elasticity: snapshotM5.elasticity },
-          state.lastBacktestM5
-        )
+        { state: snapshotM5.state, elasticity: snapshotM5.elasticity },
+        state.lastBacktestM5
+      )
       : null;
     const fusedStateResult = fuseMarketState(finalState, comparison);
 
@@ -1080,7 +1080,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
     let finalStateExp = 'RED' as MarketState;
     let fusedStateResultExp = { state: 'RED' as MarketState, explanation: 'Esperando datos...' };
     let comparisonExp: SignalComparisonResult | null = null;
-    
+
     const snapshotM5Exp = calculateSnapshotExp(symbol, state.builderM5.getCandles(), price, 'M5', timestamp);
     const snapshotM15Exp = calculateSnapshotExp(symbol, state.builderM15.getCandles(), price, 'M15', timestamp);
 
@@ -1092,9 +1092,9 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
 
       comparisonExp = state.lastBacktestM5Exp
         ? compareSignalWithHistoryExp(
-            { state: snapshotM5Exp.state, elasticity: snapshotM5Exp.elasticity, direction: snapshotM5Exp.direction },
-            state.lastBacktestM5Exp
-          )
+          { state: snapshotM5Exp.state, elasticity: snapshotM5Exp.elasticity, direction: snapshotM5Exp.direction },
+          state.lastBacktestM5Exp
+        )
         : null;
 
       fusedStateResultExp = fuseMarketState(finalStateExp, comparisonExp);
@@ -1492,13 +1492,13 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
 
         const directionEmoji = direction === 'BUY' ? '🟢 COMPRA (BUY) 📈' : '🔴 VENTA (SELL) 📉';
         const modeEmoji = tradeMode === 'experimental' ? '🧪 [EXPERIMENTAL]' : '💼 [NORMAL]';
-        
+
         let messageText = `${modeEmoji} 🚨 **ALERTA DE TRADING: ${alertName}**\n\n`;
         messageText += `Símbolo: **${symbolState.symbol}**\n`;
         messageText += `Sugerido: **${directionEmoji}**\n`;
         messageText += `Precio: \`${entryPrice.toFixed(5)}\`\n`;
         messageText += `TP Sugerido: \`${tpPrice.toFixed(5)}\` | SL Sugerido: \`${slPrice.toFixed(5)}\`\n\n`;
-        
+
         if (explanation) {
           messageText += `Detalle: _${explanation}_\n\n`;
         }
@@ -1588,14 +1588,14 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
             const pip = signal.direction === 'BUY'
               ? exitPrice - signal.entryPrice
               : signal.entryPrice - exitPrice;
-            
+
             const pnl = (pip / signal.entryPrice) * 200 * 2.0; // apalancamiento x200, inversión $2.00
-            
+
             signal.status = statusResult;
             signal.closedAt = new Date();
             signal.totalMinutesOpen = Math.max(1, Math.round(totalMinutes));
             signal.pnl = Math.round(pnl * 10000) / 10000;
-            
+
             this.em.persist(signal);
             hasClosedAny = true;
             console.log(`[Fomowatch] Alerta descartada #${signal.id} (${signal.symbol}) cerrada virtualmente como ${statusResult} (P&L: $${signal.pnl}, Minutos: ${signal.totalMinutesOpen}).`);

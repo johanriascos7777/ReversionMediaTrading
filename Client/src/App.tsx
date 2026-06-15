@@ -190,14 +190,18 @@ function App() {
   const fused = fuseMarketState(currentMarket.finalState, comparison)
 
   return (
-    // ── DIV PADRE AQUI!!!!!!! ──────────────────────────────────────────
+    /* 
+      ==================================================================
+      🎨 MAIN LAYOUT RENDER (JSX)
+      ================================================================== 
+    */
     <div style={{ padding: '24px 0', margin: '0 auto' }}>
 
-
-
-      {/* ==================================================== */}
-      {/* 🔴 ALERTA CRÍTICA: AGOTAMIENTO DE LLAVES             */}
-      {/* ==================================================== */}
+      {/* 
+        ==================================================================
+        🚨 SECTION 1: CRITICAL ALERT - API KEYS EXHAUSTED
+        ================================================================== 
+      */}
       {exhaustAlert && (
         <div style={{
           marginBottom: 24,
@@ -227,7 +231,11 @@ function App() {
         </div>
       )}
 
-      {/* HEADER PRINCIPAL */}
+      {/* 
+        ==================================================================
+        📡 SECTION 2: MAIN DASHBOARD HEADER & CONNECTION STATUS
+        ================================================================== 
+      */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32, gap: 16, flexWrap: 'wrap' }}>
         <div>
           <h1 className="title-gradient" style={{ margin: 0, fontSize: 32, fontWeight: 800, letterSpacing: '-1px' }}>
@@ -258,14 +266,18 @@ function App() {
         </div>
       </div>
 
-      {/* ==================================================== */}
-      {/* 🔑 PANEL DE API KEYS Y CRÉDITOS                       */}
-      {/* ==================================================== */}
+      {/* 
+        ==================================================================
+        🔑 SECTION 3: API KEYS & CREDITS STATUS
+        ================================================================== 
+      */}
       <ApiKeysStatus keysStatus={keysStatus} />
 
-      {/* ==================================================== */}
-      {/* ⚠️ REST FALLBACK ALERT BANNER                        */}
-      {/* ==================================================== */}
+      {/* 
+        ==================================================================
+        ⚠️ SECTION 4: REST FALLBACK ALERT BANNER
+        ================================================================== 
+      */}
       {Object.keys(wsFallbacks).filter(sym => !dismissedFallbacks.has(sym)).length > 0 && (
         <div style={{
           marginBottom: 20,
@@ -352,9 +364,11 @@ function App() {
         </div>
       )}
 
-      {/* ==================================================== */}
-      {/* 🎛️ COCKPIT / TORRE DE CONTROL (GRID MULTISÍMBOLO)   */}
-      {/* ==================================================== */}
+      {/* 
+        ==================================================================
+        🎛️ SECTION 5: LIVE COCKPIT (MULTI-SYMBOL CARD GRID)
+        ================================================================== 
+      */}
       <div style={{ marginBottom: 32 }}>
         <h2 style={{ fontSize: 14, textTransform: 'uppercase', letterSpacing: '2px', color: '#6b7280', margin: '0 0 16px 4px', fontWeight: 700 }}>
           ⚡ Live Cockpit (Click to Inspect)
@@ -426,9 +440,11 @@ function App() {
         </div>
       </div>
 
-      {/* ==================================================== */}
-      {/* 🔍 DETALLES DE INSPECCIÓN DEL SÍMBOLO ACTIVO        */}
-      {/* ==================================================== */}
+      {/* 
+        ==================================================================
+        🔍 SECTION 6: DETAIL INSPECTOR HEADER
+        ================================================================== 
+      */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 24 }}>
 
         {/* ENCABEZADO DE SECCIÓN DETALLES */}
@@ -441,10 +457,16 @@ function App() {
           </span>
         </div>
 
-        {/* GRID DE PANELS */}
+        {/* 
+          ==================================================================
+          🟢 SECTION 7: LIVE DECISION ENGINE & ELASTICITY CARD GRID
+          ================================================================== 
+        */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 24 }}>
 
-          {/* SEMÁFORO DE TIEMPO REAL */}
+          {/* ------------------------------------------------------------
+              🟢 SUB-SECTION: Live Decision Engine
+              ------------------------------------------------------------ */}
           <div className="glass-panel" style={{ margin: 0 }}>
             <h3 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 8px', color: '#fff' }}>
               🟢 Live Decision Engine
@@ -460,7 +482,9 @@ function App() {
             <Semaforo state={currentMarket.finalState} label="Current State" />
           </div>
 
-          {/* TARJETA DE ELASTICIDAD */}
+          {/* ------------------------------------------------------------
+              📊 SUB-SECTION: Elasticity Card
+              ------------------------------------------------------------ */}
           <div className="glass-panel" style={{ margin: 0, padding: 0, border: 'none', background: 'transparent' }}>
             <ElasticityCard
               symbol={activeKey}
@@ -472,10 +496,16 @@ function App() {
 
         </div>
 
-        {/* SECCIÓN DE ESTADÍSTICA E HISTORIAL */}
+        {/* 
+          ==================================================================
+          🧪 SECTION 8: HISTORICAL BACKTEST & CONTEXTUAL COMPARISON GRID
+          ================================================================== 
+        */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 24 }}>
 
-          {/* BACKTESTING HISTÓRICO */}
+          {/* ------------------------------------------------------------
+              🧪 SUB-SECTION: Historical Backtest (500 bars)
+              ------------------------------------------------------------ */}
           <div className="glass-panel" style={{ margin: 0 }}>
             <h3 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 8px', color: '#fff' }}>
               🧪 Historical Backtest (500 bars)
@@ -492,7 +522,9 @@ function App() {
             )}
           </div>
 
-          {/* CONTEXT COMPARISON */}
+          {/* ------------------------------------------------------------
+              📊 SUB-SECTION: Contextual Comparison
+              ------------------------------------------------------------ */}
           <div className="glass-panel" style={{ margin: 0 }}>
             <h3 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 8px', color: '#fff' }}>
               📊 Contextual Comparison
@@ -529,12 +561,18 @@ function App() {
 
         </div>
 
-        {/* ==================================================== */}
-        {/* 🪃 CABINA DE DISPARO POR AGOTAMIENTO                 */}
-        {/* ==================================================== */}
+        {/* 
+          ==================================================================
+          🪃 SECTION 9: LAUNCH COCKPIT (MANUAL / AUTO EXECUTION TOWER)
+          ================================================================== 
+        */}
         <LaunchCockpit marketView={currentMarket} />
 
-        {/* FUSED STATE MAIN SIGNAL CARD */}
+        {/* 
+          ==================================================================
+          🚥 SECTION 10: FUSED SYSTEM SIGNAL (FINAL CONFIRMATION CARD)
+          ================================================================== 
+        */}
         <div style={{
           border: '1px solid rgba(255, 255, 255, 0.08)',
           background: 'rgba(255, 255, 255, 0.01)',
@@ -561,12 +599,18 @@ function App() {
           <Semaforo state={fused.state} label="Final Confirmation Signal" />
         </div>
 
-        {/* OBSERVABILITY SECTION */}
+        {/* 
+          ==================================================================
+          📈 SECTION 11: SYSTEM OBSERVABILITY (LATENCY & LOGS)
+          ================================================================== 
+        */}
         <SystemObservability />
 
-        {/* ========================================================= */}
-        {/* 🏛️ STRUCTURE ENGINE — CONFLUENCIA & NIVELES S/R           */}
-        {/* ========================================================= */}
+        {/* 
+          ==================================================================
+          🏛️ SECTION 12: STRUCTURE ENGINE (SUPPORT & RESISTANCE LEVELS)
+          ================================================================== 
+        */}
         <div style={{
           marginTop: 40,
           padding: '24px 28px',
@@ -578,7 +622,11 @@ function App() {
           <StructureCockpit data={structureData} />
         </div>
 
-        {/* BOTTOM TELEGRAM BOT TRIGGER */}
+        {/* 
+          ==================================================================
+          💬 SECTION 13: TEST TELEGRAM BOT ALERTS ACTION
+          ================================================================== 
+        */}
         <div style={{ display: 'flex', justifyContent: 'center', marginTop: 12 }}>
           <button
             style={{
@@ -617,9 +665,11 @@ function App() {
 
       </div>
 
-      {/* ==================================================== */}
-      {/* 🔔 FLOATING LIVE TOAST NOTIFICATIONS (GLOBAL TOASTS) */}
-      {/* ==================================================== */}
+      {/* 
+        ==================================================================
+        🔔 SECTION 14: FLOATING LIVE TOAST NOTIFICATIONS
+        ================================================================== 
+      */}
       {toasts.length > 0 && (
         <div className="toast-container">
           {toasts.map((toast) => {

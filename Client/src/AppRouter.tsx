@@ -13,6 +13,7 @@ import { ExperimentalDashboard } from './pages/ExperimentalDashboard'
 import { FullRevertionDashboard } from './pages/FullRevertionDashboard'
 import { TradingRecommendations } from './pages/TradingRecommendations'
 import { IdealSchedule } from './pages/IdealSchedule'
+import { UseCasesPage } from './pages/UseCasesPage'
 
 // ─── Barra de navegación global ──────────────────────────────────────────────
 
@@ -49,6 +50,7 @@ function NavBar() {
       <NavLink to="/tower-control" label="🗼 Torre de Control" active={currentPath === '/tower-control'} />
       <NavLink to="/holgura-calculator" label="🧮 Calculadora de Holgura" active={currentPath === '/holgura-calculator'} />
       <NavLink to="/experimental" label="🧪 Experimental" active={currentPath === '/experimental'} />
+      <NavLink to="/casos-de-uso" label="📚 Casos de Uso" active={currentPath === '/casos-de-uso'} />
     </nav>
   )
 }
@@ -91,6 +93,7 @@ export function AppRouter() {
           <Route path="/tower-control" element={<TowerControl />} />
           <Route path="/holgura-calculator" element={<HolguraCalculator />} />
           <Route path="/experimental" element={<ExperimentalDashboard />} />
+          <Route path="/casos-de-uso" element={<UseCasesPage />} />
         </Routes>
       </div>
     </>

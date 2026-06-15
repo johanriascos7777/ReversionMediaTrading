@@ -65,6 +65,8 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
 
 
   const [notes, setNotes] = useState(trade.notes ?? '')
+  const [isImportantEdit, setIsImportantEdit] = useState<boolean>(trade.isImportant ?? false)
+  const [favScreenshotUrl, setFavScreenshotUrl] = useState<string | null>(trade.favoriteScreenshotUrl ?? null)
   const [tradeMode, setTradeMode] = useState<TradeMode>(trade.tradeMode ?? 'normal')
   const [accountType, setAccountType] = useState<AccountType>(trade.accountType ?? 'demo')
   const [submitting, setSubmitting] = useState(false)
@@ -118,6 +120,10 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
       if (!res.ok) throw new Error('Error al eliminar imagen')
       const data = await res.json()
       setScreenshotUrls(parseScreenshotUrls(data.screenshotUrls))
+      if (favScreenshotUrl === url) {
+        setFavScreenshotUrl(null)
+        await onSubmit(trade.id, { favoriteScreenshotUrl: null as any })
+      }
     } catch (err) {
       console.error(err)
       alert('Fallo al eliminar captura de pantalla')
@@ -152,6 +158,8 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
       tradeType,
       tradeMode,
       accountType,
+      isImportant: isImportantEdit,
+      favoriteScreenshotUrl: favScreenshotUrl || null,
       entryPrice: parseFloat(entryPrice),
       leverage: parseInt(leverage),
       spread: parseFloat(spread),
@@ -216,6 +224,19 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
           <div>
             <h3 style={{ margin: 0, fontSize: 16, fontWeight: 900, color: '#fff', display: 'flex', alignItems: 'center', gap: 8 }}>
               ✏️ Actualizar Operación #{trade.id}
+              <button
+                type="button"
+                onClick={() => setIsImportantEdit(!isImportantEdit)}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  fontSize: 16, color: isImportantEdit ? '#fbbf24' : '#4b5563',
+                  padding: 0, margin: '0 4px', display: 'inline-flex',
+                  transition: 'color 0.15s',
+                }}
+                title={isImportantEdit ? "Quitar importancia" : "Marcar como importante ⭐"}
+              >
+                {isImportantEdit ? '★' : '☆'}
+              </button>
             </h3>
             <span style={{ fontSize: 11, color: '#6b7280', display: 'block', marginTop: 4 }}>
               Abierta el: {openedDate.toLocaleString()}
@@ -541,41 +562,66 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
         {/* Capturas de Pantalla (Screenshots) */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <label style={{ fontSize: 10, color: '#6b7280', textTransform: 'uppercase', fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span>📸 Capturas de Pantalla ({screenshotUrls.length}/5)</span>
+            <span>📸 Capturas de Pantalla ({screenshotUrls.length}/30)</span>
             {uploading && <span style={{ color: '#a78bfa', fontSize: 10, fontWeight: 700 }}>⏳ Subiendo...</span>}
           </label>
 
           {/* Grid de miniaturas */}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-            {screenshotUrls.map((url, i) => (
-              <div key={url} style={{
-                position: 'relative', width: 75, height: 75, borderRadius: 10, overflow: 'hidden',
-                border: '1px solid rgba(255,255,255,0.1)', background: '#000', cursor: 'pointer',
-                transition: 'transform 0.15s ease',
-              }} onClick={() => setLightboxUrl(url)}>
-                <img src={url} alt={`Screenshot ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                {/* Botón para eliminar */}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    handleDeleteScreenshot(url)
-                  }}
-                  style={{
-                    position: 'absolute', top: 4, right: 4, width: 18, height: 18, borderRadius: '50%',
-                    background: 'rgba(0,0,0,0.8)', border: '1px solid rgba(255,255,255,0.15)',
-                    color: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    cursor: 'pointer', fontSize: 8, fontWeight: 'bold', padding: 0,
-                  }}
-                  title="Eliminar captura"
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
+            {screenshotUrls.map((url, i) => {
+              const isFav = favScreenshotUrl === url
+              return (
+                <div key={url} style={{
+                  position: 'relative', width: 75, height: 75, borderRadius: 10, overflow: 'hidden',
+                  border: isFav ? '2px solid #fbbf24' : '1px solid rgba(255,255,255,0.1)',
+                  background: '#000', cursor: 'pointer',
+                  transition: 'transform 0.15s ease, border-color 0.15s',
+                  boxShadow: isFav ? '0 0 10px rgba(251,191,36,0.2)' : 'none',
+                }} onClick={() => setLightboxUrl(url)}>
+                  <img src={url} alt={`Screenshot ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  
+                  {/* Botón para Estrella Favorita */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setFavScreenshotUrl(isFav ? null : url)
+                    }}
+                    style={{
+                      position: 'absolute', top: 4, left: 4, width: 18, height: 18, borderRadius: '50%',
+                      background: 'rgba(0,0,0,0.8)', border: '1px solid rgba(255,255,255,0.15)',
+                      color: isFav ? '#fbbf24' : '#6b7280', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      cursor: 'pointer', fontSize: 10, fontWeight: 'bold', padding: 0,
+                      transition: 'all 0.15s ease',
+                    }}
+                    title={isFav ? "Quitar de principal" : "Marcar como captura principal"}
+                  >
+                    ★
+                  </button>
+
+                  {/* Botón para eliminar */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleDeleteScreenshot(url)
+                    }}
+                    style={{
+                      position: 'absolute', top: 4, right: 4, width: 18, height: 18, borderRadius: '50%',
+                      background: 'rgba(0,0,0,0.8)', border: '1px solid rgba(255,255,255,0.15)',
+                      color: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      cursor: 'pointer', fontSize: 8, fontWeight: 'bold', padding: 0,
+                    }}
+                    title="Eliminar captura"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )
+            })}
 
             {/* Botón para añadir captura */}
-            {screenshotUrls.length < 5 && (
+            {screenshotUrls.length < 30 && (
               <label style={{
                 width: 75, height: 75, borderRadius: 10, border: '2px dashed rgba(124,58,237,0.3)',
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',

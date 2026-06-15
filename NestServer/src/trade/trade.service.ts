@@ -129,6 +129,8 @@ export class TradeService {
     }
 
     if (dto.notes) trade.notes = dto.notes;
+    if (dto.isImportant !== undefined) trade.isImportant = dto.isImportant;
+    if (dto.favoriteScreenshotUrl !== undefined) trade.favoriteScreenshotUrl = dto.favoriteScreenshotUrl;
 
     this.em.persist(trade);
     await this.em.flush();
@@ -189,6 +191,8 @@ export class TradeService {
     if (dto.closeReason !== undefined) trade.closeReason = dto.closeReason;
     if (dto.outcome !== undefined) trade.outcome = dto.outcome;
     if (dto.notes !== undefined) trade.notes = dto.notes;
+    if (dto.isImportant !== undefined) trade.isImportant = dto.isImportant;
+    if (dto.favoriteScreenshotUrl !== undefined) trade.favoriteScreenshotUrl = dto.favoriteScreenshotUrl;
 
     // Actualizar fecha/hora de apertura si el usuario la modificó
     if (dto.openedAt !== undefined) {

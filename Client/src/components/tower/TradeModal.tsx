@@ -64,6 +64,7 @@ export function TradeModal({ onClose, onSubmit, autoCapture }: TradeModalProps) 
   const [tradeMode, setTradeMode] = useState<TradeMode>('normal')
   const [accountType, setAccountType] = useState<AccountType>('demo')
   const [submitting, setSubmitting] = useState(false)
+  const [isImportant, setIsImportant] = useState(false)
 
   // Señales de entrada editables
   const [elasticityM5State, setElasticityM5State] = useState<string>(autoCapture?.elasticityM5State ?? '')
@@ -100,6 +101,7 @@ export function TradeModal({ onClose, onSubmit, autoCapture }: TradeModalProps) 
       tradeType,
       tradeMode,
       accountType,
+      isImportant,
       session: detectSessionNow() as any,
       entryPrice: entryN,
       leverage: leverageN,
@@ -156,8 +158,21 @@ export function TradeModal({ onClose, onSubmit, autoCapture }: TradeModalProps) 
       }}>
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#fff' }}>
+          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#fff', display: 'flex', alignItems: 'center', gap: 8 }}>
             ➕ Registrar Operación
+            <button
+              type="button"
+              onClick={() => setIsImportant(!isImportant)}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                fontSize: 16, color: isImportant ? '#fbbf24' : '#4b5563',
+                padding: 0, margin: '0 4px', display: 'inline-flex',
+                transition: 'color 0.15s',
+              }}
+              title={isImportant ? "Quitar importancia" : "Marcar como importante ⭐"}
+            >
+              {isImportant ? '★' : '☆'}
+            </button>
           </h2>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 20 }}>✕</button>
         </div>

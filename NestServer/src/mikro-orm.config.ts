@@ -1,20 +1,9 @@
 import { defineConfig } from '@mikro-orm/mysql';
+import { Migrator } from '@mikro-orm/migrations';
 import { ReflectMetadataProvider } from '@mikro-orm/decorators/legacy';
 
-// Cargar el Migrator dinámicamente. Esto previene errores de compilación local
-// si el paquete no está instalado (entorno local offline). En producción,
-// npm install instalará '@mikro-orm/migrations' y se activará automáticamente.
-const extensions: any[] = [];
-try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { Migrator } = require('@mikro-orm/migrations');
-  extensions.push(Migrator);
-} catch (e) {
-  console.warn('[MikroORM] Migrator no disponible localmente (instalación offline).');
-}
-
 export default defineConfig({
-  // Mismo patrón que brawlstart-api pero con MySQL driver
+  // Lee los tipos basándose en la reflexión estándar de JS en runtime (resuelve las uniones TS a String/VARCHAR)
   metadataProvider: ReflectMetadataProvider,
 
   host:     process.env.DB_HOST     || 'localhost',
@@ -27,13 +16,17 @@ export default defineConfig({
   entities:   ['dist/**/*.entity.js'],   // producción (compilado)
   entitiesTs: ['src/**/*.entity.ts'],    // desarrollo (TypeScript)
 
-  extensions,
+  // Migrator activado correctamente (sin try/catch, ya está instalado)
+  extensions: [Migrator],
 
   migrations: {
-    path: 'dist/migrations',             // Ruta de las migraciones compiladas (.js) para producción
-    pathTs: 'src/migrations',            // Ruta de las migraciones fuente (.ts) para desarrollo
-    glob: '!(*.d).{js,ts}',              // Coincidir archivos JS compilados y TS en desarrollo
-    transactional: true,                 // Ejecutar cada migración dentro de una transacción SQL
-    allOrNothing: true,                  // Transacciones atómicas (se aplica todo o nada)
+    path:   'dist/migrations',           // JS compilado para producción
+    pathTs: 'src/migrations',            // TS para desarrollo
+    glob: '!(*.d).{js,ts}',
+    transactional: true,
+    allOrNothing: true,
   },
+
+  // Ver queries SQL en desarrollo
+  debug: process.env.NODE_ENV === 'development',
 });

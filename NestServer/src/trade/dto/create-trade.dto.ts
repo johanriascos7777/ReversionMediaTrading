@@ -52,4 +52,7 @@ export class CreateTradeDto {
 
   // Notas
   notes?: string;
+
+  isImportant?: boolean;
+  favoriteScreenshotUrl?: string;
 }

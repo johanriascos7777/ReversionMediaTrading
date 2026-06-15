@@ -41,14 +41,16 @@ export function TradeTable({ trades, onClose, onUpdate, onDelete }: Props) {
   const [filterAccountType, setFilterAccountType] = useState('all')
   const [closingTrade, setClosingTrade] = useState<Trade | null>(null)
   const [editingTrade, setEditingTrade] = useState<Trade | null>(null)
-  const [lightboxUrls, setLightboxUrls] = useState<string[]>([])
+  const [lightboxTrade, setLightboxTrade] = useState<Trade | null>(null)
   const [lightboxIndex, setLightboxIndex] = useState<number>(0)
+
+  const lightboxUrls = lightboxTrade ? parseScreenshotUrls(lightboxTrade.screenshotUrls) : []
 
   // Navegación por teclado para la galería de imágenes del histórico
   useEffect(() => {
     if (lightboxUrls.length === 0) return
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setLightboxUrls([])
+      if (e.key === 'Escape') setLightboxTrade(null)
       else if (e.key === 'ArrowRight' && lightboxUrls.length > 1) {
         setLightboxIndex(prev => (prev + 1) % lightboxUrls.length)
       } else if (e.key === 'ArrowLeft' && lightboxUrls.length > 1) {
@@ -124,22 +126,41 @@ export function TradeTable({ trades, onClose, onUpdate, onDelete }: Props) {
                   background: isOpen ? 'rgba(245,158,11,0.04)' : 'transparent',
                   transition: 'background 0.15s',
                 }}>
-                  <Td>{t.id}</Td>
+                  <Td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span
+                        onClick={() => onUpdate(t.id, { isImportant: !t.isImportant })}
+                        style={{
+                          cursor: 'pointer',
+                          color: t.isImportant ? '#fbbf24' : '#374151',
+                          fontSize: 13,
+                          transition: 'color 0.15s',
+                        }}
+                        title={t.isImportant ? "Quitar importancia" : "Marcar como importante ⭐"}
+                      >
+                        {t.isImportant ? '★' : '☆'}
+                      </span>
+                      <span>{t.id}</span>
+                    </div>
+                  </Td>
                   <Td bold>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       {t.symbol}
                       {(() => {
                         const urls = parseScreenshotUrls(t.screenshotUrls)
+                        const favIndex = t.favoriteScreenshotUrl ? urls.indexOf(t.favoriteScreenshotUrl) : -1
+                        const hasFav = t.favoriteScreenshotUrl && favIndex !== -1
+                        const startIndex = hasFav ? favIndex : 0
                         return urls.length > 0 && (
                           <span
                             onClick={() => {
-                              setLightboxUrls(urls)
-                              setLightboxIndex(0)
+                              setLightboxTrade(t)
+                              setLightboxIndex(startIndex)
                             }}
-                            style={{ cursor: 'pointer', fontSize: 12, filter: 'drop-shadow(0 0 2px rgba(167,139,250,0.5))' }}
-                            title={`Ver capturas (${urls.length})`}
+                            style={{ cursor: 'pointer', fontSize: 11, filter: 'drop-shadow(0 0 2px rgba(167,139,250,0.5))' }}
+                            title={hasFav ? `Ver capturas (${urls.length}) - Principal: ⭐` : `Ver capturas (${urls.length})`}
                           >
-                            📸
+                            {hasFav ? '📸⭐' : '📸'}
                           </span>
                         )
                       })()}
@@ -244,7 +265,7 @@ export function TradeTable({ trades, onClose, onUpdate, onDelete }: Props) {
           position: 'fixed', inset: 0, zIndex: 3000,
           background: 'rgba(0,0,0,0.95)', backdropFilter: 'blur(10px)',
           display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
-        }} onClick={() => setLightboxUrls([])}>
+        }} onClick={() => setLightboxTrade(null)}>
           <div style={{ position: 'relative', maxWidth: '90vw', maxHeight: '90vh', display: 'flex', alignItems: 'center' }} onClick={e => e.stopPropagation()}>
 
             {/* Botón de Anterior */}
@@ -266,7 +287,20 @@ export function TradeTable({ trades, onClose, onUpdate, onDelete }: Props) {
 
             {/* Contenedor de Imagen y Contador */}
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
-              <img src={lightboxUrls[lightboxIndex]} alt="Screenshot Completa" style={{ maxWidth: '100%', maxHeight: '80vh', borderRadius: 10, boxShadow: '0 20px 50px rgba(0,0,0,0.8)' }} />
+              <div style={{ position: 'relative' }}>
+                <img src={lightboxUrls[lightboxIndex]} alt="Screenshot Completa" style={{ maxWidth: '100%', maxHeight: '80vh', borderRadius: 10, boxShadow: '0 20px 50px rgba(0,0,0,0.8)' }} />
+                {lightboxTrade?.favoriteScreenshotUrl === lightboxUrls[lightboxIndex] && (
+                  <span style={{
+                    position: 'absolute', top: 12, left: 12,
+                    background: 'rgba(251,191,36,0.9)', color: '#000',
+                    fontSize: 10, fontWeight: 800, padding: '4px 8px', borderRadius: 6,
+                    boxShadow: '0 4px 10px rgba(0,0,0,0.3)',
+                    fontFamily: 'sans-serif', textTransform: 'uppercase', letterSpacing: '0.5px'
+                  }}>
+                    ⭐ Captura Principal
+                  </span>
+                )}
+              </div>
               {lightboxUrls.length > 1 && (
                 <span style={{ color: '#9ca3af', fontSize: 12, background: 'rgba(255,255,255,0.06)', padding: '4px 10px', borderRadius: 20 }}>
                   {lightboxIndex + 1} / {lightboxUrls.length}
@@ -293,7 +327,7 @@ export function TradeTable({ trades, onClose, onUpdate, onDelete }: Props) {
 
             {/* Botón de Cerrar */}
             <button
-              onClick={() => setLightboxUrls([])}
+              onClick={() => setLightboxTrade(null)}
               style={{
                 position: 'absolute', top: -45, right: 0, background: 'none', border: 'none',
                 color: '#fff', fontSize: 28, cursor: 'pointer', outline: 'none',
