@@ -29,7 +29,7 @@ export type FinalMarketView = {
   m15:              MarketSnapshot
   finalState:       'GREEN' | 'YELLOW' | 'RED'
   fusedState:       'GREEN' | 'YELLOW' | 'RED'
-  triggerState?:    'reposo' | 'estirando' | 'giro'
+  triggerState?:    'reposo' | 'estirando' | 'giro-provisional' | 'giro'
   lastClosedElasticityM5?: number | null
   prevClosedElasticityM5?: number | null
   fusedExplanation: string
@@ -40,7 +40,7 @@ export type FinalMarketView = {
     m15:              MarketSnapshot & { direction: 'BUY' | 'SELL' }
     finalState:       'GREEN' | 'YELLOW' | 'RED'
     fusedState:       'GREEN' | 'YELLOW' | 'RED'
-    triggerState:     'reposo' | 'estirando' | 'giro'
+    triggerState:     'reposo' | 'estirando' | 'giro-provisional' | 'giro'
     pedestrianLight:  'STOP' | 'WALK'
     fusedExplanation: string
     fusedComparison:  any
@@ -92,7 +92,7 @@ type BackendMessage =
       m15:              MarketSnapshot
       finalState:       'GREEN' | 'YELLOW' | 'RED'
       fusedState:       'GREEN' | 'YELLOW' | 'RED'
-      triggerState?:    'reposo' | 'estirando' | 'giro'
+      triggerState?:    'reposo' | 'estirando' | 'giro-provisional' | 'giro'
       lastClosedElasticityM5?: number | null
       prevClosedElasticityM5?: number | null
       fusedExplanation: string
@@ -103,7 +103,7 @@ type BackendMessage =
         m15:              MarketSnapshot & { direction: 'BUY' | 'SELL' }
         finalState:       'GREEN' | 'YELLOW' | 'RED'
         fusedState:       'GREEN' | 'YELLOW' | 'RED'
-        triggerState:     'reposo' | 'estirando' | 'giro'
+        triggerState:     'reposo' | 'estirando' | 'giro-provisional' | 'giro'
         pedestrianLight:  'STOP' | 'WALK'
         fusedExplanation: string
         fusedComparison:  any

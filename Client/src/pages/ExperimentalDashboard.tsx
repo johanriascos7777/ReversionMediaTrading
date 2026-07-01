@@ -331,8 +331,13 @@ export function ExperimentalDashboard() {
                 checked={exp ? (exp.fusedState === 'GREEN' || (exp.fusedComparison && exp.fusedComparison.winRate >= 65)) : false}
               />
               <ConfluenceItem
-                label="Giro de Elasticidad (Pico superado)"
+                label={
+                  exp?.triggerState === 'giro-provisional'
+                    ? "Giro de Elasticidad (⏳ Confirmando...)"
+                    : "Giro de Elasticidad (Pico superado)"
+                }
                 checked={exp ? exp.triggerState === 'giro' : false}
+                pending={exp ? exp.triggerState === 'giro-provisional' : false}
               />
             </div>
           </div>
@@ -640,24 +645,33 @@ export function ExperimentalDashboard() {
 
 // ─── Helpers locales ──────────────────────────────────────────────────────────
 
-function ConfluenceItem({ label, checked }: { label: string; checked: boolean }) {
+function ConfluenceItem({ label, checked, pending }: { label: string; checked: boolean; pending?: boolean }) {
+  const isPending = !checked && pending
+  const bgColor = checked ? 'rgba(16,185,129,0.04)' : isPending ? 'rgba(245,158,11,0.04)' : 'rgba(255,255,255,0.01)'
+  const borderColor = checked ? 'rgba(16,185,129,0.15)' : isPending ? 'rgba(245,158,11,0.15)' : 'rgba(255,255,255,0.04)'
+  const dotColor = checked ? '#10b981' : isPending ? '#f59e0b' : '#374151'
+  const dotIcon = checked ? '✓' : isPending ? '◷' : '✗'
+  const textColor = checked ? '#fff' : isPending ? '#fbbf24' : '#9ca3af'
+  const textWeight = checked ? 600 : isPending ? 600 : 400
+
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 10,
       padding: '10px 14px', borderRadius: 8,
-      background: checked ? 'rgba(16,185,129,0.04)' : 'rgba(255,255,255,0.01)',
-      border: `1px solid ${checked ? 'rgba(16,185,129,0.15)' : 'rgba(255,255,255,0.04)'}`,
+      background: bgColor,
+      border: `1px solid ${borderColor}`,
       fontSize: 12, transition: 'all 0.2s'
     }}>
       <div style={{
         width: 16, height: 16, borderRadius: '50%',
-        background: checked ? '#10b981' : '#374151',
+        background: dotColor,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 10, color: '#fff', flexShrink: 0
+        fontSize: 10, color: '#fff', flexShrink: 0,
+        animation: isPending ? 'pulse-walk 1s infinite alternate' : 'none'
       }}>
-        {checked ? '✓' : '✗'}
+        {dotIcon}
       </div>
-      <span style={{ color: checked ? '#fff' : '#9ca3af', fontWeight: checked ? 600 : 400 }}>{label}</span>
+      <span style={{ color: textColor, fontWeight: textWeight }}>{label}</span>
     </div>
   )
 }

@@ -117,12 +117,16 @@ export function runBacktestExp(
     // Determinar la dirección de la sobre-extensión
     const direction: 'BUY' | 'SELL' = candle.close < ema ? 'BUY' : 'SELL';
 
-    // Buscar reversión en las siguientes `maxBarsToRevert` velas
+    // maxBarsToRevert adaptativo: señales más extremas necesitan más tiempo para revertir.
+    // elas 1.2 → 26 bars (2h10m) | elas 2.5 → 33 bars (2h45m) | elas 5.08 → 45 bars (3h45m)
+    const adaptiveMaxBars = Math.min(50, Math.round(config.maxBarsToRevert + 5 * elasticity));
+
+    // Buscar reversión en las siguientes velas (ventana adaptativa)
     let reverted = false;
 
     for (
       let j = 1;
-      j <= config.maxBarsToRevert && i + j < candles.length;
+      j <= adaptiveMaxBars && i + j < candles.length;
       j++
     ) {
       const future = candles[i + j];
@@ -149,7 +153,7 @@ export function runBacktestExp(
       events.push({
         entryIndex: i,
         exitIndex: -1,
-        barsToRevert: config.maxBarsToRevert,
+        barsToRevert: adaptiveMaxBars,
         state,
         elasticity,
         direction,

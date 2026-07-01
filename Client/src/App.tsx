@@ -11,6 +11,7 @@ import { Semaforo } from './components/Semaforo'
 import { BacktestMetrics } from './components/BacktestMetrics'
 import { ElasticityCard } from './components/ElasticityCard'
 import { SystemObservability } from './components/SystemObservability'
+import { ChecklistAccordion } from './components/ChecklistAccordion'
 import { ApiKeysStatus } from './components/ApiKeysStatus'
 import { StructureCockpit } from './components/StructureCockpit'
 import { LaunchCockpit } from './components/tower/LaunchCockpit'
@@ -272,6 +273,13 @@ function App() {
         ================================================================== 
       */}
       <ApiKeysStatus keysStatus={keysStatus} />
+
+      {/* 
+        ==================================================================
+        📋 SECTION: CHECKLIST DE VALIDACIÓN
+        ================================================================== 
+      */}
+      <ChecklistAccordion />
 
       {/* 
         ==================================================================

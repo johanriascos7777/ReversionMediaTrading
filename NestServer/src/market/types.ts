@@ -83,7 +83,7 @@ export type BackendMessage =
         m15: MarketSnapshot & { direction: 'BUY' | 'SELL' };
         finalState: MarketState;
         fusedState: MarketState;
-        triggerState: 'reposo' | 'estirando' | 'giro';
+        triggerState: 'reposo' | 'estirando' | 'giro-provisional' | 'giro';
         pedestrianLight: 'STOP' | 'WALK';
         fusedExplanation: string;
         fusedComparison: SignalComparisonResult | null;

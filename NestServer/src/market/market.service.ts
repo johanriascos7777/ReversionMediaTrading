@@ -21,7 +21,7 @@ import { calculateSnapshotExp, resolveMultiTFExp, calculateElasticityForCandlesE
 import { runBacktestExp } from './backtestEngineExp';
 import { compareSignalWithHistoryExp } from './compareSignalExp';
 
-const HISTORY_OUTPUT = 500;
+const HISTORY_OUTPUT = 1000;
 
 export class SymbolState {
   public readonly symbol: string;
@@ -61,9 +61,17 @@ export class SymbolState {
   public lastClosedElasticityM5Exp: number | null = null;
   public prevClosedElasticityM5Exp: number | null = null;
 
-  public triggerStateM5Exp: 'reposo' | 'estirando' | 'giro' = 'reposo';
-  public previousTriggerStateM5Exp: 'reposo' | 'estirando' | 'giro' = 'reposo';
+  public triggerStateM5Exp: 'reposo' | 'estirando' | 'giro-provisional' | 'giro' = 'reposo';
+  public previousTriggerStateM5Exp: 'reposo' | 'estirando' | 'giro-provisional' | 'giro' = 'reposo';
   public maxLiveElasticityExp = 0;
+
+  // --- Mejoras al Detector de Pico (3 capas) ---
+  /** Buffer circular de últimos N valores de elasticidad tick-a-tick para calcular stddev */
+  public liveElasticityBufferExp: number[] = [];
+  /** Contador de ticks consecutivos en estado GREEN antes de armar el detector */
+  public greenTickCountExp = 0;
+  /** Contador de ticks sosteniendo retroceso tras giro provisional */
+  public provisionalGiroTicksExp = 0;
 
   public lastTelegramAlertTimeAExp = 0;
   public lastTelegramAlertTimeBExp = 0;
@@ -244,6 +252,11 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
   // NOTA: Usamos COT (UTC-5) explícitamente para que funcione igual en
   //       servidores en la nube (Render/UTC) y en máquina local.
   private isOperationalTime(): boolean {
+    // Si estamos en desarrollo/local y queremos operar 24/7 sin restricción
+    if (process.env.IGNORE_SCHEDULE === 'true') {
+      return true;
+    }
+
     // Calcular hora actual en COT (UTC-5) de forma explícita y portable
     const ahoraUTC = Date.now();
     const COT_OFFSET_MS = -5 * 60 * 60 * 1000; // UTC-5
@@ -1099,23 +1112,96 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
 
       fusedStateResultExp = fuseMarketState(finalStateExp, comparisonExp);
 
-      // Resolver estado de gatillo experimental usando detector de pico
+      // ╔══════════════════════════════════════════════════════════════════════╗
+      // ║  Detector de Pico Experimental — 3 Capas de Protección            ║
+      // ║  Capa 1: Umbral adaptativo (stddev)                               ║
+      // ║  Capa 2: Persistencia en GREEN (N ticks antes de armar)           ║
+      // ║  Capa 3: Giro provisional → confirmado (M ticks sostenidos)       ║
+      // ╚══════════════════════════════════════════════════════════════════════╝
+
+      // Constantes del detector — calibrar con backtest en /experimental
+      const ADAPTIVE_K = 1.5;           // multiplicador de stddev
+      const ADAPTIVE_FLOOR = 0.08;      // piso mínimo de retroceso
+      const BUFFER_SIZE = 30;           // ticks para calcular stddev
+      const GREEN_PERSISTENCE = 5;     // ticks consecutivos en GREEN antes de armar
+      const CONFIRM_TICKS = 3;         // ticks sostenidos para confirmar giro
+
       if (fusedStateResultExp.state === 'GREEN') {
-        if (state.triggerStateM5Exp === 'reposo') {
-          state.maxLiveElasticityExp = snapshotM5Exp.elasticity;
-          state.triggerStateM5Exp = 'estirando';
-        } else if (snapshotM5Exp.elasticity > state.maxLiveElasticityExp) {
-          state.maxLiveElasticityExp = snapshotM5Exp.elasticity;
-          state.triggerStateM5Exp = 'estirando';
-        } else if (state.maxLiveElasticityExp - snapshotM5Exp.elasticity >= 0.1) {
-          state.triggerStateM5Exp = 'giro';
+        // --- Capa 1: Alimentar buffer de elasticidad para umbral adaptativo ---
+        state.liveElasticityBufferExp.push(snapshotM5Exp.elasticity);
+        if (state.liveElasticityBufferExp.length > BUFFER_SIZE) {
+          state.liveElasticityBufferExp.shift();
+        }
+
+        // --- Capa 2: Filtro de persistencia ---
+        state.greenTickCountExp++;
+
+        const detectorArmed = state.greenTickCountExp >= GREEN_PERSISTENCE;
+
+        if (!detectorArmed) {
+          // Aún no hay suficientes ticks en GREEN — trackear pico pero no disparar
+          if (snapshotM5Exp.elasticity > state.maxLiveElasticityExp) {
+            state.maxLiveElasticityExp = snapshotM5Exp.elasticity;
+          }
+          if (state.triggerStateM5Exp === 'reposo') {
+            state.triggerStateM5Exp = 'estirando';
+          }
+        } else {
+          // Detector armado — aplicar lógica de pico con umbral adaptativo
+
+          // Calcular umbral adaptativo basado en stddev del buffer
+          let adaptiveThreshold = ADAPTIVE_FLOOR;
+          if (state.liveElasticityBufferExp.length >= 5) {
+            const buf = state.liveElasticityBufferExp;
+            const mean = buf.reduce((a, b) => a + b, 0) / buf.length;
+            const variance = buf.reduce((a, v) => a + (v - mean) ** 2, 0) / buf.length;
+            const stddev = Math.sqrt(variance);
+            adaptiveThreshold = Math.max(ADAPTIVE_FLOOR, ADAPTIVE_K * stddev);
+          }
+
+          if (state.triggerStateM5Exp === 'reposo' || state.triggerStateM5Exp === 'estirando') {
+            // Fase de estiramiento — buscar pico máximo
+            if (snapshotM5Exp.elasticity > state.maxLiveElasticityExp) {
+              state.maxLiveElasticityExp = snapshotM5Exp.elasticity;
+              state.triggerStateM5Exp = 'estirando';
+              state.provisionalGiroTicksExp = 0; // reset si se actualiza el pico
+            } else if (state.maxLiveElasticityExp - snapshotM5Exp.elasticity >= adaptiveThreshold) {
+              // --- Capa 3: Primer tick que cumple el umbral → giro provisional ---
+              state.triggerStateM5Exp = 'giro-provisional';
+              state.provisionalGiroTicksExp = 1;
+            }
+          } else if (state.triggerStateM5Exp === 'giro-provisional') {
+            // --- Capa 3: Confirmación del giro ---
+            if (snapshotM5Exp.elasticity >= state.maxLiveElasticityExp) {
+              // Precio volvió a superar el pico → falso giro, cancelar
+              state.triggerStateM5Exp = 'estirando';
+              state.maxLiveElasticityExp = snapshotM5Exp.elasticity;
+              state.provisionalGiroTicksExp = 0;
+            } else if (state.maxLiveElasticityExp - snapshotM5Exp.elasticity >= adaptiveThreshold) {
+              // Sigue retrocediendo — sumar tick de confirmación
+              state.provisionalGiroTicksExp++;
+              if (state.provisionalGiroTicksExp >= CONFIRM_TICKS) {
+                state.triggerStateM5Exp = 'giro'; // ¡Confirmado!
+              }
+            } else {
+              // Retrocedió menos que el umbral — cancelar provisional
+              state.triggerStateM5Exp = 'estirando';
+              state.provisionalGiroTicksExp = 0;
+            }
+          }
+          // Si ya está en 'giro' confirmado, se queda ahí hasta que salga de GREEN
         }
       } else {
+        // Fuera de GREEN: reset completo del detector
         state.maxLiveElasticityExp = 0;
         state.triggerStateM5Exp = 'reposo';
+        state.liveElasticityBufferExp = [];
+        state.greenTickCountExp = 0;
+        state.provisionalGiroTicksExp = 0;
       }
 
       // Semáforo de peatón experimental
+      // Solo se activa con giro CONFIRMADO, no provisional
       const checkAnomaly = finalStateExp === 'GREEN' || finalStateExp === 'YELLOW';
       const checkBacktest = fusedStateResultExp.state === 'GREEN' || (comparisonExp && comparisonExp.winRate >= 65);
       const checkTrigger = state.triggerStateM5Exp === 'giro';
