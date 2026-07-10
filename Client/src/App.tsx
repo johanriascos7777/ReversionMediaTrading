@@ -15,6 +15,7 @@ import { ChecklistAccordion } from './components/ChecklistAccordion'
 import { ApiKeysStatus } from './components/ApiKeysStatus'
 import { StructureCockpit } from './components/StructureCockpit'
 import { LaunchCockpit } from './components/tower/LaunchCockpit'
+import { ConsolidationPanel } from './components/ConsolidationPanel'
 
 import { compareSignalWithHistory } from './backtest/compareSignal'
 import { fuseMarketState } from './logic/fuseMarketState'
@@ -52,7 +53,7 @@ function App() {
   const [dismissedFallbacks, setDismissedFallbacks] = useState<Set<string>>(new Set())
 
   // 🟢 1. Mercado en tiempo real — via backend WebSocket local (Multi-símbolo)
-  const { data: market, status: wsStatus, wsFallbacks, keysStatus, exhaustAlert } = useMarketData()
+  const { data: market, consolidation, status: wsStatus, wsFallbacks, keysStatus, exhaustAlert } = useMarketData()
 
   // Símbolo activo resuelto (con fallback si el activo no se ha recibido o es vacío)
   const activeKey = market && market[activeSymbol] ? activeSymbol : (market ? Object.keys(market)[0] : 'EUR/USD')
@@ -629,6 +630,16 @@ function App() {
         }}>
           <StructureCockpit data={structureData} />
         </div>
+
+        {/* 
+          ==================================================================
+          🔬 SECTION 12.5: CONSOLIDATION GEOMETRY ANALYZER
+          ================================================================== 
+        */}
+        <ConsolidationPanel
+          data={consolidation ? consolidation[activeKey] : null}
+          symbol={activeKey}
+        />
 
         {/* 
           ==================================================================

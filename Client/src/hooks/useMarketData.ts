@@ -23,6 +23,42 @@ const RECONNECT_MS    = 3_000
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─── Consolidation Analyzer Types ───────────────────────────────────────────
+
+export type ConsolidationTimeframeSignal = {
+  detected:    boolean
+  pattern:     string | null
+  alignment:   'aligned' | 'opposed' | 'neutral'
+  confidence:  number
+  duration:    number
+  rangeATR:    number
+  explanation: string
+}
+
+export type SuperSignalType = 'SUPER_STOP' | 'SUPER_REVERSAL' | 'CONFLICT' | 'INACTIVE'
+
+export type SuperSignal = {
+  active:         boolean
+  type:           SuperSignalType
+  recommendation: string
+}
+
+export type ConsolidationData = {
+  symbol:       string
+  priceVsEma:   'above' | 'below'
+  elasticityM5:  number
+  elasticityM15: number
+  m5:           ConsolidationTimeframeSignal
+  m15:          ConsolidationTimeframeSignal
+  superSignal:  SuperSignal
+}
+
+export type MultiSymbolConsolidation = {
+  [symbol: string]: ConsolidationData
+}
+
+// ─── Market View Types ──────────────────────────────────────────────────────
+
 export type FinalMarketView = {
   symbol:           string
   m5:               MarketSnapshot
@@ -110,6 +146,16 @@ type BackendMessage =
         backtest:         any
       }
     }
+  | {
+      type:          'consolidation'
+      symbol:        string
+      priceVsEma:    'above' | 'below'
+      elasticityM5:  number
+      elasticityM15: number
+      m5:            ConsolidationTimeframeSignal
+      m15:           ConsolidationTimeframeSignal
+      superSignal:   SuperSignal
+    }
   | { type: 'status';    status: string; message: string }
   | { type: 'error';     message: string }
   | { type: 'ws-fallback'; symbol: string; reason: string }
@@ -140,19 +186,21 @@ export type WsFallbackMap = { [symbol: string]: string }
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected'
 
 export function useMarketData(): {
-  data:        MultiSymbolMarketData | null
-  status:      ConnectionStatus
-  wsFallbacks: WsFallbackMap
-  keysStatus:  ApiKeysPoolStatus | null
-  exhaustAlert: string | null
+  data:           MultiSymbolMarketData | null
+  consolidation:  MultiSymbolConsolidation | null
+  status:         ConnectionStatus
+  wsFallbacks:    WsFallbackMap
+  keysStatus:     ApiKeysPoolStatus | null
+  exhaustAlert:   string | null
 } {
-  const [data,        setData]        = useState<MultiSymbolMarketData | null>(null)
-  const [status,      setStatus]      = useState<ConnectionStatus>('connecting')
-  const [wsFallbacks, setWsFallbacks] = useState<WsFallbackMap>({})
-  const [keysStatus,  setKeysStatus]  = useState<ApiKeysPoolStatus | null>(null)
-  const [exhaustAlert, setExhaustAlert] = useState<string | null>(null)
-  const wsRef                         = useRef<WebSocket | null>(null)
-  const stoppedRef                    = useRef(false)
+  const [data,           setData]           = useState<MultiSymbolMarketData | null>(null)
+  const [consolidation,  setConsolidation]  = useState<MultiSymbolConsolidation | null>(null)
+  const [status,         setStatus]         = useState<ConnectionStatus>('connecting')
+  const [wsFallbacks,    setWsFallbacks]    = useState<WsFallbackMap>({})
+  const [keysStatus,     setKeysStatus]     = useState<ApiKeysPoolStatus | null>(null)
+  const [exhaustAlert,   setExhaustAlert]   = useState<string | null>(null)
+  const wsRef                               = useRef<WebSocket | null>(null)
+  const stoppedRef                          = useRef(false)
 
   useEffect(() => {
     stoppedRef.current = false
@@ -196,6 +244,21 @@ export function useMarketData(): {
               fusedComparison:  msg.fusedComparison,
               backtest:         msg.backtest,
               experimental:     msg.experimental,
+            }
+          }))
+        }
+
+        if (msg.type === 'consolidation') {
+          setConsolidation(prev => ({
+            ...prev,
+            [msg.symbol]: {
+              symbol:        msg.symbol,
+              priceVsEma:    msg.priceVsEma,
+              elasticityM5:  msg.elasticityM5,
+              elasticityM15: msg.elasticityM15,
+              m5:            msg.m5,
+              m15:           msg.m15,
+              superSignal:   msg.superSignal,
             }
           }))
         }
@@ -252,5 +315,5 @@ export function useMarketData(): {
     }
   }, [])
 
-  return { data, status, wsFallbacks, keysStatus, exhaustAlert }
+  return { data, consolidation, status, wsFallbacks, keysStatus, exhaustAlert }
 }
