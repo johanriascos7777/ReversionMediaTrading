@@ -637,8 +637,9 @@ function App() {
           ================================================================== 
         */}
         <ConsolidationPanel
-          data={consolidation ? consolidation[activeKey] : null}
-          symbol={activeKey}
+          consolidation={consolidation}
+          symbols={market ? Object.keys(market) : []}
+          activeSymbol={activeKey}
         />
 
         {/* 
