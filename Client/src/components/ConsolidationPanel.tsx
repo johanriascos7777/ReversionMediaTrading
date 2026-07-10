@@ -757,12 +757,12 @@ export function ConsolidationPanel({
             <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 10 }}>
               <TimeframeCard
                 timeframe="M5"
-                role="Detector de pullbacks (68% acc.)"
+                role={`Detector de pullbacks (${data.backtest?.byAlignment?.opposed?.accuracy ? data.backtest.byAlignment.opposed.accuracy.toFixed(1) : '68'}% acc.)`}
                 signal={data.m5}
               />
               <TimeframeCard
                 timeframe="M15"
-                role="Confirmador de reversión (63% acc.)"
+                role={`Confirmador de reversión (${data.backtest?.byAlignment?.aligned?.accuracy ? data.backtest.byAlignment.aligned.accuracy.toFixed(1) : '63'}% acc.)`}
                 signal={data.m15}
               />
             </div>
@@ -785,7 +785,7 @@ export function ConsolidationPanel({
             }}>
               <div style={{ marginBottom: 8 }}>
                 <strong style={{ color: '#f87171' }}>🛡️ Escudo ARRIBA (OPPOSED)</strong> = la geometría indica que el precio va a seguir estirándose → <strong style={{ color: '#ef4444' }}>NO ENTRES</strong>.
-                <br /><span style={{ fontSize: 10, color: '#4b5563' }}>68% accuracy • 78% en Bear Flags (backtest EUR/USD, 5000 velas)</span>
+                <br /><span style={{ fontSize: 10, color: '#4b5563' }}>{data.backtest?.byAlignment?.opposed?.accuracy ? data.backtest.byAlignment.opposed.accuracy.toFixed(1) : '68'}% accuracy • {data.backtest?.byPattern?.bear_flag?.accuracy ? data.backtest.byPattern.bear_flag.accuracy.toFixed(1) : '78'}% en Bear Flags (backtest dinámico actual)</span>
               </div>
               <div style={{ marginBottom: 8 }}>
                 <strong style={{ color: '#34d399' }}>✅ Escudo ABAJO (ALIGNED)</strong> = la geometría favorece la reversión → <em>el escudo no bloquea</em>, pero confirma con otros indicadores.

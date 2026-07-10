@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, OnModuleInit, OnModuleDestroy, Inject, forwardRef } from '@nestjs/common';
 import { EventEmitter } from 'events';
 import https from 'https';
 import http from 'http';
@@ -15,6 +15,7 @@ import { EntityManager } from '@mikro-orm/mysql';
 import { PendingSignal } from '../trade/pending-signal.entity';
 import { detectSession } from '../trade/trade.service';
 import { RequestContext } from '@mikro-orm/core';
+import { ConsolidationService } from '../consolidation/consolidation.service';
 
 // --- Imports de Versión Experimental ---
 import { calculateSnapshotExp, resolveMultiTFExp, calculateElasticityForCandlesExp, pushPercentileHistoryExp, clearPercentileHistoryExp } from './marketEngineExp';
@@ -190,7 +191,11 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
   private readonly DELAY_HISTORY_SIZE = 50;
   private metricsInterval: NodeJS.Timeout | null = null;
 
-  constructor(private readonly em: EntityManager) {
+  constructor(
+    private readonly em: EntityManager,
+    @Inject(forwardRef(() => ConsolidationService))
+    private readonly consolidationService: ConsolidationService
+  ) {
     this.symbolList = this.symbol.split(',').map((s) => s.trim());
     this.apiKeyList = this.apiKey.split(',').map((k) => k.trim());
 
@@ -1205,7 +1210,29 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       const checkAnomaly = finalStateExp === 'GREEN' || finalStateExp === 'YELLOW';
       const checkBacktest = fusedStateResultExp.state === 'GREEN' || (comparisonExp && comparisonExp.winRate >= 65);
       const checkTrigger = state.triggerStateM5Exp === 'giro';
-      state.pedestrianLight = checkAnomaly && checkBacktest && checkTrigger ? 'WALK' : 'STOP';
+      
+      // -- Integración de Pullback Shield --
+      const shieldSnap = this.consolidationService.getConsolidationSnapshot(symbol);
+      const isOpposedM5 = shieldSnap?.m5.detected && shieldSnap?.m5.alignment === 'opposed';
+      const isOpposedM15 = shieldSnap?.m15.detected && shieldSnap?.m15.alignment === 'opposed';
+      const shieldBlocked = isOpposedM5 || isOpposedM15 || shieldSnap?.superSignal.type === 'SUPER_STOP';
+
+      // -- Integración de Structure Engine (Sándwich de EMAs) --
+      const structureSnap = state.lastStructureM5;
+      const isCompression = structureSnap?.isCompressionSandwich === true;
+      const isDoublePattern = structureSnap?.doublePattern === 'double_top' || structureSnap?.doublePattern === 'double_bottom';
+      
+      if (isCompression) {
+        state.pedestrianLight = 'STOP';
+        fusedStateResultExp.state = 'RED';
+        fusedStateResultExp.explanation = '🚫 BLOQUEADO POR COMPRESIÓN: Sándwich de EMAs (EMA50 y EMA100 demasiado cerca).';
+      } else if (shieldBlocked) {
+        state.pedestrianLight = 'STOP'; // El escudo bloquea forzosamente
+        fusedStateResultExp.state = 'RED'; // Forzar rojo para cancelar alertas
+        fusedStateResultExp.explanation = '🚫 BLOQUEADO POR ESCUDO DE PULLBACKS: ' + (shieldSnap?.superSignal.recommendation || 'Consolidación en contra de la reversión.');
+      } else {
+        state.pedestrianLight = checkAnomaly && checkBacktest && checkTrigger ? 'WALK' : 'STOP';
+      }
     }
 
     // Broadcast a través de eventos (Tradicional + Experimental)

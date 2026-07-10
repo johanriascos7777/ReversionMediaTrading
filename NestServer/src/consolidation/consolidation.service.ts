@@ -14,7 +14,7 @@
  * NUNCA modifica ni llama a nada del motor de elasticidad estándar.
  */
 
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable, OnModuleInit, Inject, forwardRef } from '@nestjs/common';
 import { MarketService } from '../market/market.service';
 import { HistoricalDataService } from '../historical/historical-data.service';
 import type { BackendMessage } from '../market/types';
@@ -64,6 +64,7 @@ export type ConsolidationSnapshot = {
   m5:          ConsolidationTimeframeSignal;
   m15:         ConsolidationTimeframeSignal;
   superSignal: SuperSignal;
+  backtest:    ConsolidationBacktestResult | null;
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -86,6 +87,7 @@ export class ConsolidationService implements OnModuleInit {
   private initializing = false;
 
   constructor(
+    @Inject(forwardRef(() => MarketService))
     private readonly marketService: MarketService,
     private readonly historicalData: HistoricalDataService,
   ) {}
@@ -161,6 +163,7 @@ export class ConsolidationService implements OnModuleInit {
       m5:  m5Signal,
       m15: m15Signal,
       superSignal,
+      backtest: this.lastBacktest.get(symbol) ?? null,
     };
   }
 
@@ -283,17 +286,15 @@ export class ConsolidationService implements OnModuleInit {
   ): void {
     // Solo analizar cuando hay sobreextensión (YELLOW o GREEN, inercia hasta percentil 50)
     if (snapshot.state === 'RED' && snapshot.percentile < 50) {
-      if (store.has(symbol)) {
-        store.set(symbol, {
-          detected: false,
-          zone: null,
-          geometry: null,
-          reversalAlignment: 'neutral',
-          priceVsEma: snapshot.price > snapshot.ema100 ? 'above' : 'below',
-          elasticity: snapshot.elasticity,
-          explanation: `Mercado en rango normal (RED) en ${timeframe}. Sin análisis de consolidación.`,
-        });
-      }
+      store.set(symbol, {
+        detected: false,
+        zone: null,
+        geometry: null,
+        reversalAlignment: 'neutral',
+        priceVsEma: snapshot.price > snapshot.ema100 ? 'above' : 'below',
+        elasticity: snapshot.elasticity,
+        explanation: `Mercado en rango normal (RED) en ${timeframe}. Sin análisis de consolidación.`,
+      });
       return;
     }
 

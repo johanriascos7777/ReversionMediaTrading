@@ -202,6 +202,59 @@ function detectDivergence(
   return 'none';
 }
 
+// ─── Double Top / Bottom ─────────────────────────────────────────────────────
+
+/**
+ * Detecta patrones recientes de Doble Techo o Doble Piso.
+ * Si los últimos dos swing highs/lows están en el mismo nivel, es un patrón doble.
+ */
+function detectDoublePattern(
+  candles: Candle[],
+  atr: number
+): 'double_top' | 'double_bottom' | 'none' {
+  const lookback = Math.min(60, candles.length);
+  const slice    = candles.slice(-lookback);
+  const confirm  = 2;
+
+  const swingHighs: number[] = [];
+  const swingLows:  number[] = [];
+
+  for (let i = confirm; i < slice.length - confirm; i++) {
+    const h = slice[i].high;
+    const l = slice[i].low;
+
+    const isSwingHigh = Array.from({ length: confirm }, (_, k) => k + 1).every(
+      k => h > slice[i - k].high && h > slice[i + k].high
+    );
+    const isSwingLow = Array.from({ length: confirm }, (_, k) => k + 1).every(
+      k => l < slice[i - k].low && l < slice[i + k].low
+    );
+
+    if (isSwingHigh) swingHighs.push(h);
+    if (isSwingLow)  swingLows.push(l);
+  }
+
+  const tolerance = atr * 0.25;
+
+  if (swingHighs.length >= 2) {
+    const last1 = swingHighs[swingHighs.length - 1];
+    const last2 = swingHighs[swingHighs.length - 2];
+    if (Math.abs(last1 - last2) <= tolerance) {
+      return 'double_top';
+    }
+  }
+
+  if (swingLows.length >= 2) {
+    const last1 = swingLows[swingLows.length - 1];
+    const last2 = swingLows[swingLows.length - 2];
+    if (Math.abs(last1 - last2) <= tolerance) {
+      return 'double_bottom';
+    }
+  }
+
+  return 'none';
+}
+
 // ─── Clasificador de Señal ────────────────────────────────────────────────────
 
 function resolveStructureSignal(
@@ -283,10 +336,16 @@ export function calculateStructureSnapshot(
 
   const closes       = candles.map(c => c.close);
   const atr          = calculateATR(candles, 14);
+  const ema50        = calculateEMA(closes, 50);
+  const ema100       = calculateEMA(closes, 100);
   const ema200       = calculateEMA(closes, 200);
   const ema200Slope  = calculateEMA200Slope(candles, atr);
   const priceAbove   = price > ema200;
   const rsi          = calculateRSI(candles, 14);
+
+  // Filtro de Compresión: Sándwich de EMAs
+  const isCompressionSandwich = Math.abs(ema50 - ema100) / atr < 0.5;
+  const doublePattern = detectDoublePattern(candles, atr);
 
   const rsiZone = rsi >= 70 ? 'overbought'
                 : rsi <= 30 ? 'oversold'
@@ -299,6 +358,15 @@ export function calculateStructureSnapshot(
   const { state, signal, confluences } = resolveStructureSignal(
     rsi, nearestSR, divergence, ema200Slope, priceAbove
   );
+
+  if (isCompressionSandwich) {
+    confluences.push('Sándwich EMA50-100 (Compresión)');
+  }
+  if (doublePattern === 'double_top') {
+    confluences.push('Doble Techo Reciente');
+  } else if (doublePattern === 'double_bottom') {
+    confluences.push('Doble Piso Reciente');
+  }
 
   // Texto de explicación para el frontend
   let explanation: string;
@@ -319,9 +387,13 @@ export function calculateStructureSnapshot(
     price,
     rsi,
     rsiZone,
+    ema50,
+    ema100,
     ema200,
     ema200Slope,
     priceVsEma200: priceAbove ? 'above' : 'below',
+    isCompressionSandwich,
+    doublePattern,
     divergence,
     srLevels,
     nearestSR,

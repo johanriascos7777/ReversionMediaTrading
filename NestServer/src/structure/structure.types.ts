@@ -24,9 +24,13 @@ export type StructureSnapshot = {
   price:          number;
   rsi:            number;
   rsiZone:        'overbought' | 'oversold' | 'neutral';
+  ema50:          number;
+  ema100:         number;
   ema200:         number;
   ema200Slope:    TrendDirection;
   priceVsEma200:  'above' | 'below';
+  isCompressionSandwich: boolean;
+  doublePattern:  'double_top' | 'double_bottom' | 'none';
   divergence:     DivergenceType;
   srLevels:       SRLevel[];
   nearestSR:      SRLevel | null;

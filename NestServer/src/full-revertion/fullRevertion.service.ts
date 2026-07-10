@@ -19,6 +19,7 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { MarketService } from '../market/market.service';
 import { StructureService } from '../structure/structure.service';
+import { ConsolidationService } from '../consolidation/consolidation.service';
 import type { BackendMessage } from '../market/types';
 import {
   calculateFullRevertionSnapshot,
@@ -66,6 +67,7 @@ export class FullRevertionService implements OnModuleInit {
   constructor(
     private readonly marketService: MarketService,
     private readonly structureService: StructureService,
+    private readonly consolidationService: ConsolidationService,
   ) {}
 
   onModuleInit() {
@@ -132,6 +134,23 @@ export class FullRevertionService implements OnModuleInit {
     if (structSnap) {
       snap.divergence = structSnap.divergence;
       snap.nearestSR = structSnap.nearestSR;
+    }
+
+    // ─── ENRIQUECER CON PULLBACK SHIELD Y BLOQUEO AUTOMÁTICO ──────────────
+    const consolidationSnap = this.consolidationService.getConsolidationSnapshot(symbol);
+    if (consolidationSnap) {
+      const m5Opposed = consolidationSnap.m5.detected && consolidationSnap.m5.alignment === 'opposed';
+      const m15Opposed = consolidationSnap.m15.detected && consolidationSnap.m15.alignment === 'opposed';
+      const isSuperStop = consolidationSnap.superSignal.type === 'SUPER_STOP';
+      
+      if (m5Opposed || m15Opposed || isSuperStop) {
+        snap.shieldBlocked = true;
+        snap.signalAllowed = false; // El escudo tiene autoridad máxima para cancelar entradas
+      } else {
+        snap.shieldBlocked = false;
+      }
+    } else {
+      snap.shieldBlocked = false;
     }
 
     const decimals = symbol.includes('JPY') ? 3 : 5;

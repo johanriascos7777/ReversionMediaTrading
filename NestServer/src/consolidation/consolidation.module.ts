@@ -11,14 +11,14 @@
  * el estado de consolidación si lo necesitan.
  */
 
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { MarketModule } from '../market/market.module';
 import { HistoricalModule } from '../historical/historical.module';
 import { ConsolidationService } from './consolidation.service';
 import { ConsolidationController } from './consolidation.controller';
 
 @Module({
-  imports:     [MarketModule, HistoricalModule],
+  imports:     [forwardRef(() => MarketModule), HistoricalModule],
   providers:   [ConsolidationService],
   controllers: [ConsolidationController],
   exports:     [ConsolidationService],

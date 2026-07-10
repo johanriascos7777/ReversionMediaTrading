@@ -16,12 +16,10 @@ import { useHistoricalData } from '../hooks/useHistoricalData'
 import { useBacktest } from '../hooks/useBacktest'
 import { useStructureData } from '../hooks/useStructureData'
 
-import { Semaforo } from '../components/Semaforo'
 import { BacktestMetrics } from '../components/BacktestMetrics'
 import { ElasticityCard } from '../components/ElasticityCard'
 import { SystemObservability } from '../components/SystemObservability'
-import { StructureCockpit } from '../components/StructureCockpit'
-import { LaunchCockpit } from '../components/tower/LaunchCockpit'
+import { SuperSemaforo } from '../components/SuperSemaforo'
 
 import { API_URL } from '@/config/env'
 
@@ -58,7 +56,7 @@ export function ExperimentalDashboard() {
   const [toasts, setToasts] = useState<Toast[]>([])
   const [dismissedFallbacks, setDismissedFallbacks] = useState<Set<string>>(new Set())
 
-  const { data: market, status: wsStatus, wsFallbacks, exhaustAlert } = useMarketData()
+  const { data: market, consolidation, status: wsStatus, wsFallbacks, exhaustAlert } = useMarketData()
 
   const activeKey = market && market[activeSymbol] ? activeSymbol : (market ? Object.keys(market)[0] : 'EUR/USD')
   const currentRaw = market ? market[activeKey] : null
@@ -78,6 +76,7 @@ export function ExperimentalDashboard() {
     fusedExplanation: exp.fusedExplanation,
     fusedComparison: exp.fusedComparison,
     backtest: exp.backtest,
+    pedestrianLight: exp.pedestrianLight,
   } : null
 
   // Hooks de historial y backtest (mismos datos base, diferente motor)
@@ -258,90 +257,13 @@ export function ExperimentalDashboard() {
         )}
 
         {/* ==================================================== */}
-        {/* 🚦 SEMÁFORO DE PEATÓN (exclusivo del canal exp.)      */}
+        {/* 🚦 SÚPER SEMÁFORO (UNIFICADO)                         */}
         {/* ==================================================== */}
-        <div style={{ marginBottom: 32 }}>
-          <h2 style={{ fontSize: 14, textTransform: 'uppercase', letterSpacing: '2px', color: '#a78bfa', margin: '0 0 16px 4px', fontWeight: 700 }}>
-            🚦 Semáforo de Peatón (Confluencia Total Experimental)
-          </h2>
-          <div style={{
-            padding: '24px', borderRadius: 16,
-            background: isWalk
-              ? 'radial-gradient(circle at 20% 50%, rgba(16,185,129,0.08) 0%, transparent 60%), rgba(15,15,25,0.6)'
-              : 'rgba(15,15,25,0.6)',
-            border: isWalk ? '1px solid rgba(16,185,129,0.2)' : '1px solid rgba(255,255,255,0.06)',
-            backdropFilter: 'blur(16px)',
-            display: 'flex', gap: 32, alignItems: 'center', flexWrap: 'wrap',
-            transition: 'all 0.4s ease'
-          }}>
-            {/* Semáforo visual */}
-            <div style={{
-              width: 90, height: 180, background: '#11111a', borderRadius: 18,
-              border: '4px solid #1e1e2f', padding: '14px 0',
-              display: 'flex', flexDirection: 'column', justifyContent: 'space-around', alignItems: 'center',
-              boxShadow: '0 10px 30px rgba(0,0,0,0.5)', flexShrink: 0
-            }}>
-              <div style={{
-                width: 54, height: 54, borderRadius: '50%',
-                background: !isWalk ? '#f43f5e' : '#22080e',
-                boxShadow: !isWalk ? '0 0 25px #f43f5e, inset 0 0 10px rgba(255,255,255,0.3)' : 'none',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, transition: 'all 0.3s'
-              }}>🛑</div>
-              <div style={{
-                width: 54, height: 54, borderRadius: '50%',
-                background: isWalk ? '#10b981' : '#042217',
-                boxShadow: isWalk ? '0 0 25px #10b981, inset 0 0 10px rgba(255,255,255,0.3)' : 'none',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, transition: 'all 0.3s',
-                animation: isWalk ? 'pulse-walk 1.5s infinite alternate' : 'none'
-              }}>🚶‍♂️</div>
-            </div>
-
-            {/* Estado y texto */}
-            <div style={{ flex: 1, minWidth: 200 }}>
-              <div style={{ fontSize: 26, fontWeight: 900, color: isWalk ? '#10b981' : '#f43f5e', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 8 }}>
-                {isWalk ? '¡CAMINAR (WALK)!' : 'PARAR (STOP)'}
-              </div>
-              <div style={{ fontSize: 13, color: '#9ca3af', lineHeight: 1.5, marginBottom: 12 }}>
-                {isWalk
-                  ? `Todas las confluencias experimentales están alineadas para ${activeKey}.`
-                  : 'Esperando que todos los indicadores experimentales coincidan.'}
-              </div>
-              {isWalk && exp && (
-                <div style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 8,
-                  padding: '8px 16px', borderRadius: 8,
-                  background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)',
-                  fontSize: 14, fontWeight: 700
-                }}>
-                  Operación sugerida: <span style={{ color: directionColor, marginLeft: 4 }}>
-                    {exp.m5.direction === 'BUY' ? 'COMPRA (BUY)' : 'VENTA (SELL)'}
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* Checklist de confluencia */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 260 }}>
-              <ConfluenceItem
-                label="Anomalía M5+M15 (EMA)"
-                checked={exp ? (exp.finalState === 'GREEN' || exp.finalState === 'YELLOW') : false}
-              />
-              <ConfluenceItem
-                label="Ventaja Backtest Dir. (Win Rate ≥ 65%)"
-                checked={exp ? (exp.fusedState === 'GREEN' || (exp.fusedComparison && exp.fusedComparison.winRate >= 65)) : false}
-              />
-              <ConfluenceItem
-                label={
-                  exp?.triggerState === 'giro-provisional'
-                    ? "Giro de Elasticidad (⏳ Confirmando...)"
-                    : "Giro de Elasticidad (Pico superado)"
-                }
-                checked={exp ? exp.triggerState === 'giro' : false}
-                pending={exp ? exp.triggerState === 'giro-provisional' : false}
-              />
-            </div>
-          </div>
-        </div>
+        <SuperSemaforo 
+          marketView={expMarketView} 
+          structureData={structureData[activeKey]} 
+          shieldData={consolidation ? consolidation[activeKey] : null} 
+        />
 
         {/* ==================================================== */}
         {/* ⚡ LIVE COCKPIT (multi-símbolo experimental)         */}
@@ -451,7 +373,6 @@ export function ExperimentalDashboard() {
               ) : (
                 <div style={{ marginBottom: 12, fontSize: 13, color: '#6b7280' }}>Esperando datos experimentales...</div>
               )}
-              <Semaforo state={exp?.finalState ?? 'RED'} label="Estado Experimental" />
             </div>
 
             {/* TARJETA DE ELASTICIDAD EXPERIMENTAL */}
@@ -527,48 +448,8 @@ export function ExperimentalDashboard() {
             </div>
           </div>
 
-          {/* ==================================================== */}
-          {/* 🪃 CABINA DE DISPARO EXPERIMENTAL                    */}
-          {/* ==================================================== */}
-          <LaunchCockpit marketView={expMarketView} />
-
-          {/* FUSED SIGNAL EXPERIMENTAL */}
-          <div style={{
-            border: '1px solid rgba(139,92,246,0.15)',
-            background: 'rgba(139,92,246,0.03)',
-            backdropFilter: 'blur(16px)',
-            borderRadius: 16, padding: 24,
-            boxShadow: '0 4px 30px rgba(0, 0, 0, 0.3)'
-          }}>
-            <h3 style={{ fontSize: 18, fontWeight: 800, margin: '0 0 6px', color: '#fff' }}>
-              🚥 Fused System Signal (Experimental)
-            </h3>
-            <p style={{ margin: '0 0 16px', fontSize: 13, color: '#9ca3af', lineHeight: 1.4 }}>
-              Combina señal de extremo de precio con estadísticas históricas segmentadas por dirección.
-            </p>
-            <div style={{
-              fontSize: 14, color: '#d1d5db',
-              background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.03)',
-              borderRadius: 8, padding: '16px 20px',
-              margin: '0 0 16px', lineHeight: 1.6, fontFamily: 'monospace'
-            }}>
-              {exp?.fusedExplanation ?? 'Esperando datos del motor experimental...'}
-            </div>
-            <Semaforo state={exp?.fusedState ?? 'RED'} label="Señal Fused Experimental" />
-          </div>
-
           {/* SYSTEM OBSERVABILITY */}
           <SystemObservability />
-
-          {/* STRUCTURE ENGINE */}
-          <div style={{
-            marginTop: 16, padding: '24px 28px',
-            background: 'rgba(167,139,250,0.03)',
-            border: '1px solid rgba(167,139,250,0.12)',
-            borderRadius: 18, backdropFilter: 'blur(12px)',
-          }}>
-            <StructureCockpit data={structureData} />
-          </div>
 
           {/* TEST TELEGRAM */}
           <div style={{ display: 'flex', justifyContent: 'center', marginTop: 12 }}>
@@ -643,35 +524,3 @@ export function ExperimentalDashboard() {
   )
 }
 
-// ─── Helpers locales ──────────────────────────────────────────────────────────
-
-function ConfluenceItem({ label, checked, pending }: { label: string; checked: boolean; pending?: boolean }) {
-  const isPending = !checked && pending
-  const bgColor = checked ? 'rgba(16,185,129,0.04)' : isPending ? 'rgba(245,158,11,0.04)' : 'rgba(255,255,255,0.01)'
-  const borderColor = checked ? 'rgba(16,185,129,0.15)' : isPending ? 'rgba(245,158,11,0.15)' : 'rgba(255,255,255,0.04)'
-  const dotColor = checked ? '#10b981' : isPending ? '#f59e0b' : '#374151'
-  const dotIcon = checked ? '✓' : isPending ? '◷' : '✗'
-  const textColor = checked ? '#fff' : isPending ? '#fbbf24' : '#9ca3af'
-  const textWeight = checked ? 600 : isPending ? 600 : 400
-
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 10,
-      padding: '10px 14px', borderRadius: 8,
-      background: bgColor,
-      border: `1px solid ${borderColor}`,
-      fontSize: 12, transition: 'all 0.2s'
-    }}>
-      <div style={{
-        width: 16, height: 16, borderRadius: '50%',
-        background: dotColor,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 10, color: '#fff', flexShrink: 0,
-        animation: isPending ? 'pulse-walk 1s infinite alternate' : 'none'
-      }}>
-        {dotIcon}
-      </div>
-      <span style={{ color: textColor, fontWeight: textWeight }}>{label}</span>
-    </div>
-  )
-}

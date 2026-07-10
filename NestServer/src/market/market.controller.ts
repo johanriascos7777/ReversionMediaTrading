@@ -1,10 +1,13 @@
-import { Controller, Get, Post, Query, Body, Res, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Query, Body, Res, HttpStatus, Inject, forwardRef } from '@nestjs/common';
 import * as express from 'express';
 import { MarketService } from './market.service';
 
 @Controller()
 export class MarketController {
-  constructor(private readonly marketService: MarketService) {}
+  constructor(
+    @Inject(forwardRef(() => MarketService))
+    private readonly marketService: MarketService
+  ) {}
 
   @Get('history')
   getHistory(

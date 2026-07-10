@@ -51,6 +51,7 @@ export type ConsolidationData = {
   m5:           ConsolidationTimeframeSignal
   m15:          ConsolidationTimeframeSignal
   superSignal:  SuperSignal
+  backtest?:    any
 }
 
 export type MultiSymbolConsolidation = {
@@ -71,6 +72,7 @@ export type FinalMarketView = {
   fusedExplanation: string
   fusedComparison:  any
   backtest:         any
+  pedestrianLight?: 'STOP' | 'WALK'
   experimental?: {
     m5:               MarketSnapshot & { direction: 'BUY' | 'SELL' }
     m15:              MarketSnapshot & { direction: 'BUY' | 'SELL' }
@@ -155,6 +157,7 @@ type BackendMessage =
       m5:            ConsolidationTimeframeSignal
       m15:           ConsolidationTimeframeSignal
       superSignal:   SuperSignal
+      backtest:      any // ConsolidationBacktestResult | null
     }
   | { type: 'status';    status: string; message: string }
   | { type: 'error';     message: string }
@@ -259,6 +262,7 @@ export function useMarketData(): {
               m5:            msg.m5,
               m15:           msg.m15,
               superSignal:   msg.superSignal,
+              backtest:      msg.backtest,
             }
           }))
         }

@@ -45,6 +45,9 @@ export type FullRevertionSnapshot = {
   // -- Objetivos Sugeridos --
   tpPrice?:       number;
   slPrice?:       number;
+
+  // -- Pullback Shield --
+  shieldBlocked?: boolean;
 };
 
 /**
