@@ -281,8 +281,8 @@ export class ConsolidationService implements OnModuleInit {
     timeframe: '5min' | '15min',
     store: Map<string, ConsolidationAnalysis>,
   ): void {
-    // Solo analizar cuando hay sobreextensión (YELLOW o GREEN)
-    if (snapshot.state === 'RED') {
+    // Solo analizar cuando hay sobreextensión (YELLOW o GREEN, inercia hasta percentil 50)
+    if (snapshot.state === 'RED' && snapshot.percentile < 50) {
       if (store.has(symbol)) {
         store.set(symbol, {
           detected: false,
@@ -305,7 +305,14 @@ export class ConsolidationService implements OnModuleInit {
     const atr = calculateATR(candles, currentIndex);
     if (atr <= 0) return;
 
-    const config = DEFAULT_CONSOLIDATION_CONFIG;
+    const config = { ...DEFAULT_CONSOLIDATION_CONFIG };
+    if (timeframe === '15min') {
+      config.minDuration = 3;
+      config.lookback = 12;
+    } else {
+      config.minDuration = 6;
+      config.lookback = 40;
+    }
     const priceVsEma: 'above' | 'below' = snapshot.price > snapshot.ema100 ? 'above' : 'below';
 
     // Detectar consolidación
@@ -614,6 +621,8 @@ function buildExplanation(
     bear_flag:            'Bandera Bajista',
     contracting_wedge:    'Cuña Contractiva',
     expanding_wedge:      'Cuña Expansiva',
+    falling_channel:      'Canal Descendente',
+    rising_channel:       'Canal Ascendente',
     unclassified:         'No clasificado',
   };
 

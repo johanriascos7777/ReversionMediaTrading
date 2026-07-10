@@ -153,8 +153,8 @@ export function detectConsolidationWithContext(
   config: ConsolidationConfig,
 ): ConsolidationZone | null {
   // Solo buscar consolidaciones cuando hay estiramiento significativo
-  // Percentil ≥ 60 = YELLOW o GREEN (hay sobreextensión)
-  if (percentile < 60) return null;
+  // Percentil >= 50 da margen de error (inercia) si previamente estaba en 60+ (YELLOW)
+  if (percentile < 50) return null;
 
   return detectConsolidation(candles, currentIndex, atr, config);
 }

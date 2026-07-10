@@ -33,6 +33,8 @@ export type ConsolidationPattern =
   | 'bear_flag'             // pendiente positiva en tendencia bajista → continuación down
   | 'contracting_wedge'     // boundaries convergen → explosividad inminente
   | 'expanding_wedge'       // boundaries divergen → indecisión peligrosa
+  | 'falling_channel'       // pendiente negativa debajo de EMA → capitulación/reversión up
+  | 'rising_channel'        // pendiente positiva encima de EMA → agotamiento/reversión down
   | 'unclassified';         // no encaja en ningún patrón reconocible
 
 export type BreakoutBias = 'bullish' | 'bearish' | 'neutral';

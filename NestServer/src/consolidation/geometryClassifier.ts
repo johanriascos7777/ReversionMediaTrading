@@ -173,15 +173,15 @@ function classifyPattern(
     return { pattern: 'rectangle', breakoutBias: 'neutral' };
   }
 
-  // ─── Banderas: ambos en la misma dirección ─────────────────────────────
-  // Bandera alcista (bull flag): retroceso bajista dentro de tendencia alcista
+  // ─── Banderas y Canales: ambos en la misma dirección ───────────────────
   if (upperDown && lowerDown) {
     if (isAboveEma) {
       // Precio arriba de EMA + pendiente bajista = pullback en tendencia alcista
       return { pattern: 'bull_flag', breakoutBias: 'bullish' };
     } else {
-      // Precio abajo de EMA + pendiente bajista = continuación bajista
-      return { pattern: 'bear_flag', breakoutBias: 'bearish' };
+      // Precio abajo de EMA + pendiente bajista = capitulación
+      // Favorece reversión a la media (alcista)
+      return { pattern: 'falling_channel', breakoutBias: 'bullish' };
     }
   }
 
@@ -190,8 +190,9 @@ function classifyPattern(
       // Precio abajo de EMA + pendiente alcista = rebote en tendencia bajista
       return { pattern: 'bear_flag', breakoutBias: 'bearish' };
     } else {
-      // Precio arriba de EMA + pendiente alcista = continuación alcista
-      return { pattern: 'bull_flag', breakoutBias: 'bullish' };
+      // Precio arriba de EMA + pendiente alcista = agotamiento
+      // Favorece reversión a la media (bajista)
+      return { pattern: 'rising_channel', breakoutBias: 'bearish' };
     }
   }
 
