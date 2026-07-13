@@ -55,6 +55,8 @@ export class FullRevertionService implements OnModuleInit {
   private alertStates       = new Map<string, FRAlertState>();
   // Estado de alerta FUSIONADA por símbolo
   private fusedAlertStates  = new Map<string, FRFusedAlertState>();
+  // Estado de alerta FUSIONADA blindada por símbolo
+  private shieldedFusedAlertStates = new Map<string, FRFusedAlertState>();
   // Rate-limit de cálculo
   private lastCalcTime      = new Map<string, number>();
 
@@ -107,6 +109,8 @@ export class FullRevertionService implements OnModuleInit {
 
     // Después de actualizar ambos timeframes, evaluar la fusión M5+M15
     this.checkFusedAlert(symbol);
+    // Alerta fusionada: Shielded
+    this.checkShieldedFusedAlert(symbol);
   }
 
   private runForTimeframe(
@@ -134,6 +138,9 @@ export class FullRevertionService implements OnModuleInit {
     if (structSnap) {
       snap.divergence = structSnap.divergence;
       snap.nearestSR = structSnap.nearestSR;
+      snap.isCompression = structSnap.isCompressionSandwich === true;
+    } else {
+      snap.isCompression = false;
     }
 
     // ─── ENRIQUECER CON PULLBACK SHIELD Y BLOQUEO AUTOMÁTICO ──────────────
@@ -333,6 +340,85 @@ export class FullRevertionService implements OnModuleInit {
     fusedState.previousM15State = snapM15.state;
   }
 
+  // ─── Alerta fusionada blindada (Shield ✓): Sin Sándwich ───────────────────────────
+
+  private async checkShieldedFusedAlert(symbol: string): Promise<void> {
+    const snapM5  = this.lastSnapshots.get(`${symbol}:M5`);
+    const snapM15 = this.lastSnapshots.get(`${symbol}:M15`);
+
+    if (!snapM5 || !snapM15) return;
+
+    if (!this.shieldedFusedAlertStates.has(symbol)) {
+      this.shieldedFusedAlertStates.set(symbol, {
+        previousM5State:    null,
+        previousM15State:   null,
+        lastFusedAlertTime: 0,
+        preAlertActive:     false,
+      });
+    }
+
+    const state = this.shieldedFusedAlertStates.get(symbol)!;
+    const now   = Date.now();
+
+    const bothGreen       = snapM5.state === 'GREEN' && snapM15.state === 'GREEN';
+    const bothAllowed     = snapM5.signalAllowed && snapM15.signalAllowed;
+    const noCompression   = !snapM5.isCompression && !snapM15.isCompression;
+
+    // Solo activamos pre-alerta si está permitido y además NO hay sándwich de EMAs
+    if (bothGreen && bothAllowed && noCompression) {
+      if (!state.preAlertActive) {
+        console.log(`[FullRevertion Shield] [${symbol}] 🛡️🪃 Pre-alerta blindada activada. Esperando Giro...`);
+        state.preAlertActive = true;
+      }
+    } else {
+      if (state.preAlertActive) {
+        console.log(`[FullRevertion Shield] [${symbol}] ⏳ Pre-alerta blindada cancelada.`);
+        state.preAlertActive = false;
+      }
+    }
+
+    let currentTriggerState: 'reposo' | 'estirando' | 'giro' = 'reposo';
+    if (state.preAlertActive) {
+      const lastEl = this.lastClosedElasticity.get(symbol) ?? null;
+      const prevEl = this.prevClosedElasticity.get(symbol) ?? null;
+
+      if (lastEl !== null && prevEl !== null && lastEl < prevEl) {
+        currentTriggerState = 'giro';
+      } else {
+        currentTriggerState = 'estirando';
+      }
+    }
+
+    if (state.preAlertActive && currentTriggerState === 'giro') {
+      const canAlert = now - state.lastFusedAlertTime > FUSED_ALERT_COOLDOWN_MS;
+      if (canAlert) {
+        const symbolState = (this.marketService as any).symbolStates?.get(symbol);
+        if (symbolState) {
+          const baseAlertWindow = 15 * 60 * 1000;
+          const hasRecentA = (now - (symbolState.lastTelegramAlertTimeA ?? 0)) < baseAlertWindow;
+          const hasRecentAExp = (now - (symbolState.lastTelegramAlertTimeAExp ?? 0)) < baseAlertWindow;
+          const hasRecentC = (now - (symbolState.lastTelegramAlertTimeTrigger ?? 0)) < baseAlertWindow;
+          const hasRecentCExp = (now - (symbolState.lastTelegramAlertTimeTriggerExp ?? 0)) < baseAlertWindow;
+
+          if (!hasRecentA && !hasRecentAExp && !hasRecentC && !hasRecentCExp) {
+            console.log(`[FullRevertion Shield] [${symbol}] Alerta blindada omitida: sin alertas en el motor base.`);
+            return;
+          }
+        }
+
+        state.lastFusedAlertTime = now;
+        state.preAlertActive = false;
+        
+        console.log(`[FullRevertion Shield] [${symbol}] 🔥 GIRO CONFIRMADO Y BLINDADO. Enviando alerta...`);
+        const backtest = this.lastBacktests.get(symbol) ?? null;
+        await this.sendShieldedFusedTelegramAlert(symbol, snapM5, snapM15, backtest);
+      }
+    }
+
+    state.previousM5State  = snapM5.state;
+    state.previousM15State = snapM15.state;
+  }
+
   // ─── Telegram: Alerta simple (M5 o M15) ──────────────────────────────────
 
   private async sendSimpleTelegramAlert(
@@ -427,6 +513,75 @@ export class FullRevertionService implements OnModuleInit {
       console.log(`[FullRevertion] 🔱 Alerta FUSIONADA M5+M15 enviada: ${symbol} | ${direction} @ ${priceStr} (M15: ${snapM15.state}, BT: ${backtest?.winRate ?? 0}%)`);
     } catch (err) {
       console.error('[FullRevertion] ❌ Error alerta fusionada:', err);
+    }
+  }
+
+  // ─── Telegram: Alerta fusionada BLINDADA (Shield ✓) ──────────────────────────────────
+
+  private async sendShieldedFusedTelegramAlert(
+    symbol: string,
+    snapM5: FullRevertionSnapshot,
+    snapM15: FullRevertionSnapshot,
+    backtest: FullRevertionBacktestResult | null
+  ): Promise<void> {
+    const token  = process.env.TELEGRAM_BOT_TOKEN;
+    const chatId = process.env.TELEGRAM_CHAT_ID;
+    if (!token || !chatId) return;
+
+    try {
+      const isAboveEMA = snapM5.price > snapM5.ema100;
+      const direction  = isAboveEMA ? 'SELL' : 'BUY';
+      const dirEmoji   = isAboveEMA ? '🔻' : '🔺';
+
+      const srLevel = snapM5.nearestSR;
+      let structEmoji = '➖';
+      if (srLevel) {
+        if (srLevel.type === 'support' && direction === 'BUY') structEmoji = '🏰';
+        if (srLevel.type === 'resistance' && direction === 'SELL') structEmoji = '🧱';
+      }
+
+      let winRateLine = 'N/D';
+      if (backtest) {
+        const wr = (backtest.winRate * 100).toFixed(1);
+        const winEmoji = backtest.winRate >= 0.65 ? '🌟' : '⚠️';
+        winRateLine = `*WinRate histórico:* ${wr}% ${winEmoji}`;
+      }
+
+      const tpText = snapM5.tpPrice ? `\n*TP:* ${snapM5.tpPrice}` : '';
+      const slText = snapM5.slPrice ? `\n*SL:* ${snapM5.slPrice}` : '';
+
+      const message = `
+*🛡️🔱 FULL REVERSION SHIELD ✓*
+*${symbol}* — ${dirEmoji} *${direction}*
+_Confluencia M5 + M15 (Extremo)_
+
+✅ *Sin Sándwich de EMAs*
+✅ *Sin Pullback Geométrico*
+${winRateLine}
+
+*GATILLO DE AGOTAMIENTO*
+🔥 *GIRO CONFIRMADO* (Elasticidad rotando)
+
+*CONFLUENCIA ESTRUCTURAL*
+${structEmoji} *${srLevel ? `${srLevel.type} (fza ${srLevel.strength})` : 'Sin zona S/R cercana'}*
+
+*PARÁMETROS SUGERIDOS (BROKER)*${tpText}${slText}
+🛡️🔱
+      `.trim();
+
+      const url = `https://api.telegram.org/bot${token}/sendMessage`;
+      await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: message,
+          parse_mode: 'Markdown',
+        }),
+      });
+      console.log(`[Telegram] Alerta Shield Fused enviada para ${symbol}`);
+    } catch (error) {
+      console.error(`[Telegram] Error enviando alerta Shield Fused de ${symbol}:`, error);
     }
   }
 }

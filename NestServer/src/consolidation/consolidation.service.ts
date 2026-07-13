@@ -556,19 +556,13 @@ export class ConsolidationService implements OnModuleInit {
       try {
         // M5
         const cacheCountM5 = await this.historicalData.getCacheCount(sym, '5min');
-        if (cacheCountM5 < 5000) {
-          await this.historicalData.downloadHistory(sym, '5min', 10_000);
-        } else {
-          console.log(`[ConsolidationService] [${sym}] M5: ${cacheCountM5} velas en caché. OK.`);
-        }
+        console.log(`[ConsolidationService] [${sym}] M5: ${cacheCountM5} velas en caché. Sincronizando Gaps...`);
+        await this.historicalData.downloadHistory(sym, '5min', 10_000);
 
         // M15
         const cacheCountM15 = await this.historicalData.getCacheCount(sym, '15min');
-        if (cacheCountM15 < 5000) {
-          await this.historicalData.downloadHistory(sym, '15min', 10_000);
-        } else {
-          console.log(`[ConsolidationService] [${sym}] M15: ${cacheCountM15} velas en caché. OK.`);
-        }
+        console.log(`[ConsolidationService] [${sym}] M15: ${cacheCountM15} velas en caché. Sincronizando Gaps...`);
+        await this.historicalData.downloadHistory(sym, '15min', 10_000);
 
         // Backtests
         await this.runBacktestForSymbol(sym, undefined, '5min');
