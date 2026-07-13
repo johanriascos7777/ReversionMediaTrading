@@ -79,8 +79,18 @@ export class SymbolState {
   public lastTelegramAlertTimeTriggerExp = 0;
   public lastTelegramAlertTimePedestrian = 0;
 
+  // Cooldowns para alertas Shield-Verified (con Pullback Shield aprobado)
+  public lastTelegramAlertTimeAShield = 0;
+  public lastTelegramAlertTimeCShield = 0;
+  public lastTelegramAlertTimePedestrianShield = 0;
+
   public pedestrianLight: 'STOP' | 'WALK' = 'STOP';
   public previousPedestrianLight: 'STOP' | 'WALK' = 'STOP';
+
+  // Estado del escudo (para alertas Shield-Verified y frontend)
+  public shieldBlocked = false;
+  public isCompression = false;
+  public shieldExplanation = '✅ Escudo despejado.';
 
   // Tracking de historial individual
   public historyLoaded = false;
@@ -1222,17 +1232,19 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       const isCompression = structureSnap?.isCompressionSandwich === true;
       const isDoublePattern = structureSnap?.doublePattern === 'double_top' || structureSnap?.doublePattern === 'double_bottom';
       
-      if (isCompression) {
-        state.pedestrianLight = 'STOP';
-        fusedStateResultExp.state = 'RED';
-        fusedStateResultExp.explanation = '🚫 BLOQUEADO POR COMPRESIÓN: Sándwich de EMAs (EMA50 y EMA100 demasiado cerca).';
-      } else if (shieldBlocked) {
-        state.pedestrianLight = 'STOP'; // El escudo bloquea forzosamente
-        fusedStateResultExp.state = 'RED'; // Forzar rojo para cancelar alertas
-        fusedStateResultExp.explanation = '🚫 BLOQUEADO POR ESCUDO DE PULLBACKS: ' + (shieldSnap?.superSignal.recommendation || 'Consolidación en contra de la reversión.');
-      } else {
-        state.pedestrianLight = checkAnomaly && checkBacktest && checkTrigger ? 'WALK' : 'STOP';
-      }
+      // Ya NO bloqueamos fusedStateResultExp ni pedestrianLight por el escudo.
+      // Las alertas experimentales ahora fluyen libremente.
+      // Las nuevas alertas "Shield-Verified" se encargan de filtrar por el escudo.
+      state.pedestrianLight = checkAnomaly && checkBacktest && checkTrigger ? 'WALK' : 'STOP';
+
+      // Guardar estado del escudo para las alertas Shield-Verified y el frontend
+      state.shieldBlocked = !!(shieldBlocked);
+      state.isCompression = !!(isCompression);
+      state.shieldExplanation = isCompression
+        ? '🚫 Sándwich de EMAs (EMA50 y EMA100 demasiado cerca).'
+        : shieldBlocked
+          ? (shieldSnap?.superSignal.recommendation || 'Consolidación en contra de la reversión.')
+          : '✅ Escudo despejado.';
     }
 
     // Broadcast a través de eventos (Tradicional + Experimental)
@@ -1487,6 +1499,77 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
         comparison,
         '¡CAMINAR (WALK)! Todas las confluencias experimentales (Anomalía + Backtest + Giro) están alineadas.'
       );
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 🛡️ ALERTAS SHIELD-VERIFIED (solo disparan si el Pullback Shield aprueba)
+    // ═══════════════════════════════════════════════════════════════════════
+    const shieldClear = !state.shieldBlocked && !state.isCompression;
+
+    // 5️⃣ Alerta Shield-Verified Tipo A
+    if (isNewFusedGreen && shieldClear) {
+      const canAlertAShield = now - state.lastTelegramAlertTimeAShield > 300000;
+      if (canAlertAShield) {
+        state.lastTelegramAlertTimeAShield = now;
+        await this.createPendingSignalAndSendTelegram(
+          state,
+          '🛡️ Tipo A · Shield ✓',
+          direction,
+          'experimental',
+          m5.price,
+          fused.state,
+          m5.state,
+          m15.state,
+          m5.elasticity,
+          m15.elasticity,
+          comparison,
+          '🛡️✅ SHIELD VERIFIED — Señal confirmada Y escudo despejado. Sin pullbacks ni compresión detectados. Máxima convicción.'
+        );
+      }
+    }
+
+    // 6️⃣ Alerta Shield-Verified Tipo C (Giro)
+    if (isNewGiro && shieldClear) {
+      const canAlertCShield = now - state.lastTelegramAlertTimeCShield > 290000;
+      if (canAlertCShield) {
+        state.lastTelegramAlertTimeCShield = now;
+        await this.createPendingSignalAndSendTelegram(
+          state,
+          '🛡️ Tipo C · Shield ✓',
+          direction,
+          'experimental',
+          m5.price,
+          fused.state,
+          m5.state,
+          m15.state,
+          m5.elasticity,
+          m15.elasticity,
+          comparison,
+          '🛡️✅ SHIELD VERIFIED — Giro de elasticidad confirmado Y escudo despejado. Sin consolidación geométrica en contra.'
+        );
+      }
+    }
+
+    // 7️⃣ Alerta Shield-Verified Semáforo Peatón
+    if (isNewWalk && shieldClear) {
+      const canAlertPedestrianShield = now - state.lastTelegramAlertTimePedestrianShield > 300000;
+      if (canAlertPedestrianShield) {
+        state.lastTelegramAlertTimePedestrianShield = now;
+        await this.createPendingSignalAndSendTelegram(
+          state,
+          '🛡️ Semáforo Peatón · Shield ✓',
+          direction,
+          'experimental',
+          m5.price,
+          fused.state,
+          m5.state,
+          m15.state,
+          m5.elasticity,
+          m15.elasticity,
+          comparison,
+          '🛡️✅ SHIELD VERIFIED — ¡WALK! Todas las confluencias alineadas + Escudo despejado. Máxima convicción para operar.'
+        );
+      }
     }
 
     state.previousFusedStateExp = fused.state;

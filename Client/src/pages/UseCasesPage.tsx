@@ -812,6 +812,254 @@ export function UseCasesPage() {
           </div>
         </div>
       )
+    },
+    {
+      id: 'shield_verified',
+      title: '🛡️ Shield Verified (Máxima Convicción)',
+      subtitle: 'EMAs abiertas + sin pullback geométrico = campo libre para reversión',
+      verdict: 'OPERAR',
+      verdictColor: '#22d3ee',
+      verdictBg: 'rgba(34, 211, 238, 0.12)',
+      verdictText: 'Máxima Convicción — Shield Despejado',
+      description: 'Las EMAs 50 y 100 están bien separadas (≥ 0.5 ATR), confirmando una tendencia estructural clara. El Pullback Shield ha analizado 10,000 velas históricas y no detecta ningún patrón geométrico de consolidación opuesto (ni banderas, ni canales, ni cuñas en contra). El precio se ha sobre-extendido y el giro de elasticidad ya fue confirmado por el Peak Detector. Es el escenario ideal para una reversión a la media.',
+      rules: [
+        'La distancia entre EMA50 y EMA100 es ≥ 0.5 ATR (sin compresión/sándwich).',
+        'El Pullback Shield (10,000 velas) no detecta patrones geométricos opuestos.',
+        'El Win Rate segmentado por dirección es ≥ 65% y el giro de elasticidad está confirmado.',
+        'Comparar con el caso "Sándwich de EMAs" donde las medias están pegadas y el Shield bloquea.'
+      ],
+      bullishChart: (
+        <svg viewBox="0 0 400 250" style={{ width: '100%', height: '100%', overflow: 'visible' }}>
+          {/* Grid lines */}
+          {[40, 80, 120, 160, 200].map((y, i) => (
+            <line key={i} x1="0" y1={y} x2="400" y2={y} stroke="rgba(255,255,255,0.03)" strokeWidth="1" />
+          ))}
+
+          {/* Shield Verified badge */}
+          <rect x="280" y="5" width="115" height="22" rx="11" fill="rgba(34, 211, 238, 0.15)" stroke="#22d3ee" strokeWidth="1" />
+          <text x="337" y="19" fill="#22d3ee" fontSize="9" fontWeight="bold" textAnchor="middle">🛡️ SHIELD VERIFIED</text>
+
+          {/* EMA 100 - Dark Blue (well separated, trending) */}
+          <path
+            d="M -10,200 C 100,195 200,175 410,140"
+            fill="none"
+            stroke="#1d4ed8"
+            strokeWidth="3"
+            strokeLinecap="round"
+            filter="drop-shadow(0 2px 8px rgba(29, 78, 216, 0.4))"
+          />
+          {/* EMA 50 - Light Blue (well separated above EMA100) */}
+          <path
+            d="M -10,165 C 100,150 200,115 410,70"
+            fill="none"
+            stroke="#06b6d4"
+            strokeWidth="3"
+            strokeLinecap="round"
+            filter="drop-shadow(0 2px 8px rgba(6, 182, 212, 0.4))"
+          />
+
+          {/* Distance annotation between EMAs */}
+          <line x1="200" y1="125" x2="200" y2="180" stroke="#22d3ee" strokeWidth="1" strokeDasharray="3,3" />
+          <line x1="194" y1="125" x2="206" y2="125" stroke="#22d3ee" strokeWidth="1.5" />
+          <line x1="194" y1="180" x2="206" y2="180" stroke="#22d3ee" strokeWidth="1.5" />
+          <text x="215" y="155" fill="#22d3ee" fontSize="9" fontWeight="bold">≥ 0.5 ATR</text>
+          <text x="215" y="167" fill="#22d3ee" fontSize="8" opacity="0.7">Bien separadas</text>
+
+          {/* No pullback indicator */}
+          <rect x="5" y="210" width="120" height="30" rx="6" fill="rgba(16, 185, 129, 0.08)" stroke="rgba(16, 185, 129, 0.3)" strokeWidth="1" />
+          <text x="65" y="224" fill="#10b981" fontSize="8" fontWeight="bold" textAnchor="middle">✅ Sin Pullback</text>
+          <text x="65" y="235" fill="#10b981" fontSize="7" textAnchor="middle" opacity="0.7">10,000 velas analizadas</text>
+
+          {/* Entry Zone */}
+          <path
+            d="M 270,30 L 290,10 L 340,10 L 340,45 L 310,45 Z"
+            fill="rgba(34, 211, 238, 0.08)"
+            stroke="#22d3ee"
+            strokeWidth="1"
+            strokeDasharray="3,3"
+          />
+          <text x="312" y="30" fill="#22d3ee" fontSize="9" fontWeight="bold" textAnchor="middle">ZONA ENTRY</text>
+
+          {/* Reversion path */}
+          <path
+            d="M 340,40 Q 320,100 290,145"
+            fill="none"
+            stroke="#10b981"
+            strokeWidth="2"
+            strokeDasharray="4,4"
+            markerEnd="url(#arrow-cyan-shield)"
+          />
+          <text x="340" y="95" fill="#10b981" fontSize="10" fontWeight="bold">Reversión a 100</text>
+
+          {/* Candlesticks */}
+          {[
+            [20, 190, 185, 195, 182],
+            [45, 185, 170, 188, 167],
+            [70, 170, 155, 173, 150],
+            [95, 155, 140, 158, 135],
+            [120, 140, 120, 143, 115],
+            [145, 120, 100, 125, 95],
+            [170, 100, 80, 105, 75],
+            [195, 80, 60, 85, 55],
+            [220, 60, 42, 65, 38],
+            [245, 42, 30, 45, 25],
+            [270, 30, 22, 35, 18],
+            [295, 25, 18, 30, 12],
+            [320, 20, 35, 15, 40],
+            [345, 35, 55, 30, 60],
+            [370, 55, 80, 50, 85],
+          ].map(([x, op, cl, lo, hi], idx) => {
+            const isGreen = cl < op
+            const color = isGreen ? '#10b981' : '#ef4444'
+            return (
+              <g key={idx} opacity="0.95">
+                <line x1={x} y1={lo} x2={x} y2={hi} stroke={color} strokeWidth="1.5" />
+                <rect
+                  x={x - 4}
+                  y={Math.min(op, cl)}
+                  width="8"
+                  height={Math.max(Math.abs(cl - op), 2)}
+                  fill={color}
+                  rx="1"
+                />
+              </g>
+            )
+          })}
+
+          {/* Peak detector indicator on the climax candle */}
+          <circle cx="295" cy="8" r="5" fill="none" stroke="#f59e0b" strokeWidth="1.5" />
+          <text x="295" y="11" fill="#f59e0b" fontSize="7" fontWeight="bold" textAnchor="middle">P</text>
+          <text x="310" y="6" fill="#f59e0b" fontSize="7" fontWeight="bold">Peak Detectado</text>
+
+          {/* Legend */}
+          <line x1="160" y1="242" x2="180" y2="242" stroke="#06b6d4" strokeWidth="2" />
+          <text x="185" y="245" fill="#9ca3af" fontSize="8">EMA 50 (Celeste)</text>
+          <line x1="280" y1="242" x2="300" y2="242" stroke="#1d4ed8" strokeWidth="2" />
+          <text x="305" y="245" fill="#9ca3af" fontSize="8">EMA 100 (Oscura)</text>
+
+          <defs>
+            <marker id="arrow-cyan-shield" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#10b981" />
+            </marker>
+          </defs>
+        </svg>
+      ),
+      bearishChart: (
+        <svg viewBox="0 0 400 250" style={{ width: '100%', height: '100%', overflow: 'visible' }}>
+          {/* Grid lines */}
+          {[40, 80, 120, 160, 200].map((y, i) => (
+            <line key={i} x1="0" y1={y} x2="400" y2={y} stroke="rgba(255,255,255,0.03)" strokeWidth="1" />
+          ))}
+
+          {/* Shield Verified badge */}
+          <rect x="280" y="5" width="115" height="22" rx="11" fill="rgba(34, 211, 238, 0.15)" stroke="#22d3ee" strokeWidth="1" />
+          <text x="337" y="19" fill="#22d3ee" fontSize="9" fontWeight="bold" textAnchor="middle">🛡️ SHIELD VERIFIED</text>
+
+          {/* EMA 100 - Dark Blue (well separated, trending down) */}
+          <path
+            d="M -10,50 C 100,55 200,75 410,110"
+            fill="none"
+            stroke="#1d4ed8"
+            strokeWidth="3"
+            strokeLinecap="round"
+            filter="drop-shadow(0 2px 8px rgba(29, 78, 216, 0.4))"
+          />
+          {/* EMA 50 - Light Blue (well separated below EMA100) */}
+          <path
+            d="M -10,85 C 100,100 200,135 410,180"
+            fill="none"
+            stroke="#06b6d4"
+            strokeWidth="3"
+            strokeLinecap="round"
+            filter="drop-shadow(0 2px 8px rgba(6, 182, 212, 0.4))"
+          />
+
+          {/* Distance annotation between EMAs */}
+          <line x1="200" y1="72" x2="200" y2="130" stroke="#22d3ee" strokeWidth="1" strokeDasharray="3,3" />
+          <line x1="194" y1="72" x2="206" y2="72" stroke="#22d3ee" strokeWidth="1.5" />
+          <line x1="194" y1="130" x2="206" y2="130" stroke="#22d3ee" strokeWidth="1.5" />
+          <text x="215" y="100" fill="#22d3ee" fontSize="9" fontWeight="bold">≥ 0.5 ATR</text>
+          <text x="215" y="112" fill="#22d3ee" fontSize="8" opacity="0.7">Bien separadas</text>
+
+          {/* No pullback indicator */}
+          <rect x="5" y="210" width="120" height="30" rx="6" fill="rgba(16, 185, 129, 0.08)" stroke="rgba(16, 185, 129, 0.3)" strokeWidth="1" />
+          <text x="65" y="224" fill="#10b981" fontSize="8" fontWeight="bold" textAnchor="middle">✅ Sin Pullback</text>
+          <text x="65" y="235" fill="#10b981" fontSize="7" textAnchor="middle" opacity="0.7">10,000 velas analizadas</text>
+
+          {/* Entry Zone */}
+          <path
+            d="M 270,195 L 290,215 L 340,215 L 340,185 L 310,185 Z"
+            fill="rgba(34, 211, 238, 0.08)"
+            stroke="#22d3ee"
+            strokeWidth="1"
+            strokeDasharray="3,3"
+          />
+          <text x="312" y="205" fill="#22d3ee" fontSize="9" fontWeight="bold" textAnchor="middle">ZONA ENTRY</text>
+
+          {/* Reversion path */}
+          <path
+            d="M 340,188 Q 320,140 290,105"
+            fill="none"
+            stroke="#10b981"
+            strokeWidth="2"
+            strokeDasharray="4,4"
+            markerEnd="url(#arrow-cyan-shield-bear)"
+          />
+          <text x="340" y="145" fill="#10b981" fontSize="10" fontWeight="bold">Reversión a 100</text>
+
+          {/* Candlesticks */}
+          {[
+            [20, 60, 65, 55, 68],
+            [45, 65, 80, 62, 83],
+            [70, 80, 95, 77, 100],
+            [95, 95, 110, 92, 115],
+            [120, 110, 130, 107, 135],
+            [145, 130, 150, 125, 155],
+            [170, 150, 170, 145, 175],
+            [195, 170, 190, 165, 195],
+            [220, 190, 205, 185, 210],
+            [245, 205, 215, 200, 220],
+            [270, 215, 222, 210, 228],
+            [295, 220, 228, 215, 235],
+            [320, 225, 210, 230, 205],
+            [345, 210, 190, 215, 185],
+            [370, 190, 165, 195, 160],
+          ].map(([x, op, cl, lo, hi], idx) => {
+            const isGreen = cl < op
+            const color = isGreen ? '#10b981' : '#ef4444'
+            return (
+              <g key={idx} opacity="0.95">
+                <line x1={x} y1={lo} x2={x} y2={hi} stroke={color} strokeWidth="1.5" />
+                <rect
+                  x={x - 4}
+                  y={Math.min(op, cl)}
+                  width="8"
+                  height={Math.max(Math.abs(cl - op), 2)}
+                  fill={color}
+                  rx="1"
+                />
+              </g>
+            )
+          })}
+
+          {/* Peak detector indicator on the climax candle */}
+          <circle cx="295" cy="239" r="5" fill="none" stroke="#f59e0b" strokeWidth="1.5" />
+          <text x="295" y="242" fill="#f59e0b" fontSize="7" fontWeight="bold" textAnchor="middle">P</text>
+          <text x="310" y="245" fill="#f59e0b" fontSize="7" fontWeight="bold">Peak Detectado</text>
+
+          {/* Legend */}
+          <line x1="160" y1="242" x2="180" y2="242" stroke="#06b6d4" strokeWidth="2" />
+          <text x="185" y="245" fill="#9ca3af" fontSize="8">EMA 50 (Celeste)</text>
+          <line x1="280" y1="242" x2="300" y2="242" stroke="#1d4ed8" strokeWidth="2" />
+          <text x="305" y="245" fill="#9ca3af" fontSize="8">EMA 100 (Oscura)</text>
+
+          <defs>
+            <marker id="arrow-cyan-shield-bear" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#10b981" />
+            </marker>
+          </defs>
+        </svg>
+      )
     }
   ]
 
@@ -1134,7 +1382,8 @@ export function UseCasesPage() {
           <p style={{ margin: 0, fontSize: 12, color: '#9ca3af', lineHeight: '1.5' }}>
             La alineación fractal perfecta en múltiples temporalidades (M1, M5, M15) es la señal de confluencia más fuerte de la inercia del mercado. 
             Sin embargo, la EMA50 en M5 es un filtro crítico de corto plazo: si observas un cruce reciente con fuerza (caso 2) o compresión extrema (caso 3), 
-            la probabilidad de reversión a la media exitosa disminuye drásticamente. Utiliza esta guía para filtrar y evitar operaciones de baja calidad.
+            la probabilidad de reversión a la media exitosa disminuye drásticamente. El caso ideal es el <strong style={{ color: '#22d3ee' }}>🛡️ Shield Verified</strong> (caso 5): 
+            EMAs bien abiertas, sin patrones geométricos en contra y con el giro de elasticidad confirmado por el Peak Detector.
           </p>
         </div>
       </div>
