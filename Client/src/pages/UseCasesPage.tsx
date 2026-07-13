@@ -1060,6 +1060,226 @@ export function UseCasesPage() {
           </defs>
         </svg>
       )
+    },
+    {
+      id: 'shield_blocked_sandwich',
+      title: '🚫 Shield Blocked (Sándwich de EMAs)',
+      subtitle: 'EMAs pegadas (< 0.5 ATR) = Bloqueo por compresión. Solo alerta experimental.',
+      verdict: 'EVITAR',
+      verdictColor: '#ef4444',
+      verdictBg: 'rgba(239, 68, 68, 0.12)',
+      verdictText: 'Bloqueado — Zona Muerta',
+      description: 'A diferencia del caso anterior, aquí la EMA50 y la EMA100 están demasiado cerca la una de la otra (< 0.5 ATR). Esto significa que el mercado está en compresión y no tiene dirección estructural. Aunque el precio parezca sobre-extendido, intentar regresar a una zona comprimida es altamente riesgoso porque el precio puede romper violentamente en cualquier dirección. La alerta "Shield Verified" es bloqueada para proteger tu capital.',
+      rules: [
+        'La distancia entre EMA50 y EMA100 es < 0.5 ATR.',
+        'El mercado carece de tendencia fuerte, está consolidando.',
+        'Se cancela la alerta 🛡️ Shield Verified.',
+        'Solo recibes la alerta 🧪 Experimental para estar al tanto, pero no debes operar la reversión.'
+      ],
+      bullishChart: (
+        <svg viewBox="0 0 400 250" style={{ width: '100%', height: '100%', overflow: 'visible' }}>
+          {/* Grid lines */}
+          {[40, 80, 120, 160, 200].map((y, i) => (
+            <line key={i} x1="0" y1={y} x2="400" y2={y} stroke="rgba(255,255,255,0.03)" strokeWidth="1" />
+          ))}
+
+          {/* Shield Blocked badge */}
+          <rect x="280" y="5" width="115" height="22" rx="11" fill="rgba(239, 68, 68, 0.15)" stroke="#ef4444" strokeWidth="1" />
+          <text x="337" y="19" fill="#ef4444" fontSize="9" fontWeight="bold" textAnchor="middle">🚫 SHIELD BLOCKED</text>
+
+          {/* EMA 100 - Dark Blue (flat) */}
+          <path
+            d="M -10,140 L 410,140"
+            fill="none"
+            stroke="#1d4ed8"
+            strokeWidth="3"
+            strokeLinecap="round"
+          />
+          {/* EMA 50 - Light Blue (very close, sandwich) */}
+          <path
+            d="M -10,132 L 410,132"
+            fill="none"
+            stroke="#06b6d4"
+            strokeWidth="3"
+            strokeLinecap="round"
+          />
+
+          {/* Distance annotation between EMAs */}
+          <line x1="200" y1="132" x2="200" y2="140" stroke="#ef4444" strokeWidth="1" />
+          <text x="215" y="139" fill="#ef4444" fontSize="9" fontWeight="bold">&lt; 0.5 ATR</text>
+          <text x="215" y="150" fill="#ef4444" fontSize="8" opacity="0.7">Sándwich (Comprimidas)</text>
+
+          {/* Warning indicator */}
+          <rect x="5" y="210" width="120" height="30" rx="6" fill="rgba(245, 158, 11, 0.08)" stroke="rgba(245, 158, 11, 0.3)" strokeWidth="1" />
+          <text x="65" y="224" fill="#f59e0b" fontSize="8" fontWeight="bold" textAnchor="middle">⚠️ Sin Tendencia</text>
+          <text x="65" y="235" fill="#f59e0b" fontSize="7" textAnchor="middle" opacity="0.7">Posible rotura inminente</text>
+
+          {/* Danger Zone */}
+          <path
+            d="M 270,40 L 290,20 L 340,20 L 340,55 L 310,55 Z"
+            fill="rgba(239, 68, 68, 0.08)"
+            stroke="#ef4444"
+            strokeWidth="1"
+            strokeDasharray="3,3"
+          />
+          <text x="312" y="40" fill="#ef4444" fontSize="9" fontWeight="bold" textAnchor="middle">ZONA PELIGRO</text>
+
+          {/* Reversion path blocked */}
+          <path
+            d="M 340,50 Q 320,100 290,130"
+            fill="none"
+            stroke="#ef4444"
+            strokeWidth="2"
+            strokeDasharray="4,4"
+          />
+          <line x1="285" y1="125" x2="295" y2="135" stroke="#ef4444" strokeWidth="2" />
+          <line x1="295" y1="125" x2="285" y2="135" stroke="#ef4444" strokeWidth="2" />
+          <text x="340" y="95" fill="#ef4444" fontSize="10" fontWeight="bold">Bloqueado</text>
+
+          {/* Candlesticks */}
+          {[
+            [20, 138, 130, 142, 125],
+            [45, 130, 135, 128, 140],
+            [70, 135, 132, 138, 128],
+            [95, 132, 125, 135, 120],
+            [120, 125, 110, 128, 105],
+            [145, 110, 95, 115, 90],
+            [170, 95, 80, 100, 75],
+            [195, 80, 65, 85, 60],
+            [220, 65, 50, 70, 45],
+            [245, 50, 40, 55, 35],
+            [270, 40, 32, 45, 28],
+            [295, 35, 28, 40, 22],
+            [320, 30, 45, 25, 50],
+            [345, 45, 65, 40, 70],
+            [370, 65, 90, 60, 95],
+          ].map(([x, op, cl, lo, hi], idx) => {
+            const isGreen = cl < op
+            const color = isGreen ? '#10b981' : '#ef4444'
+            return (
+              <g key={idx} opacity="0.95">
+                <line x1={x} y1={lo} x2={x} y2={hi} stroke={color} strokeWidth="1.5" />
+                <rect
+                  x={x - 4}
+                  y={Math.min(op, cl)}
+                  width="8"
+                  height={Math.max(Math.abs(cl - op), 2)}
+                  fill={color}
+                  rx="1"
+                />
+              </g>
+            )
+          })}
+
+          {/* Legend */}
+          <line x1="160" y1="242" x2="180" y2="242" stroke="#06b6d4" strokeWidth="2" />
+          <text x="185" y="245" fill="#9ca3af" fontSize="8">EMA 50 (Celeste)</text>
+          <line x1="280" y1="242" x2="300" y2="242" stroke="#1d4ed8" strokeWidth="2" />
+          <text x="305" y="245" fill="#9ca3af" fontSize="8">EMA 100 (Oscura)</text>
+        </svg>
+      ),
+      bearishChart: (
+        <svg viewBox="0 0 400 250" style={{ width: '100%', height: '100%', overflow: 'visible' }}>
+          {/* Grid lines */}
+          {[40, 80, 120, 160, 200].map((y, i) => (
+            <line key={i} x1="0" y1={y} x2="400" y2={y} stroke="rgba(255,255,255,0.03)" strokeWidth="1" />
+          ))}
+
+          {/* Shield Blocked badge */}
+          <rect x="280" y="5" width="115" height="22" rx="11" fill="rgba(239, 68, 68, 0.15)" stroke="#ef4444" strokeWidth="1" />
+          <text x="337" y="19" fill="#ef4444" fontSize="9" fontWeight="bold" textAnchor="middle">🚫 SHIELD BLOCKED</text>
+
+          {/* EMA 100 - Dark Blue (flat) */}
+          <path
+            d="M -10,110 L 410,110"
+            fill="none"
+            stroke="#1d4ed8"
+            strokeWidth="3"
+            strokeLinecap="round"
+          />
+          {/* EMA 50 - Light Blue (very close, sandwich) */}
+          <path
+            d="M -10,118 L 410,118"
+            fill="none"
+            stroke="#06b6d4"
+            strokeWidth="3"
+            strokeLinecap="round"
+          />
+
+          {/* Distance annotation between EMAs */}
+          <line x1="200" y1="110" x2="200" y2="118" stroke="#ef4444" strokeWidth="1" />
+          <text x="215" y="112" fill="#ef4444" fontSize="9" fontWeight="bold">&lt; 0.5 ATR</text>
+          <text x="215" y="123" fill="#ef4444" fontSize="8" opacity="0.7">Sándwich (Comprimidas)</text>
+
+          {/* Warning indicator */}
+          <rect x="5" y="210" width="120" height="30" rx="6" fill="rgba(245, 158, 11, 0.08)" stroke="rgba(245, 158, 11, 0.3)" strokeWidth="1" />
+          <text x="65" y="224" fill="#f59e0b" fontSize="8" fontWeight="bold" textAnchor="middle">⚠️ Sin Tendencia</text>
+          <text x="65" y="235" fill="#f59e0b" fontSize="7" textAnchor="middle" opacity="0.7">Posible rotura inminente</text>
+
+          {/* Danger Zone */}
+          <path
+            d="M 270,210 L 290,230 L 340,230 L 340,195 L 310,195 Z"
+            fill="rgba(239, 68, 68, 0.08)"
+            stroke="#ef4444"
+            strokeWidth="1"
+            strokeDasharray="3,3"
+          />
+          <text x="312" y="220" fill="#ef4444" fontSize="9" fontWeight="bold" textAnchor="middle">ZONA PELIGRO</text>
+
+          {/* Reversion path blocked */}
+          <path
+            d="M 340,200 Q 320,150 290,120"
+            fill="none"
+            stroke="#ef4444"
+            strokeWidth="2"
+            strokeDasharray="4,4"
+          />
+          <line x1="285" y1="115" x2="295" y2="125" stroke="#ef4444" strokeWidth="2" />
+          <line x1="295" y1="115" x2="285" y2="125" stroke="#ef4444" strokeWidth="2" />
+          <text x="340" y="155" fill="#ef4444" fontSize="10" fontWeight="bold">Bloqueado</text>
+
+          {/* Candlesticks */}
+          {[
+            [20, 112, 120, 108, 125],
+            [45, 120, 115, 122, 110],
+            [70, 115, 118, 112, 122],
+            [95, 118, 125, 115, 130],
+            [120, 125, 140, 122, 145],
+            [145, 140, 155, 135, 160],
+            [170, 155, 170, 150, 175],
+            [195, 170, 185, 165, 190],
+            [220, 185, 200, 180, 205],
+            [245, 200, 210, 195, 215],
+            [270, 210, 218, 205, 222],
+            [295, 215, 222, 210, 228],
+            [320, 220, 205, 225, 200],
+            [345, 205, 185, 210, 180],
+            [370, 185, 160, 190, 155],
+          ].map(([x, op, cl, lo, hi], idx) => {
+            const isGreen = cl < op
+            const color = isGreen ? '#10b981' : '#ef4444'
+            return (
+              <g key={idx} opacity="0.95">
+                <line x1={x} y1={lo} x2={x} y2={hi} stroke={color} strokeWidth="1.5" />
+                <rect
+                  x={x - 4}
+                  y={Math.min(op, cl)}
+                  width="8"
+                  height={Math.max(Math.abs(cl - op), 2)}
+                  fill={color}
+                  rx="1"
+                />
+              </g>
+            )
+          })}
+
+          {/* Legend */}
+          <line x1="160" y1="242" x2="180" y2="242" stroke="#06b6d4" strokeWidth="2" />
+          <text x="185" y="245" fill="#9ca3af" fontSize="8">EMA 50 (Celeste)</text>
+          <line x1="280" y1="242" x2="300" y2="242" stroke="#1d4ed8" strokeWidth="2" />
+          <text x="305" y="245" fill="#9ca3af" fontSize="8">EMA 100 (Oscura)</text>
+        </svg>
+      )
     }
   ]
 
