@@ -46,6 +46,7 @@ export function HolguraCalculator() {
   const [spreadPips, setSpreadPips] = useState('1.3')
   const [includeSpread, setIncludeSpread] = useState(true)
   const [isManualPrice, setIsManualPrice] = useState(false)
+  const [manualLivePrice, setManualLivePrice] = useState('')
 
   // Holgura objetivo para cálculo inverso
   const [targetPips, setTargetPips] = useState('40')
@@ -123,7 +124,15 @@ export function HolguraCalculator() {
   const activePipsToLiq = includeSpread ? pipsToLiqReal : pipsToLiqTheo
 
   // ─── 📡 PRECIO EN VIVO Y CÁLCULO DE AGUJA DEL GRÁFICO ───────────────────────
-  const livePrice = (!isCustomAsset && market && market[symbol]) ? market[symbol].m5.price : entryN
+  // Si hay datos WS para este símbolo, usar el precio WS.
+  // Si no hay datos WS (modo manual o activo personalizado), usar el campo manualLivePrice.
+  // Si ni WS ni manual live, fallback al precio de entrada (holgura será 100%).
+  const hasWsData = !isCustomAsset && !!market?.[symbol]
+  const manualLivePriceN = parseFloat(manualLivePrice) || 0
+  const needsManualLive = (isManualPrice || isCustomAsset) && !hasWsData
+  const livePrice = hasWsData 
+    ? market![symbol].m5.price 
+    : (manualLivePriceN > 0 ? manualLivePriceN : entryN)
 
   // Porcentaje de la posición del precio actual en la regla de holgura
   const livePct = (() => {
@@ -315,6 +324,28 @@ export function HolguraCalculator() {
                   : '🟢 Actualizado en tiempo real por WebSocket'}
               </span>
             </div>
+
+            {/* Campo de Precio Actual del Mercado (solo cuando no hay WS) */}
+            {needsManualLive && (
+              <div style={fieldGroupStyle}>
+                <label style={labelStyle}>Precio Actual del Mercado</label>
+                <input
+                  type="text"
+                  placeholder={`Ej. ${entryPrice}`}
+                  value={manualLivePrice}
+                  onChange={e => setManualLivePrice(e.target.value)}
+                  style={{
+                    ...inputStyle,
+                    borderColor: manualLivePriceN > 0 ? 'rgba(16,185,129,0.3)' : 'rgba(244,63,94,0.3)'
+                  }}
+                />
+                <span style={{ fontSize: 10, color: manualLivePriceN > 0 ? '#10b981' : '#f87171' }}>
+                  {manualLivePriceN > 0 
+                    ? `📡 Precio actual: ${manualLivePriceN.toFixed(displayDecimals)} (manual)` 
+                    : '⚠️ Ingresa el precio actual del mercado para calcular holgura y P/G'}
+                </span>
+              </div>
+            )}
 
             {/* Selector de Pip Size si es activo personalizado o modo avanzado */}
             {isCustomAsset && (
@@ -641,14 +672,19 @@ export function HolguraCalculator() {
             <h3 style={{ fontSize: 15, fontWeight: 800, color: '#fff', margin: 0 }}>
               📐 Métrica de Cercanía a Liquidación (Holgura)
             </h3>
-            {wsStatus === 'connected' && !isCustomAsset && market?.[symbol] && (
+            {hasWsData && (
               <span style={{ fontSize: 11, color: '#10b981', fontWeight: 600 }}>
                 ● WebSocket Activo: {livePrice.toFixed(displayDecimals)}
               </span>
             )}
-            {(isManualPrice || isCustomAsset) && (
-              <span style={{ fontSize: 11, color: '#facc15', fontWeight: 600 }}>
-                ✏️ Entrada Manual: {entryN.toFixed(displayDecimals)}
+            {!hasWsData && manualLivePriceN > 0 && (
+              <span style={{ fontSize: 11, color: '#38bdf8', fontWeight: 600 }}>
+                📡 Precio Actual (manual): {livePrice.toFixed(displayDecimals)}
+              </span>
+            )}
+            {!hasWsData && manualLivePriceN <= 0 && (
+              <span style={{ fontSize: 11, color: '#f87171', fontWeight: 600 }}>
+                ⚠️ Sin precio actual — ingresa el precio del mercado arriba
               </span>
             )}
           </div>
