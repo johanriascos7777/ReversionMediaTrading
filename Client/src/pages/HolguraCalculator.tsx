@@ -9,17 +9,25 @@ import { useState, useEffect } from 'react'
 import { useMarketData } from '../hooks/useMarketData'
 
 // Símbolos Forex soportados y sus valores típicos
-const SYMBOL_DEFAULTS: { [key: string]: { spread: number; price: number } } = {
-  'EUR/USD': { spread: 0.00013, price: 1.08500 },
-  'GBP/USD': { spread: 0.00018, price: 1.27200 },
-  'USD/JPY': { spread: 0.015,   price: 156.50 },
-  'USD/CAD': { spread: 0.00018, price: 1.36500 },
-  'AUD/USD': { spread: 0.00016, price: 0.66500 },
-  'EUR/GBP': { spread: 0.00018, price: 0.85200 },
-  'USD/CHF': { spread: 0.00018, price: 0.89500 },
-  'CAD/JPY': { spread: 0.022,   price: 114.50 },
-  'EUR/CHF': { spread: 0.00020, price: 0.97200 }
+const SYMBOL_DEFAULTS: { [key: string]: { spread: number; price: number; pipSize: number; isJpy?: boolean } } = {
+  'EUR/USD': { spread: 0.00013, price: 1.08500, pipSize: 0.0001 },
+  'GBP/USD': { spread: 0.00018, price: 1.27200, pipSize: 0.0001 },
+  'USD/JPY': { spread: 0.015, price: 156.50, pipSize: 0.01, isJpy: true },
+  'USD/CAD': { spread: 0.00018, price: 1.36500, pipSize: 0.0001 },
+  'AUD/USD': { spread: 0.00016, price: 0.66500, pipSize: 0.0001 },
+  'EUR/GBP': { spread: 0.00018, price: 0.85200, pipSize: 0.0001 },
+  'USD/CHF': { spread: 0.00018, price: 0.89500, pipSize: 0.0001 },
+  'CAD/JPY': { spread: 0.022, price: 114.50, pipSize: 0.01, isJpy: true },
+  'EUR/CHF': { spread: 0.00020, price: 0.97200, pipSize: 0.0001 }
 }
+
+const ASSET_PIP_PRESETS = [
+  { label: 'Forex Estándar (Pip = 0.0001)', pipSize: 0.0001, minDec: 5 },
+  { label: 'Forex JPY (Pip = 0.01)', pipSize: 0.01, minDec: 3 },
+  { label: 'Oro / Metales (XAU) (Pip = 0.01)', pipSize: 0.01, minDec: 2 },
+  { label: 'Índices / Petróleo (Pip = 0.1)', pipSize: 0.1, minDec: 2 },
+  { label: 'Crypto / Puntos (Pip = 1.0)', pipSize: 1.0, minDec: 2 },
+]
 
 const SUPPORTED_SYMBOLS = Object.keys(SYMBOL_DEFAULTS)
 
@@ -28,6 +36,9 @@ export function HolguraCalculator() {
 
   // Estados de entrada
   const [symbol, setSymbol] = useState('EUR/USD')
+  const [customSymbol, setCustomSymbol] = useState('')
+  const [isCustomAsset, setIsCustomAsset] = useState(false)
+  const [customPipSize, setCustomPipSize] = useState('0.0001')
   const [direction, setDirection] = useState<'BUY' | 'SELL'>('BUY')
   const [entryPrice, setEntryPrice] = useState('1.08500')
   const [leverage, setLeverage] = useState('200')
@@ -39,28 +50,34 @@ export function HolguraCalculator() {
   // Holgura objetivo para cálculo inverso
   const [targetPips, setTargetPips] = useState('40')
 
-  const isJpy = symbol.toUpperCase().includes('JPY')
-  const pipSize = isJpy ? 0.01 : 0.0001
+  const activeSymbolName = isCustomAsset ? (customSymbol.trim() || 'Activo Personalizado') : symbol
+  const isJpy = !isCustomAsset && symbol.toUpperCase().includes('JPY')
+  
+  // Tamaño de pip activo
+  const pipSize = isCustomAsset 
+    ? (parseFloat(customPipSize) || 0.0001) 
+    : (SYMBOL_DEFAULTS[symbol]?.pipSize || (isJpy ? 0.01 : 0.0001))
 
-  // Sincronizar precio en vivo por WebSocket si no está en modo manual
+  // Sincronizar precio en vivo por WebSocket si no está en modo manual ni personalizado
   useEffect(() => {
-    if (market && market[symbol] && !isManualPrice) {
+    if (!isCustomAsset && market && market[symbol] && !isManualPrice) {
       setEntryPrice(market[symbol].m5.price.toFixed(isJpy ? 3 : 5))
     }
-  }, [market, symbol, isManualPrice, isJpy])
+  }, [market, symbol, isManualPrice, isJpy, isCustomAsset])
 
-  // Cargar defaults cuando cambia el símbolo
+  // Cargar defaults cuando cambia el símbolo predeterminado
   useEffect(() => {
+    if (isCustomAsset) return
     const defaults = SYMBOL_DEFAULTS[symbol]
     if (defaults) {
-      const defaultPipSize = symbol.toUpperCase().includes('JPY') ? 0.01 : 0.0001
+      const defaultPipSize = defaults.pipSize || (defaults.isJpy ? 0.01 : 0.0001)
       const defaultSpreadPips = defaults.spread / defaultPipSize
       setSpreadPips(defaultSpreadPips.toFixed(1))
       if (!isManualPrice && (!market || !market[symbol])) {
         setEntryPrice(String(defaults.price))
       }
     }
-  }, [symbol])
+  }, [symbol, isCustomAsset])
 
   // Parsing numérico de inputs
   const entryN = parseFloat(entryPrice) || 0
@@ -68,8 +85,13 @@ export function HolguraCalculator() {
   const investmentN = parseFloat(investment) || 0
   const spreadPipsN = parseFloat(spreadPips) || 0
 
-  // ─── 🧮 CÁCULOS CON LAS FÓRMULAS EXACTAS SOLICITADAS ──────────────────────────
-  
+  // ─── 🎯 PRECISIÓN DINÁMICA: Mostrar todos los decimales que el usuario introduce ───
+  const userDecimals = entryPrice.includes('.') ? (entryPrice.split('.')[1] || '').length : 0
+  const defaultMinDec = pipSize === 0.01 ? 3 : pipSize === 0.0001 ? 5 : pipSize <= 0.001 ? 4 : 2
+  const displayDecimals = Math.max(defaultMinDec, userDecimals)
+
+  // ─── 🧮 CÁLCULOS CON LAS FÓRMULAS EXACTAS ──────────────────────────
+
   // 1. Notional = Inversión * Apalancamiento
   const notional = investmentN * leverageN
 
@@ -84,12 +106,12 @@ export function HolguraCalculator() {
 
   // Ajustes de Spread
   const spreadInPips = spreadPipsN
-  const pipsToLiqReal = includeSpread 
+  const pipsToLiqReal = includeSpread
     ? Math.max(0, pipsToLiqTheo - spreadInPips)
     : pipsToLiqTheo
 
   // Precios de Liquidación resultantes
-  const liqTheoPrice = direction === 'BUY' 
+  const liqTheoPrice = direction === 'BUY'
     ? entryN - (pipsToLiqTheo * pipSize)
     : entryN + (pipsToLiqTheo * pipSize)
 
@@ -101,11 +123,9 @@ export function HolguraCalculator() {
   const activePipsToLiq = includeSpread ? pipsToLiqReal : pipsToLiqTheo
 
   // ─── 📡 PRECIO EN VIVO Y CÁLCULO DE AGUJA DEL GRÁFICO ───────────────────────
-  const livePrice = market && market[symbol] ? market[symbol].m5.price : entryN
+  const livePrice = (!isCustomAsset && market && market[symbol]) ? market[symbol].m5.price : entryN
 
   // Porcentaje de la posición del precio actual en la regla de holgura
-  // 100% = Entrada (Seguridad total)
-  // 0% = Liquidación (Zona de muerte)
   const livePct = (() => {
     if (entryN === activeLiqPrice) return 0
     let pct = 0
@@ -114,47 +134,105 @@ export function HolguraCalculator() {
     } else {
       pct = ((activeLiqPrice - livePrice) / (activeLiqPrice - entryN)) * 100
     }
-    return Math.max(-20, Math.min(120, pct)) // damos un poco de holgura visual por si entra en ganancias (>100)
+    return Math.max(-20, Math.min(120, pct))
   })()
 
   // Distancia del precio actual a la liquidación en pips
   const liveDistancePrice = Math.abs(livePrice - activeLiqPrice)
-  const liveDistancePips = liveDistancePrice / pipSize
+  const liveDistancePips = pipSize > 0 ? liveDistancePrice / pipSize : 0
 
   // ─── 🎯 CÁLCULO INVERSO DE APALANCAMIENTO RECOMENDADO ────────────────────────
   const targetPipsN = parseFloat(targetPips) || 1
-  // requiredLeverage = Margen / (Margen * (pipSize / Entry) * TargetPips)
-  // => requiredLeverage = Entry / (pipSize * TargetPips)
-  const recLeverage = entryN > 0 ? entryN / (pipSize * targetPipsN) : 0
+  const recLeverage = (entryN > 0 && pipSize > 0) ? entryN / (pipSize * targetPipsN) : 0
 
   return (
     <div style={{ padding: '24px 0', maxWidth: 900, margin: '0 auto', fontFamily: '"Outfit", sans-serif' }}>
-      
+
       {/* Cabecera */}
       <div style={{ marginBottom: 28 }}>
-        <h1 className="title-gradient" style={{ margin: 0, fontSize: 30, fontWeight: 800, letterSpacing: '-0.8px' }}>
-          🧮 CALCULADORA DE HOLGURA
-        </h1>
-        <p style={{ margin: '4px 0 0', fontSize: 13, color: '#9ca3af' }}>
-          Matemáticas de Liquidación y Distancia de Tolerancia en Forex
-        </p>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <h1 className="title-gradient" style={{ margin: 0, fontSize: 30, fontWeight: 800, letterSpacing: '-0.8px' }}>
+              🧮 CALCULADORA DE HOLGURA
+            </h1>
+            <p style={{ margin: '4px 0 0', fontSize: 13, color: '#9ca3af' }}>
+              Matemáticas de Liquidación y Distancia de Tolerancia (Forex, Metales, Crypto e IQ Option)
+            </p>
+          </div>
+
+          {/* Badge de modo */}
+          <div style={{
+            padding: '6px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700,
+            background: (isManualPrice || isCustomAsset) ? 'rgba(234, 179, 8, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+            border: `1px solid ${(isManualPrice || isCustomAsset) ? 'rgba(234, 179, 8, 0.4)' : 'rgba(16, 185, 129, 0.4)'}`,
+            color: (isManualPrice || isCustomAsset) ? '#facc15' : '#34d399',
+            display: 'flex', alignItems: 'center', gap: 6
+          }}>
+            <span>{(isManualPrice || isCustomAsset) ? '✏️ Modo Manual / IQ Option' : '⚡ WebSocket Sincronizado'}</span>
+          </div>
+        </div>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-        
+
         {/* Panel de Control de Parámetros */}
         <div className="glass-panel" style={{ margin: 0, border: '1px solid rgba(255,255,255,0.06)' }}>
-          <h3 style={{ fontSize: 15, fontWeight: 800, margin: '0 0 16px', color: '#fff', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: 8 }}>
-            ⚙️ Ajustes de Operación
-          </h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '0 0 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: 8 }}>
+            <h3 style={{ fontSize: 15, fontWeight: 800, margin: 0, color: '#fff' }}>
+              ⚙️ Ajustes de Operación
+            </h3>
+            <span style={{ fontSize: 11, color: '#9ca3af' }}>
+              {activeSymbolName} • Pip: {pipSize}
+            </span>
+          </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
             {/* Símbolo */}
             <div style={fieldGroupStyle}>
-              <label style={labelStyle}>Símbolo</label>
-              <select value={symbol} onChange={e => setSymbol(e.target.value)} style={selectStyle}>
-                {SUPPORTED_SYMBOLS.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
+              <label style={labelStyle}>Símbolo / Activo</label>
+              {!isCustomAsset ? (
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <select 
+                    value={symbol} 
+                    onChange={e => {
+                      if (e.target.value === 'CUSTOM') {
+                        setIsCustomAsset(true)
+                        setIsManualPrice(true)
+                      } else {
+                        setSymbol(e.target.value)
+                      }
+                    }} 
+                    style={selectStyle}
+                  >
+                    {SUPPORTED_SYMBOLS.map(s => <option key={s} value={s}>{s}</option>)}
+                    <option value="CUSTOM">➕ Otro / Personalizado...</option>
+                  </select>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <input
+                    type="text"
+                    placeholder="Ej. EUR/AUD, XAU/USD, BTC/USD"
+                    value={customSymbol}
+                    onChange={e => setCustomSymbol(e.target.value.toUpperCase())}
+                    style={inputStyle}
+                  />
+                  <button
+                    onClick={() => {
+                      setIsCustomAsset(false)
+                      setSymbol('EUR/USD')
+                    }}
+                    title="Volver a lista rápida"
+                    style={{
+                      padding: '0 10px', borderRadius: 8, background: 'rgba(255,255,255,0.06)',
+                      border: '1px solid rgba(255,255,255,0.1)', color: '#9ca3af', cursor: 'pointer',
+                      fontSize: 12, fontWeight: 700
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Dirección */}
@@ -162,18 +240,18 @@ export function HolguraCalculator() {
               <label style={labelStyle}>Dirección</label>
               <div style={{ display: 'flex', gap: 6, height: 38 }}>
                 {(['BUY', 'SELL'] as const).map(dir => (
-                  <button 
+                  <button
                     key={dir}
                     onClick={() => setDirection(dir)}
                     style={{
                       flex: 1, padding: 0, borderRadius: 8, cursor: 'pointer',
                       fontWeight: 700, fontSize: 12, transition: 'all 0.2s',
-                      background: direction === dir 
-                        ? (dir === 'BUY' ? 'rgba(16,185,129,0.2)' : 'rgba(244,63,94,0.2)') 
+                      background: direction === dir
+                        ? (dir === 'BUY' ? 'rgba(16,185,129,0.2)' : 'rgba(244,63,94,0.2)')
                         : 'rgba(255,255,255,0.03)',
                       color: direction === dir ? (dir === 'BUY' ? '#10b981' : '#f43f5e') : '#6b7280',
-                      border: direction === dir 
-                        ? `1px solid ${dir === 'BUY' ? '#10b981' : '#f43f5e'}40` 
+                      border: direction === dir
+                        ? `1px solid ${dir === 'BUY' ? '#10b981' : '#f43f5e'}40`
                         : '1px solid rgba(255,255,255,0.05)',
                     }}
                   >
@@ -193,42 +271,69 @@ export function HolguraCalculator() {
             <div style={fieldGroupStyle}>
               <label style={labelStyle}>Apalancamiento</label>
               <select value={leverage} onChange={e => setLeverage(e.target.value)} style={selectStyle}>
-                {['10','50','100','200','300','500','1000'].map(l => (
+                {['10', '25', '50', '100', '200', '300', '500', '1000'].map(l => (
                   <option key={l} value={l}>x{l}</option>
                 ))}
               </select>
             </div>
           </div>
 
-          {/* Precio y Spread */}
+          {/* Fila secundaria: Precio, Spread y Selector de Pip si es personalizado */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16, marginTop: 16 }}>
+            
             {/* Precio de Entrada */}
             <div style={fieldGroupStyle}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <label style={labelStyle}>Precio de Entrada</label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: '#9ca3af', cursor: 'pointer' }}>
-                  <input 
-                    type="checkbox" 
-                    checked={isManualPrice} 
-                    onChange={e => setIsManualPrice(e.target.checked)}
-                    style={{ cursor: 'pointer' }}
-                  />
-                  Precio manual
-                </label>
+                <label style={labelStyle}>Precio de Entrada (IQ Option / Broker)</label>
+                {!isCustomAsset && (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: '#9ca3af', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={isManualPrice}
+                      onChange={e => setIsManualPrice(e.target.checked)}
+                      style={{ cursor: 'pointer' }}
+                    />
+                    Precio manual
+                  </label>
+                )}
               </div>
-              <input 
-                type="number" 
-                step="0.00001" 
-                value={entryPrice} 
-                disabled={!isManualPrice && wsStatus === 'connected' && !!market?.[symbol]}
+              <input
+                type="text"
+                placeholder="Ej. 1.157891"
+                value={entryPrice}
+                disabled={!isCustomAsset && !isManualPrice && wsStatus === 'connected' && !!market?.[symbol]}
                 onChange={e => setEntryPrice(e.target.value)}
                 style={{
                   ...inputStyle,
-                  opacity: !isManualPrice && wsStatus === 'connected' && !!market?.[symbol] ? 0.6 : 1,
-                  borderColor: !isManualPrice && wsStatus === 'connected' && !!market?.[symbol] ? 'rgba(16,185,129,0.2)' : 'rgba(255,255,255,0.1)'
-                }} 
+                  opacity: !isCustomAsset && !isManualPrice && wsStatus === 'connected' && !!market?.[symbol] ? 0.6 : 1,
+                  borderColor: isManualPrice || isCustomAsset ? 'rgba(234,179,8,0.3)' : 'rgba(16,185,129,0.2)'
+                }}
               />
+              <span style={{ fontSize: 10, color: '#9ca3af' }}>
+                {isManualPrice || isCustomAsset 
+                  ? `✍️ Entrada manual activa con ${userDecimals} decimales detectados` 
+                  : '🟢 Actualizado en tiempo real por WebSocket'}
+              </span>
             </div>
+
+            {/* Selector de Pip Size si es activo personalizado o modo avanzado */}
+            {isCustomAsset && (
+              <div style={fieldGroupStyle}>
+                <label style={labelStyle}>Tamaño de Pip / Categoría</label>
+                <select 
+                  value={customPipSize} 
+                  onChange={e => setCustomPipSize(e.target.value)} 
+                  style={selectStyle}
+                >
+                  {ASSET_PIP_PRESETS.map(p => (
+                    <option key={p.pipSize} value={String(p.pipSize)}>{p.label}</option>
+                  ))}
+                </select>
+                <span style={{ fontSize: 10, color: '#9ca3af' }}>
+                  Define cuánto vale 1 pip para este activo (ej. 0.0001 en Forex)
+                </span>
+              </div>
+            )}
 
             {/* Configuración de Spread */}
             <div style={{
@@ -239,9 +344,9 @@ export function HolguraCalculator() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <label style={{ ...labelStyle, color: '#eab308' }}>Spread de Mercado</label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, cursor: 'pointer', color: '#fff' }}>
-                  <input 
-                    type="checkbox" 
-                    checked={includeSpread} 
+                  <input
+                    type="checkbox"
+                    checked={includeSpread}
                     onChange={e => setIncludeSpread(e.target.checked)}
                     style={{ cursor: 'pointer' }}
                   />
@@ -249,31 +354,34 @@ export function HolguraCalculator() {
                 </label>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <input 
-                  type="number" 
-                  step="0.1" 
+                <input
+                  type="number"
+                  step="0.1"
                   disabled={!includeSpread}
-                  value={spreadPips} 
+                  value={spreadPips}
                   onChange={e => setSpreadPips(e.target.value)}
-                  style={{ ...inputStyle, opacity: includeSpread ? 1 : 0.4 }} 
+                  style={{ ...inputStyle, opacity: includeSpread ? 1 : 0.4 }}
                 />
                 <span style={{ fontSize: 11, color: '#6b7280', whiteSpace: 'nowrap' }}>
                   pips
                 </span>
               </div>
+              <span style={{ fontSize: 10, color: '#9ca3af', display: 'block', marginTop: 2 }}>
+                💡 En IQ Option es la cifra que sale en el botón (ej: 0.8 o 1.3)
+              </span>
             </div>
           </div>
         </div>
 
         {/* Desglose Matemático de la Holgura */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 20 }}>
-          
+
           {/* Fórmulas matemáticas */}
           <div className="glass-panel" style={{ margin: 0, border: '1px solid rgba(255,255,255,0.06)' }}>
             <h3 style={{ fontSize: 14, fontWeight: 800, margin: '0 0 16px', color: '#fff', letterSpacing: '0.5px' }}>
               📐 FÓRMULAS DE CÁLCULO
             </h3>
-            
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: 13 }}>
               <div>
                 <div style={formulaLabelStyle}>1. NOTIONAL (Inversión × Apalancamiento)</div>
@@ -284,7 +392,7 @@ export function HolguraCalculator() {
               <div>
                 <div style={formulaLabelStyle}>2. VALOR POR PIP (unidad base)</div>
                 <div style={formulaValStyle}>
-                  {pipSize} / {entryN.toFixed(5)} = <strong style={{ color: '#fff' }}>{valPerPipUnit.toFixed(8)}</strong>
+                  {pipSize} / {entryN.toFixed(displayDecimals)} = <strong style={{ color: '#fff' }}>{valPerPipUnit.toFixed(8)}</strong>
                 </div>
               </div>
               <div>
@@ -296,7 +404,7 @@ export function HolguraCalculator() {
               <div>
                 <div style={formulaLabelStyle}>4. PIPS HASTA LIQUIDACIÓN (Margen / Valor Pip Trade)</div>
                 <div style={formulaValStyle}>
-                  {includeSpread 
+                  {includeSpread
                     ? `(${investmentN} / ${valPerPipTrade.toFixed(4)}) - ${spreadInPips.toFixed(1)} spread = `
                     : `${investmentN} / ${valPerPipTrade.toFixed(4)} = `
                   }
@@ -316,13 +424,13 @@ export function HolguraCalculator() {
               <div style={resultRowStyle}>
                 <span style={resultLabelStyle}>Precio de Entrada:</span>
                 <span style={{ fontSize: 18, fontWeight: 700, color: '#fff', fontFamily: 'monospace' }}>
-                  {entryN.toFixed(isJpy ? 3 : 5)}
+                  {entryN.toFixed(displayDecimals)}
                 </span>
               </div>
               <div style={resultRowStyle}>
                 <span style={resultLabelStyle}>Zona de Liquidación:</span>
                 <span style={{ fontSize: 18, fontWeight: 700, color: '#f43f5e', fontFamily: 'monospace' }}>
-                  {activeLiqPrice.toFixed(isJpy ? 3 : 5)}
+                  {activeLiqPrice.toFixed(displayDecimals)}
                 </span>
               </div>
               <div style={resultRowStyle}>
@@ -342,15 +450,205 @@ export function HolguraCalculator() {
 
         </div>
 
+        {/* ─── 💵 SECCIÓN DIFERENCIADA: SPREAD vs VALOR/PIP vs P/G ───────────────── */}
+        <div className="glass-panel" style={{
+          margin: 0,
+          border: '1px solid rgba(59,130,246,0.2)',
+          background: 'linear-gradient(135deg, rgba(15,23,42,0.85) 0%, rgba(30,41,59,0.7) 100%)',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.37)'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: 10 }}>
+            <div>
+              <h3 style={{ fontSize: 15, fontWeight: 800, color: '#60a5fa', margin: 0 }}>
+                💵 COSTOS Y GANANCIAS DEL TRADE
+              </h3>
+              <span style={{ fontSize: 11, color: '#9ca3af' }}>
+                Spread (costo de entrada) vs Valor por Pip (ganancia por movimiento)
+              </span>
+            </div>
+            <div style={{
+              padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700,
+              background: 'rgba(59,130,246,0.15)', color: '#60a5fa', border: '1px solid rgba(59,130,246,0.3)'
+            }}>
+              Volumen: ${(investmentN * leverageN).toFixed(0)} USD
+            </div>
+          </div>
+
+          {/* ── Grid de Tarjetas ── */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 16 }}>
+
+            {/* ── TARJETA 1: COSTO DEL SPREAD (solo si "Restar spread" está activado) ── */}
+            {includeSpread && (
+              <div style={{
+                padding: '16px 18px', borderRadius: 12,
+                background: 'rgba(234,179,8,0.04)', border: '1px solid rgba(234,179,8,0.2)',
+                display: 'flex', flexDirection: 'column', justifyContent: 'space-between'
+              }}>
+                <div>
+                  <span style={{ fontSize: 10, color: '#eab308', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.5px' }}>
+                    ⚡ COSTO DEL SPREAD (PEAJE DE ENTRADA)
+                  </span>
+                  <div style={{ fontSize: 22, fontWeight: 800, color: '#fbbf24', fontFamily: 'monospace', margin: '6px 0 2px' }}>
+                    -${(spreadInPips * valPerPipTrade).toFixed(4)} <span style={{ fontSize: 12, color: '#a16207' }}>USD</span>
+                  </div>
+                  <p style={{ margin: 0, fontSize: 11, color: '#d4a017', lineHeight: 1.5 }}>
+                    Al abrir la operación, <strong>empiezas {spreadInPips.toFixed(1)} pips abajo</strong> por el spread del broker. Este costo se paga <strong>una sola vez</strong> al entrar.
+                  </p>
+                </div>
+
+                <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid rgba(234,179,8,0.1)', fontSize: 11, color: '#a16207' }}>
+                  {spreadInPips.toFixed(1)} pips × ${valPerPipTrade.toFixed(4)}/pip = <strong style={{ color: '#fbbf24' }}>-${(spreadInPips * valPerPipTrade).toFixed(4)}</strong>
+                </div>
+              </div>
+            )}
+
+            {/* ── TARJETA 2: VALOR DEL PIP POR MOVIMIENTO (lo que ganas/pierdes por cada pip) ── */}
+            <div style={{
+              padding: '16px 18px', borderRadius: 12,
+              background: 'rgba(56,189,248,0.04)', border: '1px solid rgba(56,189,248,0.2)',
+              display: 'flex', flexDirection: 'column', justifyContent: 'space-between'
+            }}>
+              <div>
+                <span style={{ fontSize: 10, color: '#38bdf8', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.5px' }}>
+                  📈 VALOR POR PIP (GANANCIA/PÉRDIDA POR MOVIMIENTO)
+                </span>
+                <div style={{ fontSize: 24, fontWeight: 800, color: '#38bdf8', fontFamily: 'monospace', margin: '6px 0 2px' }}>
+                  ${valPerPipTrade.toFixed(4)} <span style={{ fontSize: 13, color: '#94a3b8' }}>USD/pip</span>
+                </div>
+                <p style={{ margin: 0, fontSize: 11, color: '#cbd5e1', lineHeight: 1.5 }}>
+                  Cuando el precio se mueve <strong>1 pip</strong> a tu favor, ganas <strong style={{ color: '#10b981' }}>+${valPerPipTrade.toFixed(4)}</strong>. Si se mueve 1 pip en contra, pierdes <strong style={{ color: '#f43f5e' }}>-${valPerPipTrade.toFixed(4)}</strong>.
+                </p>
+              </div>
+
+              <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid rgba(56,189,248,0.08)', display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#9ca3af' }}>
+                <span>10p = <strong style={{ color: '#fff' }}>${(valPerPipTrade * 10).toFixed(2)}</strong></span>
+                <span>20p = <strong style={{ color: '#fff' }}>${(valPerPipTrade * 20).toFixed(2)}</strong></span>
+                <span>50p = <strong style={{ color: '#fff' }}>${(valPerPipTrade * 50).toFixed(2)}</strong></span>
+              </div>
+            </div>
+
+            {/* ── TARJETA 3: P/G BRUTA EN VIVO ── */}
+            {(() => {
+              const liveDiffPrice = direction === 'BUY' ? (livePrice - entryN) : (entryN - livePrice)
+              const livePipsMoved = pipSize > 0 ? (liveDiffPrice / pipSize) : 0
+              const livePnLBruta = Math.max(-investmentN, livePipsMoved * valPerPipTrade)
+              const livePnLPct = investmentN > 0 ? (livePnLBruta / investmentN) * 100 : 0
+              const isProfit = livePnLBruta >= 0
+
+              return (
+                <div style={{
+                  padding: '16px 18px', borderRadius: 12,
+                  background: isProfit ? 'rgba(16,185,129,0.05)' : 'rgba(244,63,94,0.05)',
+                  border: `1px solid ${isProfit ? 'rgba(16,185,129,0.25)' : 'rgba(244,63,94,0.25)'}`,
+                  display: 'flex', flexDirection: 'column', justifyContent: 'space-between'
+                }}>
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: 10, color: '#9ca3af', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.5px' }}>
+                        P/G BRUTAS EN VIVO
+                      </span>
+                      <span style={{
+                        fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
+                        background: direction === 'BUY' ? 'rgba(16,185,129,0.2)' : 'rgba(244,63,94,0.2)',
+                        color: direction === 'BUY' ? '#34d399' : '#fb7185'
+                      }}>
+                        {direction} @ {entryN.toFixed(displayDecimals)}
+                      </span>
+                    </div>
+
+                    <div style={{
+                      fontSize: 26, fontWeight: 800, fontFamily: 'monospace', margin: '6px 0 2px',
+                      color: isProfit ? '#10b981' : '#f43f5e'
+                    }}>
+                      {isProfit ? '+' : ''}${livePnLBruta.toFixed(2)} <span style={{ fontSize: 14 }}>({isProfit ? '+' : ''}{livePnLPct.toFixed(1)}%)</span>
+                    </div>
+
+                    <p style={{ margin: 0, fontSize: 11, color: '#cbd5e1' }}>
+                      {livePipsMoved >= 0 ? '🟢' : '🔴'}{' '}
+                      <strong style={{ color: isProfit ? '#34d399' : '#fb7185' }}>
+                        {livePipsMoved.toFixed(1)} pips
+                      </strong>{' '}
+                      × ${valPerPipTrade.toFixed(4)}/pip
+                    </p>
+                  </div>
+
+                  <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.04)', display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
+                    <span style={{ color: '#9ca3af' }}>Inversión: <strong style={{ color: '#fff' }}>${investmentN.toFixed(2)}</strong></span>
+                    <span style={{ color: '#9ca3af' }}>Precio: <strong style={{ color: '#fff', fontFamily: 'monospace' }}>{livePrice.toFixed(displayDecimals)}</strong></span>
+                  </div>
+                </div>
+              )
+            })()}
+
+          </div>
+
+          {/* ── Escala de P/G Proyectada ── */}
+          <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+            <span style={{ fontSize: 10, color: '#9ca3af', textTransform: 'uppercase', fontWeight: 700, display: 'block', marginBottom: 8 }}>
+              📊 Proyección de P/G {includeSpread ? '(después de recuperar spread)' : ''}
+            </span>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 8 }}>
+              {[
+                ...(includeSpread ? [{ pips: 0, label: `🔄 Break-even (${spreadInPips.toFixed(1)}p)`, isBreakeven: true }] : []),
+                { pips: 5, label: '+5 Pips' },
+                { pips: 10, label: '+10 Pips' },
+                { pips: 20, label: '+20 Pips' },
+                { pips: 50, label: '+50 Pips' },
+                { pips: -Math.round(activePipsToLiq), label: `☠️ Liq (-${activePipsToLiq.toFixed(0)}p)`, isLiq: true }
+              ].map((item: any) => {
+                let usd: number, pct: number
+                if (item.isLiq) {
+                  usd = -investmentN
+                  pct = -100
+                } else if (item.isBreakeven) {
+                  usd = 0
+                  pct = 0
+                } else {
+                  usd = item.pips * valPerPipTrade
+                  pct = investmentN > 0 ? (usd / investmentN) * 100 : 0
+                }
+                const isPositive = usd >= 0
+                return (
+                  <div key={item.label} style={{
+                    padding: '8px 10px', borderRadius: 8,
+                    background: item.isLiq ? 'rgba(239,68,68,0.1)' : item.isBreakeven ? 'rgba(234,179,8,0.08)' : 'rgba(255,255,255,0.02)',
+                    border: `1px solid ${item.isLiq ? 'rgba(239,68,68,0.3)' : item.isBreakeven ? 'rgba(234,179,8,0.25)' : 'rgba(255,255,255,0.04)'}`,
+                    textAlign: 'center'
+                  }}>
+                    <span style={{ fontSize: 10, color: item.isLiq ? '#f87171' : item.isBreakeven ? '#eab308' : '#9ca3af', display: 'block', fontWeight: 700 }}>
+                      {item.label}
+                    </span>
+                    <span style={{
+                      fontSize: 12, fontWeight: 800, fontFamily: 'monospace',
+                      color: item.isLiq ? '#ef4444' : item.isBreakeven ? '#eab308' : isPositive ? '#10b981' : '#f43f5e'
+                    }}>
+                      {item.isBreakeven ? '$0.00' : `${isPositive && !item.isLiq ? '+' : ''}$${usd.toFixed(2)}`}
+                    </span>
+                    <span style={{ fontSize: 9, color: item.isLiq ? '#fca5a5' : item.isBreakeven ? '#ca8a04' : isPositive ? '#6ee7b7' : '#fda4af', display: 'block' }}>
+                      {item.isBreakeven ? 'Recuperas spread' : `${isPositive && !item.isLiq ? '+' : ''}${pct.toFixed(1)}%`}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+        </div>
+
         {/* Métrica Gráfica de Distancia de Holgura (Custom Graphic) */}
         <div className="glass-panel" style={{ margin: 0, border: '1px solid rgba(255,255,255,0.06)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
             <h3 style={{ fontSize: 15, fontWeight: 800, color: '#fff', margin: 0 }}>
               📐 Métrica de Cercanía a Liquidación (Holgura)
             </h3>
-            {wsStatus === 'connected' && market?.[symbol] && (
+            {wsStatus === 'connected' && !isCustomAsset && market?.[symbol] && (
               <span style={{ fontSize: 11, color: '#10b981', fontWeight: 600 }}>
-                ● WebSocket Activo: {livePrice.toFixed(isJpy ? 3 : 5)}
+                ● WebSocket Activo: {livePrice.toFixed(displayDecimals)}
+              </span>
+            )}
+            {(isManualPrice || isCustomAsset) && (
+              <span style={{ fontSize: 11, color: '#facc15', fontWeight: 600 }}>
+                ✏️ Entrada Manual: {entryN.toFixed(displayDecimals)}
               </span>
             )}
           </div>
@@ -358,9 +656,9 @@ export function HolguraCalculator() {
           <div style={{ position: 'relative', padding: '24px 0 10px' }}>
             {/* Etiquetas Superiores */}
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#9ca3af', marginBottom: 8, fontWeight: 600 }}>
-              <span style={{ color: '#f87171' }}>☠️ Liquidación ({activeLiqPrice.toFixed(isJpy ? 3 : 5)})</span>
+              <span style={{ color: '#f87171' }}>☠️ Liquidación ({activeLiqPrice.toFixed(displayDecimals)})</span>
               <span>Distancia en Pips: {liveDistancePips.toFixed(1)} pips</span>
-              <span style={{ color: '#34d399' }}>🟢 Entrada ({entryN.toFixed(isJpy ? 3 : 5)})</span>
+              <span style={{ color: '#34d399' }}>🟢 Entrada ({entryN.toFixed(displayDecimals)})</span>
             </div>
 
             {/* Barra Gráfica de Holgura */}
@@ -415,7 +713,7 @@ export function HolguraCalculator() {
                   whiteSpace: 'nowrap',
                   boxShadow: '0 4px 6px rgba(0,0,0,0.3)'
                 }}>
-                  Precio: {livePrice.toFixed(isJpy ? 3 : 5)}
+                  Precio: {livePrice.toFixed(displayDecimals)}
                 </div>
               </div>
             </div>
@@ -434,18 +732,18 @@ export function HolguraCalculator() {
           <h3 style={{ fontSize: 15, fontWeight: 800, color: '#fff', margin: '0 0 12px' }}>
             🎯 ¿Con cuánto apalancamiento entrar?
           </h3>
-          
+
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 20, alignItems: 'center' }}>
             <div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <label style={labelStyle}>Holgura Requerida en Pips (Drawdown Soportado)</label>
-                <input 
+                <input
                   type="number"
                   min="5"
                   max="500"
                   value={targetPips}
                   onChange={e => setTargetPips(e.target.value)}
-                  style={inputStyle} 
+                  style={inputStyle}
                 />
               </div>
               <span style={{ fontSize: 11, color: '#6b7280', display: 'block', marginTop: 6 }}>
@@ -524,12 +822,12 @@ export function HolguraCalculator() {
                   </thead>
                   <tbody>
                     {[
-                      { lev: 'x50',   pips: '~230 pips', risk: 'Muy Bajo ✅', color: '#10b981' },
-                      { lev: 'x100',  pips: '~115 pips', risk: 'Bajo ✅',     color: '#34d399' },
-                      { lev: 'x200',  pips: '~57 pips',  risk: 'Moderado ⚠️', color: '#fbbf24' },
-                      { lev: 'x300',  pips: '~38 pips',  risk: 'Alto ⚠️',     color: '#f97316' },
-                      { lev: 'x500',  pips: '~23 pips',  risk: 'Muy Alto ❌', color: '#f43f5e' },
-                      { lev: 'x1000', pips: '~11 pips',  risk: 'Extremo 💀',  color: '#dc2626' },
+                      { lev: 'x50', pips: '~230 pips', risk: 'Muy Bajo ✅', color: '#10b981' },
+                      { lev: 'x100', pips: '~115 pips', risk: 'Bajo ✅', color: '#34d399' },
+                      { lev: 'x200', pips: '~57 pips', risk: 'Moderado ⚠️', color: '#fbbf24' },
+                      { lev: 'x300', pips: '~38 pips', risk: 'Alto ⚠️', color: '#f97316' },
+                      { lev: 'x500', pips: '~23 pips', risk: 'Muy Alto ❌', color: '#f43f5e' },
+                      { lev: 'x1000', pips: '~11 pips', risk: 'Extremo 💀', color: '#dc2626' },
                     ].map(row => (
                       <tr key={row.lev} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
                         <td style={{ padding: '7px 12px', color: '#fff', fontWeight: 700 }}>{row.lev}</td>
