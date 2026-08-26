@@ -104,7 +104,7 @@ export function TradeTable({ trades, onClose, onUpdate, onDelete }: Props) {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
           <thead>
             <tr style={{ background: 'rgba(255,255,255,0.03)' }}>
-              {['#', 'Par', 'Cuenta', 'Fecha', 'Dir', 'Entrada', 'Salida', 'P&L', 'Lev', 'Sesión', 'M5', 'M15', 'Structure', 'Tipo C', '🚶 Semáforo', 'RSI', 'Tipo', 'Modo', 'Duración', 'Estado', 'Acc'].map(h => (
+              {['#', 'Par', 'Cuenta', 'Fecha', 'Dir', 'Entrada', '🎯 TP Ideal', 'Salida', 'P&L', 'Lev', 'Sesión', 'M5', 'M15', 'Structure', 'Tipo C', '🚶 Semáforo', 'RSI', 'Tipo', 'Modo', 'Duración', 'Estado', 'Acc'].map(h => (
                 <Th key={h}>{h}</Th>
               ))}
             </tr>
@@ -112,7 +112,7 @@ export function TradeTable({ trades, onClose, onUpdate, onDelete }: Props) {
           <tbody>
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={21} style={{ textAlign: 'center', padding: '32px 0', color: '#4b5563', fontSize: 12 }}>
+                <td colSpan={22} style={{ textAlign: 'center', padding: '32px 0', color: '#4b5563', fontSize: 12 }}>
                   Sin operaciones registradas
                 </td>
               </tr>
@@ -158,9 +158,9 @@ export function TradeTable({ trades, onClose, onUpdate, onDelete }: Props) {
                               setLightboxIndex(startIndex)
                             }}
                             style={{ cursor: 'pointer', fontSize: 11, filter: 'drop-shadow(0 0 2px rgba(167,139,250,0.5))' }}
-                            title={hasFav ? `Ver capturas (${urls.length}) - Principal: ⭐` : `Ver capturas (${urls.length})`}
+                            title={hasFav ? "Ver capturas destacadas" : "Ver capturas adjuntas"}
                           >
-                            {hasFav ? '📸⭐' : '📸'}
+                            📷
                           </span>
                         )
                       })()}
@@ -184,6 +184,22 @@ export function TradeTable({ trades, onClose, onUpdate, onDelete }: Props) {
                     </span>
                   </Td>
                   <Td mono>{t.entryPrice.toFixed(5)}</Td>
+                  <Td mono>
+                    {t.userTp != null ? (
+                      <span style={{
+                        color: t.closeReason === 'tp' ? '#10b981' : '#38bdf8',
+                        fontWeight: t.closeReason === 'tp' ? 800 : 500
+                      }}>
+                        {t.userTp.toFixed(5)} {t.closeReason === 'tp' && '🎯✓'}
+                      </span>
+                    ) : t.recommendedTp != null ? (
+                      <span style={{ color: '#6b7280' }} title="Sugerido por sistema">
+                        ⚡{t.recommendedTp.toFixed(5)}
+                      </span>
+                    ) : (
+                      <span style={{ color: '#4b5563' }}>—</span>
+                    )}
+                  </Td>
                   <Td mono>{t.exitPrice?.toFixed(5) ?? '—'}</Td>
                   <Td>
                     {t.pnl != null ? (

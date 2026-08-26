@@ -157,6 +157,12 @@ export class Trade {
   @Property({ type: 'decimal', precision: 12, scale: 5, nullable: true, fieldName: 'recommended_sl' })
   recommendedSl?: number;
 
+  @Property({ type: 'decimal', precision: 12, scale: 5, nullable: true, fieldName: 'user_tp' })
+  userTp?: number;
+
+  @Property({ type: 'decimal', precision: 12, scale: 5, nullable: true, fieldName: 'user_sl' })
+  userSl?: number;
+
   // ─── Notas libres ────────────────────────────────────────────────────────
   @Property({ type: 'text', nullable: true })
   notes?: string;

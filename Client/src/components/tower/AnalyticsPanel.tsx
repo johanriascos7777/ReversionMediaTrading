@@ -26,7 +26,7 @@ export function AnalyticsPanel({ analytics, analyticsMode, analyticsMinTrades, a
   }
 
   const {
-    summary, bySession, bySymbol, byStructure, byTradeType, losingPattern,
+    summary, takeProfitStats, bySession, bySymbol, byStructure, byTradeType, losingPattern,
     bestSetup, worstSetup, mediumSetup, setupCombinations, durationBrackets,
     byPedestrianLight
   } = analytics
@@ -197,6 +197,76 @@ export function AnalyticsPanel({ analytics, analyticsMode, analyticsMinTrades, a
           <KPI label="MAE promedio"  value={summary.avgMAE != null ? `$${summary.avgMAE}` : '—'} color="#f43f5e" />
           <KPI label="MFE promedio"  value={summary.avgMFE != null ? `$${summary.avgMFE}` : '—'} color="#10b981" />
           <KPI label="Duración prom" value={summary.avgDuration != null ? `${summary.avgDuration}m` : '—'} />
+          <KPI label="TP Hit Rate"   value={summary.tpHitRate != null ? `${summary.tpHitRate}%` : '—'}
+            color={(summary.tpHitRate ?? 0) >= 50 ? '#10b981' : '#f43f5e'} />
+        </div>
+      </div>
+
+      {/* 🎯 Métricas de Take Profit & Stop Loss Ideal */}
+      <div style={{
+        padding: '20px', borderRadius: 16,
+        background: 'linear-gradient(135deg, rgba(56,189,248,0.03) 0%, rgba(124,58,237,0.03) 100%)',
+        border: '1px solid rgba(56,189,248,0.15)',
+        display: 'flex', flexDirection: 'column', gap: 14
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: '#38bdf8', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span>🎯</span> Métricas de Take Profit & Stop Loss Ideal (IQ Option)
+            </div>
+            <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>
+              Efectividad de los objetivos de salida fijados por el trader vs comportamiento del mercado.
+            </div>
+          </div>
+          {takeProfitStats && (
+            <span style={{
+              fontSize: 11, color: '#38bdf8', background: 'rgba(56,189,248,0.1)',
+              padding: '4px 10px', borderRadius: 8, fontWeight: 700, border: '1px solid rgba(56,189,248,0.2)'
+            }}>
+              {takeProfitStats.totalWithUserTp} trades con TP · {takeProfitStats.closedByTp} tocados con éxito
+            </span>
+          )}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
+          <KPI
+            label="TP Hit Rate"
+            value={takeProfitStats ? `${takeProfitStats.tpHitRate}%` : (summary.tpHitRate != null ? `${summary.tpHitRate}%` : '0%')}
+            color={(takeProfitStats?.tpHitRate ?? summary.tpHitRate ?? 0) >= 50 ? '#10b981' : '#f43f5e'}
+            sublabel={`${takeProfitStats?.closedByTp ?? 0} de ${summary.totalTrades} cerradas`}
+          />
+          <KPI
+            label="SL Hit Rate"
+            value={takeProfitStats ? `${takeProfitStats.slHitRate}%` : (summary.slHitRate != null ? `${summary.slHitRate}%` : '0%')}
+            color={(takeProfitStats?.slHitRate ?? summary.slHitRate ?? 0) <= 25 ? '#10b981' : '#f43f5e'}
+            sublabel={`${takeProfitStats?.closedBySl ?? 0} de ${summary.totalTrades} cerradas`}
+          />
+          <KPI
+            label="Distancia Prom TP"
+            value={takeProfitStats?.avgTpPips != null ? `${takeProfitStats.avgTpPips} pips` : (summary.avgTpPips != null ? `${summary.avgTpPips} pips` : '—')}
+            color="#38bdf8"
+            sublabel="Target promedio"
+          />
+          <KPI
+            label="Distancia Prom SL"
+            value={takeProfitStats?.avgSlPips != null ? `${takeProfitStats.avgSlPips} pips` : (summary.avgSlPips != null ? `${summary.avgSlPips} pips` : '—')}
+            color="#fb7185"
+            sublabel="Riesgo promedio"
+          />
+          <KPI
+            label="P&L por TP Directo"
+            value={takeProfitStats ? `${takeProfitStats.tpPnlTotal >= 0 ? '+' : ''}$${takeProfitStats.tpPnlTotal.toFixed(2)}` : '$0.00'}
+            color="#10b981"
+            sublabel="Ganancia acumulada por TP"
+          />
+          {takeProfitStats?.tpVsSystemDiffPips != null && (
+            <KPI
+              label="Trader vs Sistema"
+              value={`${takeProfitStats.tpVsSystemDiffPips >= 0 ? '+' : ''}${takeProfitStats.tpVsSystemDiffPips} pips`}
+              color={takeProfitStats.tpVsSystemDiffPips >= 0 ? '#38bdf8' : '#a78bfa'}
+              sublabel={takeProfitStats.tpVsSystemDiffPips >= 0 ? 'Más ambicioso que sistema' : 'Más conservador que sistema'}
+            />
+          )}
         </div>
       </div>
 
@@ -686,15 +756,20 @@ function SetupCard({
   )
 }
 
-function KPI({ label, value, color = '#fff' }: { label: string; value: string; color?: string }) {
+function KPI({ label, value, color = '#fff', sublabel }: { label: string; value: string; color?: string; sublabel?: string }) {
   return (
     <div style={{
       padding: '14px 16px', borderRadius: 12,
       background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)',
-      textAlign: 'center',
+      textAlign: 'center', display: 'flex', flexDirection: 'column', justifyContent: 'center'
     }}>
-      <div style={{ fontSize: 10, color: '#6b7280', textTransform: 'uppercase', marginBottom: 6 }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 800, color, fontFamily: 'monospace' }}>{value}</div>
+      <div style={{ fontSize: 10, color: '#6b7280', textTransform: 'uppercase', marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 800, color, fontFamily: 'monospace' }}>{value}</div>
+      {sublabel && (
+        <div style={{ fontSize: 9, color: '#9ca3af', marginTop: 4, lineHeight: 1.2 }}>
+          {sublabel}
+        </div>
+      )}
     </div>
   )
 }

@@ -88,8 +88,48 @@ export function CloseTradeModal({ trade, onClose, onSubmit }: Props) {
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 18 }}>✕</button>
         </div>
 
-        <div style={{ fontSize: 11, color: '#6b7280', fontFamily: 'monospace' }}>
-          Entrada: {trade.entryPrice.toFixed(5)} · x{trade.leverage} · ${trade.investmentAmount}
+        <div style={{ fontSize: 11, color: '#6b7280', fontFamily: 'monospace', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+          <span>Entrada: <strong style={{ color: '#fff' }}>{trade.entryPrice.toFixed(5)}</strong> · x{trade.leverage} · ${trade.investmentAmount}</span>
+          {(trade.userTp || trade.recommendedTp) && (
+            <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+              {trade.userTp && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExitPrice(String(trade.userTp))
+                    setOutcome('win')
+                    setCloseReason('tp')
+                  }}
+                  style={{
+                    padding: '2px 8px', borderRadius: 6, fontSize: 10, fontWeight: 700,
+                    background: 'rgba(16,185,129,0.15)', color: '#34d399', border: '1px solid rgba(16,185,129,0.3)',
+                    cursor: 'pointer'
+                  }}
+                  title="Cerrar con Take Profit Ideal"
+                >
+                  🎯 TP: {trade.userTp}
+                </button>
+              )}
+              {trade.userSl && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExitPrice(String(trade.userSl))
+                    setOutcome('loss')
+                    setCloseReason('sl')
+                  }}
+                  style={{
+                    padding: '2px 8px', borderRadius: 6, fontSize: 10, fontWeight: 700,
+                    background: 'rgba(244,63,94,0.15)', color: '#fb7185', border: '1px solid rgba(244,63,94,0.3)',
+                    cursor: 'pointer'
+                  }}
+                  title="Cerrar con Stop Loss"
+                >
+                  🛑 SL: {trade.userSl}
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Precio de salida */}

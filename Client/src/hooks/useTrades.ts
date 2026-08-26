@@ -60,6 +60,8 @@ export interface Trade {
   contextualCases?: number
   recommendedTp?: number
   recommendedSl?: number
+  userTp?: number
+  userSl?: number
   // Tiempos
   openedAt: string
   closedAt?: string
@@ -114,6 +116,8 @@ export interface CreateTradePayload {
   contextualCases?: number
   recommendedTp?: number
   recommendedSl?: number
+  userTp?: number
+  userSl?: number
   // Fecha/hora de apertura personalizada (ISO string); si no viene, el server usa now
   openedAt?: string
   notes?: string
@@ -144,6 +148,24 @@ export interface AnalyticsSummary {
   avgMAE: number | null
   avgMFE: number | null
   avgDuration: number | null
+  tpHitRate?: number
+  slHitRate?: number
+  avgTpPips?: number | null
+  avgSlPips?: number | null
+}
+
+export interface TakeProfitStats {
+  totalWithUserTp: number
+  totalWithUserSl: number
+  closedByTp: number
+  closedBySl: number
+  tpHitRate: number
+  slHitRate: number
+  avgTpPips: number | null
+  avgSlPips: number | null
+  tpPnlTotal: number
+  slPnlTotal: number
+  tpVsSystemDiffPips: number | null
 }
 
 export interface GroupStat {
@@ -180,6 +202,7 @@ export interface DurationBracketStat {
 
 export interface Analytics {
   summary: AnalyticsSummary
+  takeProfitStats?: TakeProfitStats
   bySession: GroupStat[]
   bySymbol: GroupStat[]
   byStructure: GroupStat[]

@@ -93,6 +93,8 @@ export class TradeService {
     // Recomendaciones matemáticas de TP y SL
     if (dto.recommendedTp != null) trade.recommendedTp = dto.recommendedTp;
     if (dto.recommendedSl != null) trade.recommendedSl = dto.recommendedSl;
+    if (dto.userTp != null) trade.userTp = dto.userTp;
+    if (dto.userSl != null) trade.userSl = dto.userSl;
 
     // Si no vienen calculados del frontend, se calculan matemáticamente usando la volatilidad (ATR) y soporte/resistencia
     if (trade.recommendedTp == null || trade.recommendedSl == null) {
@@ -183,6 +185,8 @@ export class TradeService {
 
     if (dto.recommendedTp !== undefined) trade.recommendedTp = dto.recommendedTp;
     if (dto.recommendedSl !== undefined) trade.recommendedSl = dto.recommendedSl;
+    if (dto.userTp !== undefined) trade.userTp = dto.userTp;
+    if (dto.userSl !== undefined) trade.userSl = dto.userSl;
 
     if (dto.mae !== undefined) trade.mae = dto.mae;
     if (dto.mfe !== undefined) trade.mfe = dto.mfe;
@@ -351,6 +355,23 @@ export class TradeService {
           avgMAE: null,
           avgMFE: null,
           avgDuration: null,
+          tpHitRate: 0,
+          slHitRate: 0,
+          avgTpPips: null,
+          avgSlPips: null,
+        },
+        takeProfitStats: {
+          totalWithUserTp: 0,
+          totalWithUserSl: 0,
+          closedByTp: 0,
+          closedBySl: 0,
+          tpHitRate: 0,
+          slHitRate: 0,
+          avgTpPips: null,
+          avgSlPips: null,
+          tpPnlTotal: 0,
+          slPnlTotal: 0,
+          tpVsSystemDiffPips: null,
         },
         bySession: [],
         bySymbol: [],
@@ -363,6 +384,7 @@ export class TradeService {
         mediumSetup: null,
         setupCombinations: [],
         durationBrackets: [],
+        byPedestrianLight: { walk: null, stop: null },
       };
     }
 
@@ -373,6 +395,50 @@ export class TradeService {
     const avgMAE = avg(closed.map(t => t.mae).filter(v => v != null) as number[]);
     const avgMFE = avg(closed.map(t => t.mfe).filter(v => v != null) as number[]);
     const avgDur = avg(closed.map(t => t.totalMinutesOpen).filter(v => v != null) as number[]);
+
+    // ─── Estadísticas de Take Profit y Stop Loss ───────────────────────────
+    const tradesWithUserTp = closed.filter(t => t.userTp != null && Number(t.userTp) > 0);
+    const tradesWithUserSl = closed.filter(t => t.userSl != null && Number(t.userSl) > 0);
+    const tradesClosedByTp = closed.filter(t => t.closeReason === 'tp');
+    const tradesClosedBySl = closed.filter(t => t.closeReason === 'sl');
+
+    const tpHitRate = closed.length > 0
+      ? Math.round((tradesClosedByTp.length / closed.length) * 1000) / 10
+      : 0;
+
+    const slHitRate = closed.length > 0
+      ? Math.round((tradesClosedBySl.length / closed.length) * 1000) / 10
+      : 0;
+
+    const avgTpPips = tradesWithUserTp.length > 0
+      ? avg(tradesWithUserTp.map(t => Math.abs(Number(t.userTp) - Number(t.entryPrice)) / getPipSize(t.symbol)))
+      : null;
+
+    const avgSlPips = tradesWithUserSl.length > 0
+      ? avg(tradesWithUserSl.map(t => Math.abs(Number(t.entryPrice) - Number(t.userSl)) / getPipSize(t.symbol)))
+      : null;
+
+    const tpVsSystemDiffPips = tradesWithUserTp.filter(t => t.recommendedTp != null).length > 0
+      ? avg(
+          tradesWithUserTp
+            .filter(t => t.recommendedTp != null)
+            .map(t => (Math.abs(Number(t.userTp) - Number(t.entryPrice)) - Math.abs(Number(t.recommendedTp) - Number(t.entryPrice))) / getPipSize(t.symbol))
+        )
+      : null;
+
+    const takeProfitStats = {
+      totalWithUserTp: tradesWithUserTp.length,
+      totalWithUserSl: tradesWithUserSl.length,
+      closedByTp: tradesClosedByTp.length,
+      closedBySl: tradesClosedBySl.length,
+      tpHitRate,
+      slHitRate,
+      avgTpPips: avgTpPips != null ? Math.round(avgTpPips * 10) / 10 : null,
+      avgSlPips: avgSlPips != null ? Math.round(avgSlPips * 10) / 10 : null,
+      tpPnlTotal: Math.round(tradesClosedByTp.reduce((s, t) => s + (t.pnl ?? 0), 0) * 100) / 100,
+      slPnlTotal: Math.round(tradesClosedBySl.reduce((s, t) => s + (t.pnl ?? 0), 0) * 100) / 100,
+      tpVsSystemDiffPips: tpVsSystemDiffPips != null ? Math.round(tpVsSystemDiffPips * 10) / 10 : null,
+    };
 
     // Últimas 3 cerradas — alerta si todas son pérdidas
     const last3 = closed.slice(0, 3);
@@ -442,7 +508,12 @@ export class TradeService {
         avgMAE: avgMAE != null ? Math.round(avgMAE * 1000) / 1000 : null,
         avgMFE: avgMFE != null ? Math.round(avgMFE * 1000) / 1000 : null,
         avgDuration: avgDur != null ? Math.round(avgDur) : null,
+        tpHitRate,
+        slHitRate,
+        avgTpPips: avgTpPips != null ? Math.round(avgTpPips * 10) / 10 : null,
+        avgSlPips: avgSlPips != null ? Math.round(avgSlPips * 10) / 10 : null,
       },
+      takeProfitStats,
       bySession: groupStats(closed, t => t.session),
       bySymbol: groupStats(closed, t => t.symbol),
       byStructure: groupStats(closed.filter(t => !!t.structureState), t => t.structureState!),
@@ -642,4 +713,11 @@ function groupStats(trades: Trade[], key: (t: Trade) => string) {
       };
     })
     .sort((a, b) => b.total - a.total);
+}
+
+function getPipSize(symbol: string): number {
+  const s = symbol.toUpperCase();
+  if (s.includes('JPY') || s.includes('XAU')) return 0.01;
+  if (s.includes('BTC') || s.includes('ETH')) return 1.0;
+  return 0.0001;
 }

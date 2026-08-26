@@ -1341,27 +1341,27 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    // 🟡 Caso 2: Alerta Tipo B (Señal en Tiempo Real)
-    const isNewFinalGreen = state.previousFinalState !== 'GREEN' && finalState === 'GREEN';
-    const canAlertB = now - state.lastTelegramAlertTimeB > 300000; // 5 min cooldown
+    // 🟡 Caso 2: Alerta Tipo B (Señal en Tiempo Real) — DESACTIVADA: no enviar a Telegram
+    // const isNewFinalGreen = state.previousFinalState !== 'GREEN' && finalState === 'GREEN';
+    // const canAlertB = now - state.lastTelegramAlertTimeB > 300000; // 5 min cooldown
 
-    if (isNewFinalGreen && fused.state !== 'GREEN' && canAlertB) {
-      state.lastTelegramAlertTimeB = now;
-      await this.createPendingSignalAndSendTelegram(
-        state,
-        'Tipo B',
-        direction,
-        'normal',
-        m5.price,
-        fused.state,
-        m5.state,
-        m15.state,
-        m5.elasticity,
-        m15.elasticity,
-        comparison,
-        'Sobre-estirado en M5/M15 (finalState: GREEN) pero sin confluencia de backtest.'
-      );
-    }
+    // if (isNewFinalGreen && fused.state !== 'GREEN' && canAlertB) {
+    //   state.lastTelegramAlertTimeB = now;
+    //   await this.createPendingSignalAndSendTelegram(
+    //     state,
+    //     'Tipo B',
+    //     direction,
+    //     'normal',
+    //     m5.price,
+    //     fused.state,
+    //     m5.state,
+    //     m15.state,
+    //     m5.elasticity,
+    //     m15.elasticity,
+    //     comparison,
+    //     'Sobre-estirado en M5/M15 (finalState: GREEN) pero sin confluencia de backtest.'
+    //   );
+    // }
 
     // 🪃 Caso 3: Alerta Tipo C (Gatillo de Agotamiento / Giro de Elasticidad)
     const isNewGiro = state.triggerStateM5 === 'giro' && state.previousTriggerStateM5 !== 'giro';
@@ -1435,27 +1435,27 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    // 2️⃣ Alerta Experimental Tipo B
-    const isNewFinalGreen = state.previousFinalStateExp !== 'GREEN' && finalState === 'GREEN';
-    const canAlertB = now - state.lastTelegramAlertTimeBExp > 300000;
+    // 2️⃣ Alerta Experimental Tipo B — DESACTIVADA: no enviar a Telegram
+    // const isNewFinalGreen = state.previousFinalStateExp !== 'GREEN' && finalState === 'GREEN';
+    // const canAlertB = now - state.lastTelegramAlertTimeBExp > 300000;
 
-    if (isNewFinalGreen && fused.state !== 'GREEN' && canAlertB) {
-      state.lastTelegramAlertTimeBExp = now;
-      await this.createPendingSignalAndSendTelegram(
-        state,
-        'Tipo B',
-        direction,
-        'experimental',
-        m5.price,
-        fused.state,
-        m5.state,
-        m15.state,
-        m5.elasticity,
-        m15.elasticity,
-        comparison,
-        'Sobre-estirado en M5/M15 pero sin ventaja estadística en backtest.'
-      );
-    }
+    // if (isNewFinalGreen && fused.state !== 'GREEN' && canAlertB) {
+    //   state.lastTelegramAlertTimeBExp = now;
+    //   await this.createPendingSignalAndSendTelegram(
+    //     state,
+    //     'Tipo B',
+    //     direction,
+    //     'experimental',
+    //     m5.price,
+    //     fused.state,
+    //     m5.state,
+    //     m15.state,
+    //     m5.elasticity,
+    //     m15.elasticity,
+    //     comparison,
+    //     'Sobre-estirado en M5/M15 pero sin ventaja estadística en backtest.'
+    //   );
+    // }
 
     // 3️⃣ Alerta Experimental Tipo C
     const isNewGiro = state.triggerStateM5Exp === 'giro' && state.previousTriggerStateM5Exp !== 'giro';
