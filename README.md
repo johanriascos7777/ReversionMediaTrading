@@ -1,5 +1,53 @@
 # 📡 Market Streaming Engine
 
+# LO ULTIMO
+
+1. FVG (Fair Value Gaps / Imbalances)
+   → Tu S/R detecta swing points, pero NO detecta los gaps de liquidez
+     que Smart Money usa. Es diferente.
+
+2. Eventos macro (noticias)
+   → Ningún módulo consulta calendario económico.
+     Una reversión perfecta puede fallar si hay NFP en 10 minutos.
+
+3. Order Blocks
+   → Detectas swing highs/lows pero no la última vela bajista antes
+     de un impulso alcista (origin candle / OB de ICT).
+
+4. Sesión de liquidez (Asia kill zone, London open, NY open)
+   → Tienes `detectSession()` pero solo clasifica la sesión actual,
+     no aprovecha las zonas de barrido de liquidez de cada apertura.
+
+
+Lo que te voy a comprobar en cada aviso
+Capa de validación	Qué mira tu sistema	Qué aporto yo
+Dirección de tendencia	Pendiente EMA200 (up/down/flat)	Estructura más amplia: 1H/4H/D1, soportes/resistencias mayores
+Contexto estructural	—	¿Está la reversión en un order block / FVG / zona de liquidez real?
+Riesgo macro	—	¿Viene un evento de alto impacto (FOMC, CPI, NFP) que invalide la reversión?
+Timing	Trigger giro	¿Es reversión a favor o contra la tendencia dominante? ¿R:R real en ese nivel?
+Confirmación	Backtest win rate ≥ 65%	Lectura independiente de TradingView (RSI, divergencias, volumen)
+Mi veredicto será ENTRAR / NO ENTRAR / ESPERAR, con el razonamiento concreto detrás.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # tip
 
 El Disparador por Agotamiento: Esperar a que la resortera empiece a ceder 🪃
