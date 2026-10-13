@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, OnModuleInit, OnModuleDestroy, Inject, forwardRef } from '@nestjs/common';
 import { EventEmitter } from 'events';
 import https from 'https';
 import http from 'http';
@@ -15,6 +15,7 @@ import { EntityManager } from '@mikro-orm/mysql';
 import { PendingSignal } from '../trade/pending-signal.entity';
 import { detectSession } from '../trade/trade.service';
 import { RequestContext } from '@mikro-orm/core';
+import { ConsolidationService } from '../consolidation/consolidation.service';
 
 // --- Imports de Versión Experimental ---
 import { calculateSnapshotExp, resolveMultiTFExp, calculateElasticityForCandlesExp, pushPercentileHistoryExp, clearPercentileHistoryExp } from './marketEngineExp';
@@ -78,8 +79,18 @@ export class SymbolState {
   public lastTelegramAlertTimeTriggerExp = 0;
   public lastTelegramAlertTimePedestrian = 0;
 
+  // Cooldowns para alertas Shield-Verified (con Pullback Shield aprobado)
+  public lastTelegramAlertTimeAShield = 0;
+  public lastTelegramAlertTimeCShield = 0;
+  public lastTelegramAlertTimePedestrianShield = 0;
+
   public pedestrianLight: 'STOP' | 'WALK' = 'STOP';
   public previousPedestrianLight: 'STOP' | 'WALK' = 'STOP';
+
+  // Estado del escudo (para alertas Shield-Verified y frontend)
+  public shieldBlocked = false;
+  public isCompression = false;
+  public shieldExplanation = '✅ Escudo despejado.';
 
   // Tracking de historial individual
   public historyLoaded = false;
@@ -190,7 +201,11 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
   private readonly DELAY_HISTORY_SIZE = 50;
   private metricsInterval: NodeJS.Timeout | null = null;
 
-  constructor(private readonly em: EntityManager) {
+  constructor(
+    private readonly em: EntityManager,
+    @Inject(forwardRef(() => ConsolidationService))
+    private readonly consolidationService: ConsolidationService
+  ) {
     this.symbolList = this.symbol.split(',').map((s) => s.trim());
     this.apiKeyList = this.apiKey.split(',').map((k) => k.trim());
 
@@ -1205,7 +1220,31 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       const checkAnomaly = finalStateExp === 'GREEN' || finalStateExp === 'YELLOW';
       const checkBacktest = fusedStateResultExp.state === 'GREEN' || (comparisonExp && comparisonExp.winRate >= 65);
       const checkTrigger = state.triggerStateM5Exp === 'giro';
+      
+      // -- Integración de Pullback Shield --
+      const shieldSnap = this.consolidationService.getConsolidationSnapshot(symbol);
+      const isOpposedM5 = shieldSnap?.m5.detected && shieldSnap?.m5.alignment === 'opposed';
+      const isOpposedM15 = shieldSnap?.m15.detected && shieldSnap?.m15.alignment === 'opposed';
+      const shieldBlocked = isOpposedM5 || isOpposedM15 || shieldSnap?.superSignal.type === 'SUPER_STOP';
+
+      // -- Integración de Structure Engine (Sándwich de EMAs) --
+      const structureSnap = state.lastStructureM5;
+      const isCompression = structureSnap?.isCompressionSandwich === true;
+      const isDoublePattern = structureSnap?.doublePattern === 'double_top' || structureSnap?.doublePattern === 'double_bottom';
+      
+      // Ya NO bloqueamos fusedStateResultExp ni pedestrianLight por el escudo.
+      // Las alertas experimentales ahora fluyen libremente.
+      // Las nuevas alertas "Shield-Verified" se encargan de filtrar por el escudo.
       state.pedestrianLight = checkAnomaly && checkBacktest && checkTrigger ? 'WALK' : 'STOP';
+
+      // Guardar estado del escudo para las alertas Shield-Verified y el frontend
+      state.shieldBlocked = !!(shieldBlocked);
+      state.isCompression = !!(isCompression);
+      state.shieldExplanation = isCompression
+        ? '🚫 Sándwich de EMAs (EMA50 y EMA100 demasiado cerca).'
+        : shieldBlocked
+          ? (shieldSnap?.superSignal.recommendation || 'Consolidación en contra de la reversión.')
+          : '✅ Escudo despejado.';
     }
 
     // Broadcast a través de eventos (Tradicional + Experimental)
@@ -1302,27 +1341,27 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    // 🟡 Caso 2: Alerta Tipo B (Señal en Tiempo Real)
-    const isNewFinalGreen = state.previousFinalState !== 'GREEN' && finalState === 'GREEN';
-    const canAlertB = now - state.lastTelegramAlertTimeB > 300000; // 5 min cooldown
+    // 🟡 Caso 2: Alerta Tipo B (Señal en Tiempo Real) — DESACTIVADA: no enviar a Telegram
+    // const isNewFinalGreen = state.previousFinalState !== 'GREEN' && finalState === 'GREEN';
+    // const canAlertB = now - state.lastTelegramAlertTimeB > 300000; // 5 min cooldown
 
-    if (isNewFinalGreen && fused.state !== 'GREEN' && canAlertB) {
-      state.lastTelegramAlertTimeB = now;
-      await this.createPendingSignalAndSendTelegram(
-        state,
-        'Tipo B',
-        direction,
-        'normal',
-        m5.price,
-        fused.state,
-        m5.state,
-        m15.state,
-        m5.elasticity,
-        m15.elasticity,
-        comparison,
-        'Sobre-estirado en M5/M15 (finalState: GREEN) pero sin confluencia de backtest.'
-      );
-    }
+    // if (isNewFinalGreen && fused.state !== 'GREEN' && canAlertB) {
+    //   state.lastTelegramAlertTimeB = now;
+    //   await this.createPendingSignalAndSendTelegram(
+    //     state,
+    //     'Tipo B',
+    //     direction,
+    //     'normal',
+    //     m5.price,
+    //     fused.state,
+    //     m5.state,
+    //     m15.state,
+    //     m5.elasticity,
+    //     m15.elasticity,
+    //     comparison,
+    //     'Sobre-estirado en M5/M15 (finalState: GREEN) pero sin confluencia de backtest.'
+    //   );
+    // }
 
     // 🪃 Caso 3: Alerta Tipo C (Gatillo de Agotamiento / Giro de Elasticidad)
     const isNewGiro = state.triggerStateM5 === 'giro' && state.previousTriggerStateM5 !== 'giro';
@@ -1396,27 +1435,27 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    // 2️⃣ Alerta Experimental Tipo B
-    const isNewFinalGreen = state.previousFinalStateExp !== 'GREEN' && finalState === 'GREEN';
-    const canAlertB = now - state.lastTelegramAlertTimeBExp > 300000;
+    // 2️⃣ Alerta Experimental Tipo B — DESACTIVADA: no enviar a Telegram
+    // const isNewFinalGreen = state.previousFinalStateExp !== 'GREEN' && finalState === 'GREEN';
+    // const canAlertB = now - state.lastTelegramAlertTimeBExp > 300000;
 
-    if (isNewFinalGreen && fused.state !== 'GREEN' && canAlertB) {
-      state.lastTelegramAlertTimeBExp = now;
-      await this.createPendingSignalAndSendTelegram(
-        state,
-        'Tipo B',
-        direction,
-        'experimental',
-        m5.price,
-        fused.state,
-        m5.state,
-        m15.state,
-        m5.elasticity,
-        m15.elasticity,
-        comparison,
-        'Sobre-estirado en M5/M15 pero sin ventaja estadística en backtest.'
-      );
-    }
+    // if (isNewFinalGreen && fused.state !== 'GREEN' && canAlertB) {
+    //   state.lastTelegramAlertTimeBExp = now;
+    //   await this.createPendingSignalAndSendTelegram(
+    //     state,
+    //     'Tipo B',
+    //     direction,
+    //     'experimental',
+    //     m5.price,
+    //     fused.state,
+    //     m5.state,
+    //     m15.state,
+    //     m5.elasticity,
+    //     m15.elasticity,
+    //     comparison,
+    //     'Sobre-estirado en M5/M15 pero sin ventaja estadística en backtest.'
+    //   );
+    // }
 
     // 3️⃣ Alerta Experimental Tipo C
     const isNewGiro = state.triggerStateM5Exp === 'giro' && state.previousTriggerStateM5Exp !== 'giro';
@@ -1460,6 +1499,77 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
         comparison,
         '¡CAMINAR (WALK)! Todas las confluencias experimentales (Anomalía + Backtest + Giro) están alineadas.'
       );
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 🛡️ ALERTAS SHIELD-VERIFIED (solo disparan si el Pullback Shield aprueba)
+    // ═══════════════════════════════════════════════════════════════════════
+    const shieldClear = !state.shieldBlocked && !state.isCompression;
+
+    // 5️⃣ Alerta Shield-Verified Tipo A
+    if (isNewFusedGreen && shieldClear) {
+      const canAlertAShield = now - state.lastTelegramAlertTimeAShield > 300000;
+      if (canAlertAShield) {
+        state.lastTelegramAlertTimeAShield = now;
+        await this.createPendingSignalAndSendTelegram(
+          state,
+          '🛡️ Tipo A · Shield ✓',
+          direction,
+          'experimental',
+          m5.price,
+          fused.state,
+          m5.state,
+          m15.state,
+          m5.elasticity,
+          m15.elasticity,
+          comparison,
+          '🛡️✅ SHIELD VERIFIED — Señal confirmada Y escudo despejado. Sin pullbacks ni compresión detectados. Máxima convicción.'
+        );
+      }
+    }
+
+    // 6️⃣ Alerta Shield-Verified Tipo C (Giro)
+    if (isNewGiro && shieldClear) {
+      const canAlertCShield = now - state.lastTelegramAlertTimeCShield > 290000;
+      if (canAlertCShield) {
+        state.lastTelegramAlertTimeCShield = now;
+        await this.createPendingSignalAndSendTelegram(
+          state,
+          '🛡️ Tipo C · Shield ✓',
+          direction,
+          'experimental',
+          m5.price,
+          fused.state,
+          m5.state,
+          m15.state,
+          m5.elasticity,
+          m15.elasticity,
+          comparison,
+          '🛡️✅ SHIELD VERIFIED — Giro de elasticidad confirmado Y escudo despejado. Sin consolidación geométrica en contra.'
+        );
+      }
+    }
+
+    // 7️⃣ Alerta Shield-Verified Semáforo Peatón
+    if (isNewWalk && shieldClear) {
+      const canAlertPedestrianShield = now - state.lastTelegramAlertTimePedestrianShield > 300000;
+      if (canAlertPedestrianShield) {
+        state.lastTelegramAlertTimePedestrianShield = now;
+        await this.createPendingSignalAndSendTelegram(
+          state,
+          '🛡️ Semáforo Peatón · Shield ✓',
+          direction,
+          'experimental',
+          m5.price,
+          fused.state,
+          m5.state,
+          m15.state,
+          m5.elasticity,
+          m15.elasticity,
+          comparison,
+          '🛡️✅ SHIELD VERIFIED — ¡WALK! Todas las confluencias alineadas + Escudo despejado. Máxima convicción para operar.'
+        );
+      }
     }
 
     state.previousFusedStateExp = fused.state;

@@ -12,11 +12,12 @@
 import { Module } from '@nestjs/common';
 import { MarketModule } from '../market/market.module';
 import { StructureModule } from '../structure/structure.module';
+import { ConsolidationModule } from '../consolidation/consolidation.module';
 import { FullRevertionService } from './fullRevertion.service';
 import { FullRevertionController } from './fullRevertion.controller';
 
 @Module({
-  imports:     [MarketModule, StructureModule],
+  imports:     [MarketModule, StructureModule, ConsolidationModule],
   providers:   [FullRevertionService],
   controllers: [FullRevertionController],
 })

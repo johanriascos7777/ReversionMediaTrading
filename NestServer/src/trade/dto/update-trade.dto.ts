@@ -47,6 +47,10 @@ export class UpdateTradeDto {
   recommendedTp?: number;
   recommendedSl?: number;
 
+  // TP y SL configurados/ideales por el usuario
+  userTp?: number;
+  userSl?: number;
+
   // Resultados
   mae?: number;
   mfe?: number;

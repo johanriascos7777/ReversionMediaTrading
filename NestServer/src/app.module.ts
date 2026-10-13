@@ -5,6 +5,8 @@ import { StructureModule } from './structure/structure.module';
 import { TradeModule } from './trade/trade.module';
 import { ScreenshotsModule } from './screenshots/screenshots.module';
 import { FullRevertionModule } from './full-revertion/fullRevertion.module';
+import { HistoricalModule } from './historical/historical.module';
+import { ConsolidationModule } from './consolidation/consolidation.module';
 import config from './mikro-orm.config';
 
 @Module({
@@ -15,6 +17,8 @@ import config from './mikro-orm.config';
     TradeModule,
     ScreenshotsModule,
     FullRevertionModule,
+    HistoricalModule,
+    ConsolidationModule,
   ],
 })
 export class AppModule {}

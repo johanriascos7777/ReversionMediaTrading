@@ -8,12 +8,19 @@ import { Server, WebSocket } from 'ws';
 import { MarketService } from './market.service';
 import type { BackendMessage } from './types';
 
+import { Inject, forwardRef, OnModuleInit } from '@nestjs/common';
+
 @WebSocketGateway()
-export class MarketGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class MarketGateway implements OnGatewayConnection, OnGatewayDisconnect, OnModuleInit {
   @WebSocketServer()
   private readonly server: Server;
 
-  constructor(private readonly marketService: MarketService) {
+  constructor(
+    @Inject(forwardRef(() => MarketService))
+    private readonly marketService: MarketService
+  ) {}
+
+  onModuleInit() {
     // Escuchar eventos de broadcast desde el servicio de mercado y transmitirlos
     this.marketService.events.on('broadcast', (message: BackendMessage) => {
       this.broadcast(message);

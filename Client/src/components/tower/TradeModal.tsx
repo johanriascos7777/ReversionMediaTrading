@@ -66,6 +66,9 @@ export function TradeModal({ onClose, onSubmit, autoCapture }: TradeModalProps) 
   const [submitting, setSubmitting] = useState(false)
   const [isImportant, setIsImportant] = useState(false)
 
+  const [userTp, setUserTp] = useState(autoCapture?.recommendedTp != null ? String(autoCapture.recommendedTp) : '')
+  const [userSl, setUserSl] = useState(autoCapture?.recommendedSl != null ? String(autoCapture.recommendedSl) : '')
+
   // Señales de entrada editables
   const [elasticityM5State, setElasticityM5State] = useState<string>(autoCapture?.elasticityM5State ?? '')
   const [elasticityM15State, setElasticityM15State] = useState<string>(autoCapture?.elasticityM15State ?? '')
@@ -114,6 +117,9 @@ export function TradeModal({ onClose, onSubmit, autoCapture }: TradeModalProps) 
       hasPedestrianLight: tradeMode === 'experimental' ? hasPedestrianLight : null,
       // Fecha de apertura personalizada (convertida a ISO UTC)
       openedAt: new Date(openedAt).toISOString(),
+      // TP y SL configurados
+      userTp: userTp ? parseFloat(userTp) : undefined,
+      userSl: userSl ? parseFloat(userSl) : undefined,
       // Señales auto-capturadas y editables (casts a tipos del DTO)
       elasticityM5State: (elasticityM5State || undefined) as any,
 
@@ -322,6 +328,135 @@ export function TradeModal({ onClose, onSubmit, autoCapture }: TradeModalProps) 
               placeholder="0.00013" style={inputStyle} />
           </Field>
         </div>
+
+        {/* 🎯 Take Profit & Stop Loss Ideal (IQ Option / Broker) */}
+        {(() => {
+          const userTpN = parseFloat(userTp) || 0
+          const userSlN = parseFloat(userSl) || 0
+          const isJpy = symbol.includes('JPY')
+          const pipMultiplier = isJpy ? 100 : (symbol.includes('BTC') || symbol.includes('ETH') ? 1 : 10000)
+
+          const tpPips = (userTpN > 0 && entryN > 0)
+            ? (direction === 'BUY' ? userTpN - entryN : entryN - userTpN) * pipMultiplier
+            : null
+
+          const slPips = (userSlN > 0 && entryN > 0)
+            ? (direction === 'BUY' ? entryN - userSlN : userSlN - entryN) * pipMultiplier
+            : null
+
+          const investmentVal = parseFloat(investment) || 0
+          const tpPnl = (tpPips !== null && entryN > 0)
+            ? ((Math.abs(userTpN - entryN) / entryN) * leverageN * investmentVal)
+            : null
+
+          const slLoss = (slPips !== null && entryN > 0)
+            ? ((Math.abs(entryN - userSlN) / entryN) * leverageN * investmentVal)
+            : null
+
+          const rr = (tpPips !== null && slPips !== null && slPips > 0)
+            ? (tpPips / slPips).toFixed(2)
+            : null
+
+          return (
+            <div style={{
+              padding: '14px 16px', borderRadius: 12,
+              background: 'linear-gradient(135deg, rgba(56,189,248,0.05) 0%, rgba(124,58,237,0.05) 100%)',
+              border: '1px solid rgba(56,189,248,0.2)',
+              display: 'flex', flexDirection: 'column', gap: 10
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 11, color: '#38bdf8', textTransform: 'uppercase', fontWeight: 800, letterSpacing: '0.5px' }}>
+                  🎯 Take Profit & Stop Loss Configurado (Broker)
+                </span>
+                {rr && (
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 6,
+                    background: parseFloat(rr) >= 1.5 ? 'rgba(16,185,129,0.2)' : 'rgba(234,179,8,0.2)',
+                    color: parseFloat(rr) >= 1.5 ? '#34d399' : '#facc15',
+                    border: `1px solid ${parseFloat(rr) >= 1.5 ? 'rgba(16,185,129,0.3)' : 'rgba(234,179,8,0.3)'}`
+                  }}>
+                    R:R 1:{rr}
+                  </span>
+                )}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <Field label="Take Profit Ideal (TP)">
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <input
+                      type="number"
+                      step="0.00001"
+                      value={userTp}
+                      onChange={e => setUserTp(e.target.value)}
+                      placeholder={autoCapture?.recommendedTp ? String(autoCapture.recommendedTp) : "1.34250"}
+                      style={{ ...inputStyle, borderColor: userTpN > 0 ? 'rgba(16,185,129,0.3)' : 'rgba(255,255,255,0.1)' }}
+                    />
+                    {autoCapture?.recommendedTp && (
+                      <button
+                        type="button"
+                        onClick={() => setUserTp(String(autoCapture.recommendedTp))}
+                        title={`Copiar TP sugerido (${autoCapture.recommendedTp})`}
+                        style={{
+                          padding: '0 8px', borderRadius: 8, background: 'rgba(56,189,248,0.15)',
+                          border: '1px solid rgba(56,189,248,0.3)', color: '#38bdf8', cursor: 'pointer',
+                          fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap'
+                        }}
+                      >
+                        ⚡ Sistema
+                      </button>
+                    )}
+                  </div>
+                  {tpPips !== null && (
+                    <span style={{ fontSize: 10, color: tpPips >= 0 ? '#34d399' : '#f87171', marginTop: 2 }}>
+                      {tpPips >= 0 ? `+${tpPips.toFixed(1)} pips` : `${tpPips.toFixed(1)} pips`}
+                      {tpPnl !== null && ` (~+$${tpPnl.toFixed(2)})`}
+                    </span>
+                  )}
+                </Field>
+
+                <Field label="Stop Loss (SL)">
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <input
+                      type="number"
+                      step="0.00001"
+                      value={userSl}
+                      onChange={e => setUserSl(e.target.value)}
+                      placeholder={autoCapture?.recommendedSl ? String(autoCapture.recommendedSl) : "1.33850"}
+                      style={{ ...inputStyle, borderColor: userSlN > 0 ? 'rgba(244,63,94,0.3)' : 'rgba(255,255,255,0.1)' }}
+                    />
+                    {autoCapture?.recommendedSl && (
+                      <button
+                        type="button"
+                        onClick={() => setUserSl(String(autoCapture.recommendedSl))}
+                        title={`Copiar SL sugerido (${autoCapture.recommendedSl})`}
+                        style={{
+                          padding: '0 8px', borderRadius: 8, background: 'rgba(244,63,94,0.15)',
+                          border: '1px solid rgba(244,63,94,0.3)', color: '#fb7185', cursor: 'pointer',
+                          fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap'
+                        }}
+                      >
+                        ⚡ Sistema
+                      </button>
+                    )}
+                  </div>
+                  {slPips !== null && (
+                    <span style={{ fontSize: 10, color: slPips >= 0 ? '#fb7185' : '#34d399', marginTop: 2 }}>
+                      {slPips >= 0 ? `-${slPips.toFixed(1)} pips` : `+${Math.abs(slPips).toFixed(1)} pips`}
+                      {slLoss !== null && ` (~-$${slLoss.toFixed(2)})`}
+                    </span>
+                  )}
+                </Field>
+              </div>
+
+              {autoCapture?.recommendedTp && (
+                <div style={{ fontSize: 10, color: '#9ca3af', display: 'flex', gap: 12, borderTop: '1px solid rgba(255,255,255,0.04)', paddingTop: 6 }}>
+                  <span>Sugerido Sistema TP: <strong style={{ color: '#38bdf8' }}>{autoCapture.recommendedTp}</strong></span>
+                  {autoCapture.recommendedSl && <span>SL: <strong style={{ color: '#fb7185' }}>{autoCapture.recommendedSl}</strong></span>}
+                </div>
+              )}
+            </div>
+          )
+        })()}
 
         {/* Calculadora de liquidación en vivo */}
         {liq && (

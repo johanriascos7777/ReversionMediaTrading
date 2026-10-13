@@ -48,6 +48,8 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
 
   const [recommendedTp, setRecommendedTp] = useState(trade.recommendedTp != null ? String(trade.recommendedTp) : '')
   const [recommendedSl, setRecommendedSl] = useState(trade.recommendedSl != null ? String(trade.recommendedSl) : '')
+  const [userTp, setUserTp] = useState(trade.userTp != null ? String(trade.userTp) : '')
+  const [userSl, setUserSl] = useState(trade.userSl != null ? String(trade.userSl) : '')
 
   const [mae, setMae] = useState(trade.mae != null ? String(trade.mae) : '')
   const [mfe, setMfe] = useState(trade.mfe != null ? String(trade.mfe) : '')
@@ -159,7 +161,7 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
       tradeMode,
       accountType,
       isImportant: isImportantEdit,
-      favoriteScreenshotUrl: favScreenshotUrl || null,
+      favoriteScreenshotUrl: favScreenshotUrl || undefined,
       entryPrice: parseFloat(entryPrice),
       leverage: parseInt(leverage),
       spread: parseFloat(spread),
@@ -167,6 +169,8 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
       notes: notes || '',
       recommendedTp: recommendedTp ? parseFloat(recommendedTp) : undefined,
       recommendedSl: recommendedSl ? parseFloat(recommendedSl) : undefined,
+      userTp: userTp ? parseFloat(userTp) : undefined,
+      userSl: userSl ? parseFloat(userSl) : undefined,
       mae: mae ? parseFloat(mae) : undefined,
       mfe: mfe ? parseFloat(mfe) : undefined,
       minutesInHolgura: minsHolgura ? parseInt(minsHolgura) : undefined,
@@ -383,14 +387,32 @@ export function EditTradeModal({ trade, onClose, onSubmit }: Props) {
           </Field>
         </div>
 
-        {/* TP / SL Sugeridos */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <Field label="Recomendador Take Profit">
-            <input type="number" step="0.00001" value={recommendedTp} onChange={e => setRecommendedTp(e.target.value)} placeholder="Ej: 1.34800" style={inp} />
-          </Field>
-          <Field label="Recomendador Stop Loss">
-            <input type="number" step="0.00001" value={recommendedSl} onChange={e => setRecommendedSl(e.target.value)} placeholder="Ej: 1.34100" style={inp} />
-          </Field>
+        {/* TP / SL Configurados por el Trader vs Recomendador */}
+        <div style={{
+          padding: '12px 14px', borderRadius: 10,
+          background: 'linear-gradient(135deg, rgba(56,189,248,0.04) 0%, rgba(124,58,237,0.04) 100%)',
+          border: '1px solid rgba(56,189,248,0.15)',
+          display: 'flex', flexDirection: 'column', gap: 10
+        }}>
+          <div style={{ fontSize: 10, color: '#38bdf8', textTransform: 'uppercase', fontWeight: 800, letterSpacing: '0.5px' }}>
+            🎯 Take Profit & Stop Loss (Configurado por Trader)
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <Field label="Take Profit Ideal (TP)">
+              <input type="number" step="0.00001" value={userTp} onChange={e => setUserTp(e.target.value)} placeholder="Ej: 1.34800" style={inp} />
+            </Field>
+            <Field label="Stop Loss (SL)">
+              <input type="number" step="0.00001" value={userSl} onChange={e => setUserSl(e.target.value)} placeholder="Ej: 1.34100" style={inp} />
+            </Field>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, borderTop: '1px solid rgba(255,255,255,0.04)', paddingTop: 8 }}>
+            <Field label="TP Sugerido Sistema">
+              <input type="number" step="0.00001" value={recommendedTp} onChange={e => setRecommendedTp(e.target.value)} placeholder="Ej: 1.34800" style={inp} />
+            </Field>
+            <Field label="SL Sugerido Sistema">
+              <input type="number" step="0.00001" value={recommendedSl} onChange={e => setRecommendedSl(e.target.value)} placeholder="Ej: 1.34100" style={inp} />
+            </Field>
+          </div>
         </div>
 
         {/* Señales de Entrada (M5, M15, Estructura) */}

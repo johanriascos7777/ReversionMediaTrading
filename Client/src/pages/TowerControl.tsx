@@ -169,7 +169,7 @@ export function TowerControl() {
       </div>
 
       {/* ── KPI Strip rápido ───────────────────────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 28 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 28 }}>
         <QuickKPI label="Abiertas ahora"  value={String(openTrades.length)}
           color="#f59e0b" glow="rgba(245,158,11,0.3)" />
         <QuickKPI label="Total cerradas"  value={String(closedTrades.length)} />
@@ -177,6 +177,10 @@ export function TowerControl() {
           value={analytics ? `${analytics.summary.winRate}%` : '—'}
           color={analytics && analytics.summary.winRate >= 50 ? '#10b981' : '#f43f5e'}
           glow={analytics && analytics.summary.winRate >= 50 ? 'rgba(16,185,129,0.25)' : 'rgba(244,63,94,0.25)'} />
+        <QuickKPI label="TP Hit Rate"
+          value={analytics?.summary.tpHitRate != null ? `${analytics.summary.tpHitRate}%` : '—'}
+          color={analytics && (analytics.summary.tpHitRate ?? 0) >= 50 ? '#38bdf8' : '#a78bfa'}
+          glow="rgba(56,189,248,0.2)" />
         <QuickKPI label="P&L acumulado"
           value={closedTrades.length ? `${totalPnl >= 0 ? '+' : ''}$${totalPnl.toFixed(2)}` : '—'}
           color={totalPnl >= 0 ? '#10b981' : '#f43f5e'} />

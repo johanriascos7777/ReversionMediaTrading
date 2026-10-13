@@ -47,6 +47,10 @@ export class CreateTradeDto {
   recommendedTp?: number;
   recommendedSl?: number;
 
+  // TP y SL configurados/ideales por el usuario en broker
+  userTp?: number;
+  userSl?: number;
+
   // Fecha/hora de apertura personalizable (ISO string; si no viene, se usa now)
   openedAt?: string;
 
