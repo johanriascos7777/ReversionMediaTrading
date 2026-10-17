@@ -4,9 +4,9 @@ import { MarketModule } from './market/market.module';
 import { StructureModule } from './structure/structure.module';
 import { TradeModule } from './trade/trade.module';
 import { ScreenshotsModule } from './screenshots/screenshots.module';
-import { FullRevertionModule } from './full-revertion/fullRevertion.module';
 import { HistoricalModule } from './historical/historical.module';
 import { ConsolidationModule } from './consolidation/consolidation.module';
+import { AlertsModule } from './alerts/alerts.module';
 import config from './mikro-orm.config';
 
 @Module({
@@ -16,9 +16,9 @@ import config from './mikro-orm.config';
     StructureModule,
     TradeModule,
     ScreenshotsModule,
-    FullRevertionModule,
     HistoricalModule,
     ConsolidationModule,
+    AlertsModule,
   ],
 })
 export class AppModule {}

@@ -38,6 +38,10 @@ export class CandleBuilder extends EventEmitter {
     }
   }
 
+  resumeCandle(candle: Candle): void {
+    this.current = { ...candle, closed: false }
+  }
+
   /**
    * Procesa un tick en tiempo real.
    * Emite 'candle:closed' cuando cierra una vela.

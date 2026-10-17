@@ -7,9 +7,8 @@
  * 1. Escuchar snapshots del motor principal (igual que FullRevertionService)
  * 2. Detectar y clasificar consolidaciones en M5 Y M15 en tiempo real
  * 3. Fusionar señales M5+M15 → super señal
- * 4. Enviar alertas por Telegram para super señales
- * 5. Emitir snapshot de consolidación via MarketService.events para el frontend
- * 6. Orquestar descargas de historial y backtests
+ * 4. Emitir snapshot de consolidación via MarketService.events para el frontend
+ * 5. Orquestar descargas de historial y backtests
  *
  * NUNCA modifica ni llama a nada del motor de elasticidad estándar.
  */
@@ -31,7 +30,6 @@ import type { DownloadResult } from '../historical/historical.types';
 
 // Rate-limit de cálculo por símbolo (no recalcular en cada tick)
 const MIN_CALC_INTERVAL_MS = 5_000;
-const TELEGRAM_COOLDOWN_MS = 300_000; // 5 minutos entre alertas
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Tipos del snapshot de consolidación (emitido por WS al frontend)
@@ -81,8 +79,6 @@ export class ConsolidationService implements OnModuleInit {
   private readonly lastBacktest  = new Map<string, ConsolidationBacktestResult>();
   // Rate-limit
   private readonly lastCalcTime  = new Map<string, number>();
-  // Telegram cooldown
-  private readonly lastTelegramTime = new Map<string, number>();
   // Flag para evitar doble inicialización
   private initializing = false;
 
@@ -254,12 +250,6 @@ export class ConsolidationService implements OnModuleInit {
     if (snapshot) {
       // Emitir via MarketService.events para que el Gateway lo envíe a clientes
       this.marketService.events.emit('broadcast', snapshot);
-
-      // Telegram para super señales
-      if (snapshot.superSignal.active &&
-          (snapshot.superSignal.type === 'SUPER_STOP' || snapshot.superSignal.type === 'SUPER_REVERSAL')) {
-        this.sendTelegramAlert(snapshot).catch(() => {});
-      }
 
       // Log ocasional
       if (snapshot.m5.detected || snapshot.m15.detected) {
@@ -473,60 +463,6 @@ export class ConsolidationService implements OnModuleInit {
         'Consolidación detectada en ambas temporalidades pero sin sesgo claro en alguna. ' +
         `M5: ${m5.pattern} (${m5.alignment}), M15: ${m15.pattern} (${m15.alignment}).`,
     };
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // Telegram Alerts
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  private async sendTelegramAlert(snapshot: ConsolidationSnapshot): Promise<void> {
-    const token  = process.env.TELEGRAM_BOT_TOKEN;
-    const chatId = process.env.TELEGRAM_CHAT_ID;
-    if (!token || !chatId) return;
-
-    // Cooldown: no enviar más de una alerta cada 5 minutos por símbolo
-    const now = Date.now();
-    const last = this.lastTelegramTime.get(snapshot.symbol) ?? 0;
-    if (now - last < TELEGRAM_COOLDOWN_MS) return;
-    this.lastTelegramTime.set(snapshot.symbol, now);
-
-    const emoji = snapshot.superSignal.type === 'SUPER_STOP' ? '🔴' : '🟢';
-    const side  = snapshot.priceVsEma === 'above' ? 'SELL' : 'BUY';
-
-    let messageText = '';
-    messageText += `${emoji} *CONSOLIDATION ANALYZER* ${emoji}\n`;
-    messageText += `Símbolo: *${snapshot.symbol}*\n`;
-    messageText += `Dirección reversión: *${side}*\n\n`;
-
-    messageText += `📊 *M5*: ${snapshot.m5.pattern ?? 'N/A'} (${snapshot.m5.alignment.toUpperCase()})\n`;
-    messageText += `  → Confianza: ${snapshot.m5.confidence}%\n`;
-    messageText += `  → Duración: ${snapshot.m5.duration} velas\n\n`;
-
-    messageText += `📊 *M15*: ${snapshot.m15.pattern ?? 'N/A'} (${snapshot.m15.alignment.toUpperCase()})\n`;
-    messageText += `  → Confianza: ${snapshot.m15.confidence}%\n`;
-    messageText += `  → Duración: ${snapshot.m15.duration} velas\n\n`;
-
-    messageText += `⚡ *${snapshot.superSignal.type.replace('_', ' ')}*\n`;
-    messageText += snapshot.superSignal.recommendation;
-
-    try {
-      const url = `https://api.telegram.org/bot${token}/sendMessage`;
-      await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text: messageText,
-          parse_mode: 'Markdown',
-        }),
-      });
-
-      console.log(
-        `[ConsolidationService] [${snapshot.symbol}] 📨 Alerta Telegram enviada: ${snapshot.superSignal.type}`,
-      );
-    } catch (err: any) {
-      console.error(`[ConsolidationService] Error enviando Telegram:`, err.message);
-    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════════

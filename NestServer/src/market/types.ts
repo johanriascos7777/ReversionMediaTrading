@@ -72,7 +72,8 @@ export type BackendMessage =
       m15: MarketSnapshot;
       finalState: MarketState;
       fusedState: MarketState;
-      triggerState?: 'reposo' | 'estirando' | 'giro';
+      triggerState?: 'reposo' | 'estirando' | 'giro-provisional' | 'giro';
+      pedestrianLight?: 'STOP' | 'WALK';
       lastClosedElasticityM5?: number | null;
       prevClosedElasticityM5?: number | null;
       fusedExplanation: string;
@@ -91,6 +92,7 @@ export type BackendMessage =
         lastClosedElasticityM5?: number | null;
         prevClosedElasticityM5?: number | null;
       };
+      zone?: Record<string, unknown> | null;
     }
   | { type: 'status';     status: 'connecting' | 'connected' | 'disconnected'; message: string }
   | { type: 'error';      message: string }
@@ -120,6 +122,7 @@ export type BacktestEvent = {
   barsToRevert: number
   state:        MarketState
   elasticity:   number
+  direction:    'BUY' | 'SELL'
 }
 
 export type BacktestResult = {

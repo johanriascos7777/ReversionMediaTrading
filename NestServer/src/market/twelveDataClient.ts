@@ -20,6 +20,20 @@ import { EventEmitter } from 'events'
 import https from 'https'
 
 const RECONNECT_DELAY_MS = 5_000
+const REST_POLL_MS = 60_000
+const REST_BARS_PER_POLL = 10
+
+export function minuteBarToTicks(bar: { t: number; o: number; h: number; l: number; c: number }): Array<{ ts: number; price: number }> {
+  const bullish = bar.c >= bar.o
+  const first = bullish ? bar.l : bar.h
+  const second = bullish ? bar.h : bar.l
+  return [
+    { ts: bar.t + 2_000, price: bar.o },
+    { ts: bar.t + 20_000, price: first },
+    { ts: bar.t + 40_000, price: second },
+    { ts: bar.t + 58_000, price: bar.c },
+  ]
+}
 
 export class TwelveDataClient extends EventEmitter {
   private apiKey: string
@@ -41,6 +55,10 @@ export class TwelveDataClient extends EventEmitter {
    */
   private lastKeyExhaustedAt: number = 0
   private static readonly ROTATION_COOLDOWN_MS = 62_000 // ~1 minuto (ventana de rate-limit de TwelveData)
+
+  private lastEmittedMinute = 0
+  private restPollMs = REST_POLL_MS
+  private restPoll: (() => void) | null = null
 
   constructor(apiKey: string, symbol: string | string[]) {
     super()
@@ -96,14 +114,16 @@ export class TwelveDataClient extends EventEmitter {
       `╠═══════════════════════════════════════════════════════════╣\n` +
       `║   Símbolo  : ${this.symbol.padEnd(45)}║\n` +
       `║   Razón    : Plan Free — WebSocket restringido a EUR/USD  ║\n` +
-      `║   Modo     : REST API cada 10s (sin pérdida de datos)     ║\n` +
+      `║   Modo     : velas de 1 minuto por REST (60 s o más)      ║\n` +
       `╚═══════════════════════════════════════════════════════════╝\n`
     )
 
     const poll = () => {
       if (this.stopped) return
 
-      const url = `https://api.twelvedata.com/price?symbol=${encodeURIComponent(this.symbol)}&apikey=${this.apiKey}`
+      const url =
+        `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(this.symbol)}` +
+        `&interval=1min&outputsize=${REST_BARS_PER_POLL}&timezone=UTC&apikey=${this.apiKey}`
 
       this.emit('api-request', this.apiKey)
 
@@ -115,12 +135,8 @@ export class TwelveDataClient extends EventEmitter {
         res.on('end', () => {
           try {
             const data = JSON.parse(raw)
-            if (data.price) {
-              const price = parseFloat(data.price)
-              if (!isNaN(price)) {
-                // Emitir tick como si viniera del websocket
-                this.emit('tick', this.symbol, price, Date.now())
-              }
+            if (data.status === 'ok' && Array.isArray(data.values)) {
+              this.emitClosedMinuteBars(data.values)
             } else if (data.status === 'error') {
               const code = data.code
               const message: string = data.message || ''
@@ -161,12 +177,49 @@ export class TwelveDataClient extends EventEmitter {
     // Si acabamos de rotar una llave (lastKeyExhaustedAt reciente), el cooldown
     // ya fue aplicado en updateApiKey(). Si es el primer arranque normal,
     // esperamos 2s antes del primer poll para evitar ráfagas al iniciar.
-    // En ambos casos, el setInterval controla el ritmo de 10s.
+    // En ambos casos, el setInterval controla el ritmo de 60 s.
     const initialDelay = this.lastKeyExhaustedAt > 0 ? 0 : 2_000
     setTimeout(() => {
       if (!this.stopped && this.pollInterval) poll()
     }, initialDelay)
-    this.pollInterval = setInterval(poll, 10_000)
+    this.restPoll = poll
+    this.pollInterval = setInterval(poll, this.restPollMs)
+  }
+
+  setRestPollInterval(ms: number): void {
+    if (ms === this.restPollMs) return
+    this.restPollMs = ms
+    console.log(`[TwelveData] [${this.symbol}] Velas de 1 minuto por REST cada ${(ms / 1000).toFixed(0)} s`)
+    if (this.pollInterval && this.restPoll) {
+      clearInterval(this.pollInterval)
+      this.pollInterval = setInterval(this.restPoll, ms)
+    }
+  }
+
+  isUsingRest(): boolean {
+    return this.wsRejected
+  }
+
+  private emitClosedMinuteBars(values: Array<{ datetime: string; open: string; high: string; low: string; close: string }>): void {
+    const now = Date.now()
+    const bars = values
+      .map((v) => ({
+        t: Date.parse(v.datetime.replace(' ', 'T') + 'Z'),
+        o: parseFloat(v.open),
+        h: parseFloat(v.high),
+        l: parseFloat(v.low),
+        c: parseFloat(v.close),
+      }))
+      .filter((b) => !isNaN(b.t) && !isNaN(b.o) && !isNaN(b.h) && !isNaN(b.l) && !isNaN(b.c))
+      .filter((b) => b.t + 60_000 <= now && b.t > this.lastEmittedMinute)
+      .sort((a, b) => a.t - b.t)
+
+    for (const bar of bars) {
+      for (const tick of minuteBarToTicks(bar)) {
+        this.emit('tick', this.symbol, tick.price, tick.ts)
+      }
+      this.lastEmittedMinute = bar.t
+    }
   }
 
   private stopRestPoller(): void {
@@ -222,7 +275,7 @@ export class TwelveDataClient extends EventEmitter {
           )
 
           // Notificar al frontend que este símbolo usa REST fallback
-          this.emit('ws-fallback', this.symbol, 'El plan Free de Twelve Data no permite este símbolo en WebSocket. Usando REST Poller (cada 10s).')
+          this.emit('ws-fallback', this.symbol, 'El plan Free de Twelve Data no permite este símbolo en WebSocket. Usando velas de 1 minuto por REST (cada 60 s o más, según las llaves).')
           this.emit('status', 'disconnected', `[REST Poller] ${this.symbol} no disponible en WS — usando REST`)
 
           // Activar REST Poller y cerrar WS limpiamente

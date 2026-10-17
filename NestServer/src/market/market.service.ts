@@ -6,6 +6,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { TwelveDataClient } from './twelveDataClient';
 import { CandleBuilder } from './candleBuilder';
+import { isFxClosed } from './fxCalendar';
 import { calculateSnapshot, resolveMultiTF, calculateElasticityForCandles, pushPercentileHistory, clearPercentileHistory } from './marketEngine';
 import type { BackendMessage, Candle, MarketSnapshot, MarketState, FusedStateResult, BacktestResult, SignalComparisonResult } from './types';
 import { runBacktest } from './backtestEngine';
@@ -13,84 +14,70 @@ import { compareSignalWithHistory } from './compareSignal';
 import { fuseMarketState } from './fuseMarketState';
 import { EntityManager } from '@mikro-orm/mysql';
 import { PendingSignal } from '../trade/pending-signal.entity';
-import { detectSession } from '../trade/trade.service';
-import { RequestContext } from '@mikro-orm/core';
 import { ConsolidationService } from '../consolidation/consolidation.service';
-
-// --- Imports de Versión Experimental ---
-import { calculateSnapshotExp, resolveMultiTFExp, calculateElasticityForCandlesExp, pushPercentileHistoryExp, clearPercentileHistoryExp } from './marketEngineExp';
-import { runBacktestExp } from './backtestEngineExp';
-import { compareSignalWithHistoryExp } from './compareSignalExp';
+import { AlertsService, pipSize } from '../alerts/alerts.service';
+import { buildZoneModel, emaSeries, atrSeries, lastValue, ZONE_DEFAULTS, type ZoneModel } from '../alerts/zoneEngine';
 
 const HISTORY_OUTPUT = 1000;
+const ZONE_HISTORY_OUTPUT = 5000;
+const REST_CREDITS_PER_KEY_PER_DAY = 760;
+const FOMOWATCH_REFRESH_MS = 30_000;
+
+type FomowatchSignal = Pick<PendingSignal, 'id' | 'symbol' | 'direction' | 'status' | 'entryPrice' | 'tpPrice' | 'slPrice' | 'openedAt'>;
+
+export type TriggerState = 'reposo' | 'estirando' | 'giro-provisional' | 'giro';
+export type DirectionalSnapshot = MarketSnapshot & { direction: 'BUY' | 'SELL' };
 
 export class SymbolState {
   public readonly symbol: string;
   public readonly builderM5 = new CandleBuilder('M5');
   public readonly builderM15 = new CandleBuilder('M15');
 
-  public lastSnapshotM5: MarketSnapshot | null = null;
-  public lastSnapshotM15: MarketSnapshot | null = null;
+  public lastSnapshotM5: DirectionalSnapshot | null = null;
+  public lastSnapshotM15: DirectionalSnapshot | null = null;
 
   public historicalM5: Candle[] = [];
   public historicalM15: Candle[] = [];
 
-  // Backtesting y Fusión de Señal (Fase 2)
   public lastBacktestM5: BacktestResult | null = null;
-  public previousFusedState: MarketState | null = null;
-  public previousFinalState: MarketState | null = null;
-  public lastTelegramAlertTimeA = 0;
-  public lastTelegramAlertTimeB = 0;
   public lastStructureM5: any | null = null;
   public lastStructureM15: any | null = null;
 
   // Giro de Elasticidad (Gatillo) M5
   public lastClosedElasticityM5: number | null = null;
   public prevClosedElasticityM5: number | null = null;
-  public triggerStateM5: 'reposo' | 'estirando' | 'giro' = 'reposo';
-  public previousTriggerStateM5: 'reposo' | 'estirando' | 'giro' = 'reposo';
-  public lastTelegramAlertTimeTrigger = 0;
 
-  // --- Versión Experimental ---
-  public lastSnapshotM5Exp: any = null;
-  public lastSnapshotM15Exp: any = null;
-  public lastBacktestM5Exp: any = null;
-
-  public previousFusedStateExp: MarketState | null = null;
-  public previousFinalStateExp: MarketState | null = null;
-
-  public lastClosedElasticityM5Exp: number | null = null;
-  public prevClosedElasticityM5Exp: number | null = null;
-
-  public triggerStateM5Exp: 'reposo' | 'estirando' | 'giro-provisional' | 'giro' = 'reposo';
-  public previousTriggerStateM5Exp: 'reposo' | 'estirando' | 'giro-provisional' | 'giro' = 'reposo';
-  public maxLiveElasticityExp = 0;
+  public triggerStateM5: TriggerState = 'reposo';
+  public previousTriggerStateM5: TriggerState = 'reposo';
+  public maxLiveElasticity = 0;
 
   // --- Mejoras al Detector de Pico (3 capas) ---
   /** Buffer circular de últimos N valores de elasticidad tick-a-tick para calcular stddev */
-  public liveElasticityBufferExp: number[] = [];
+  public liveElasticityBuffer: number[] = [];
   /** Contador de ticks consecutivos en estado GREEN antes de armar el detector */
-  public greenTickCountExp = 0;
+  public greenTickCount = 0;
   /** Contador de ticks sosteniendo retroceso tras giro provisional */
-  public provisionalGiroTicksExp = 0;
+  public provisionalGiroTicks = 0;
 
-  public lastTelegramAlertTimeAExp = 0;
-  public lastTelegramAlertTimeBExp = 0;
-  public lastTelegramAlertTimeTriggerExp = 0;
-  public lastTelegramAlertTimePedestrian = 0;
-
-  // Cooldowns para alertas Shield-Verified (con Pullback Shield aprobado)
-  public lastTelegramAlertTimeAShield = 0;
-  public lastTelegramAlertTimeCShield = 0;
-  public lastTelegramAlertTimePedestrianShield = 0;
+  public lastAlertTimeV1 = 0;
 
   public pedestrianLight: 'STOP' | 'WALK' = 'STOP';
-  public previousPedestrianLight: 'STOP' | 'WALK' = 'STOP';
 
-  // Estado del escudo (para alertas Shield-Verified y frontend)
+  // Estado del escudo (para alertas Shield-Verified y el frontend)
   public shieldBlocked = false;
   public isCompression = false;
   public shieldExplanation = '✅ Escudo despejado.';
+
+  // Zona de agotamiento (alerta v2)
+  public zoneBars: Candle[] = [];
+  public zoneEma: number | null = null;
+  public zoneAtr: number | null = null;
+  public zoneM15Ema: number | null = null;
+  public zoneModel: ZoneModel | null = null;
+  public zoneModelHour = -1;
+  public zoneSource = '';
+  public v2Side: 1 | -1 | null = null;
+  public v2Alerted = false;
 
   // Tracking de historial individual
   public historyLoaded = false;
@@ -101,7 +88,6 @@ export class SymbolState {
     this.symbol = symbol;
   }
 }
-
 @Injectable()
 export class MarketService implements OnModuleInit, OnModuleDestroy {
   public readonly events = new EventEmitter();
@@ -116,6 +102,9 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
   private readonly symbolStates = new Map<string, SymbolState>();
 
   private readonly twelveClients: TwelveDataClient[] = [];
+
+  private readonly fomowatchSignals = new Map<string, { loadedAt: number; signals: FomowatchSignal[] }>();
+  private readonly fomowatchLoading = new Set<string>();
 
   // ─── Control Horario y Pool de Llaves ────────────────────────────────────────
   private engineRunning = false;
@@ -204,7 +193,8 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly em: EntityManager,
     @Inject(forwardRef(() => ConsolidationService))
-    private readonly consolidationService: ConsolidationService
+    private readonly consolidationService: ConsolidationService,
+    private readonly alertsService: AlertsService
   ) {
     this.symbolList = this.symbol.split(',').map((s) => s.trim());
     this.apiKeyList = this.apiKey.split(',').map((k) => k.trim());
@@ -267,6 +257,8 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
   // NOTA: Usamos COT (UTC-5) explícitamente para que funcione igual en
   //       servidores en la nube (Render/UTC) y en máquina local.
   private isOperationalTime(): boolean {
+    if (isFxClosed(Date.now())) return false;
+
     // Si estamos en desarrollo/local y queremos operar 24/7 sin restricción
     if (process.env.IGNORE_SCHEDULE === 'true') {
       return true;
@@ -347,20 +339,16 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
               state.lastClosedElasticityM5 = el;
             }
 
-            // --- Versión Experimental ---
-            const elExp = calculateElasticityForCandlesExp(state.builderM5.getCandles(), candle.close);
-            if (elExp !== null) {
-              pushPercentileHistoryExp(sym, 'M5', elExp);
-              state.prevClosedElasticityM5Exp = state.lastClosedElasticityM5Exp;
-              state.lastClosedElasticityM5Exp = elExp;
-            }
-
             // Recalcular backtest M5 con la nueva vela
             state.lastBacktestM5 = runBacktest(state.historicalM5, { emaPeriod: 100, maxBarsToRevert: 20 });
-            state.lastBacktestM5Exp = runBacktestExp(state.historicalM5, { emaPeriod: 100, maxBarsToRevert: 20 });
             console.log(
-              `[MarketService] [${sym}] Vela M5 cerrada. Backtest M5 recalculado: WinRate: ${state.lastBacktestM5.winRate}% | Exp WinRate: ${state.lastBacktestM5Exp.winRate}%`
+              `[MarketService] [${sym}] Vela M5 cerrada. Backtest M5 recalculado: WinRate: ${state.lastBacktestM5.winRate}%`
             );
+
+            void this.alertsService.onCandleClosed(sym, candle, 5 * 60_000, state.zoneEma);
+            state.zoneBars.push(candle);
+            if (state.zoneBars.length > ZONE_HISTORY_OUTPUT + HISTORY_OUTPUT) state.zoneBars.shift();
+            this.refreshZone(state, false);
           });
 
           state.builderM15.on('candle:closed', (candle: Candle) => {
@@ -370,9 +358,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
             const el = calculateElasticityForCandles(state.builderM15.getCandles(), candle.close);
             if (el !== null) pushPercentileHistory(sym, 'M15', el);
 
-            // --- Versión Experimental ---
-            const elExp = calculateElasticityForCandlesExp(state.builderM15.getCandles(), candle.close);
-            if (elExp !== null) pushPercentileHistoryExp(sym, 'M15', elExp);
+            state.zoneM15Ema = lastValue(emaSeries(state.historicalM15.map((c) => c.close)));
           });
 
           // Intentar cargar el historial inicial de forma asíncrona pero secuencial durante el startup
@@ -406,6 +392,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
 
         client.on('ws-fallback', (symbol: string, reason: string) => {
           console.log(`[MarketService] 📡 [${symbol}] WS Fallback activo — notificando al frontend`);
+          this.balanceRestPolling();
           this.events.emit('broadcast', {
             type: 'ws-fallback',
             symbol,
@@ -466,6 +453,14 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
         console.log('[MarketService] Sistema dormido fuera de horario operativo...');
       }
     }
+  }
+
+  private balanceRestPolling(): void {
+    const restClients = this.twelveClients.filter((c) => c.isUsingRest());
+    if (restClients.length === 0) return;
+    const dailyBudget = Math.max(1, this.apiKeyList.length) * REST_CREDITS_PER_KEY_PER_DAY;
+    const ms = Math.min(5 * 60_000, Math.max(60_000, Math.ceil((86_400_000 * restClients.length) / dailyBudget / 60_000) * 60_000));
+    for (const client of restClients) client.setRestPollInterval(ms);
   }
 
   // ─── Gestión Dinámica de API Keys (Pool de 32 llaves) ────────────────────────
@@ -722,98 +717,58 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
     this.events.emit('broadcast', this.getKeysPoolStatus());
   }
 
+  private snapshotPayload(
+    state: SymbolState,
+    m5: DirectionalSnapshot,
+    m15: DirectionalSnapshot,
+    finalState: MarketState,
+    fused: FusedStateResult,
+    comparison: SignalComparisonResult | null,
+  ): BackendMessage {
+    const engine = {
+      m5,
+      m15,
+      finalState,
+      fusedState: fused.state,
+      triggerState: state.triggerStateM5,
+      pedestrianLight: state.pedestrianLight,
+      fusedExplanation: fused.explanation,
+      fusedComparison: comparison,
+      backtest: state.lastBacktestM5,
+      lastClosedElasticityM5: state.lastClosedElasticityM5,
+      prevClosedElasticityM5: state.prevClosedElasticityM5,
+    };
+    return {
+      type: 'snapshot',
+      symbol: state.symbol,
+      ...engine,
+      experimental: engine,
+      zone: this.zoneView(state, m5.price),
+    };
+  }
+
+  private evaluate(state: SymbolState, m5: DirectionalSnapshot, m15: DirectionalSnapshot) {
+    const finalState = resolveMultiTF(m5, m15);
+    const comparison = state.lastBacktestM5
+      ? compareSignalWithHistory(
+        { state: m5.state, elasticity: m5.elasticity, direction: m5.direction },
+        state.lastBacktestM5
+      )
+      : null;
+    const fused = fuseMarketState(finalState, comparison);
+    return { finalState, comparison, fused };
+  }
+
   // Retorna todos los últimos snapshots del sistema
   public getAllLastSnapshots(): BackendMessage[] {
     const list: BackendMessage[] = [];
     for (const state of this.symbolStates.values()) {
       if (state.lastSnapshotM5 && state.lastSnapshotM15) {
-        const finalState = resolveMultiTF(state.lastSnapshotM5, state.lastSnapshotM15);
-        const comparison = state.lastBacktestM5
-          ? compareSignalWithHistory(
-            { state: state.lastSnapshotM5.state, elasticity: state.lastSnapshotM5.elasticity },
-            state.lastBacktestM5
-          )
-          : null;
-        const fusedStateResult = fuseMarketState(finalState, comparison);
-
-        // --- Versión Experimental ---
-        const finalStateExp = state.lastSnapshotM5Exp && state.lastSnapshotM15Exp
-          ? resolveMultiTFExp(state.lastSnapshotM5Exp, state.lastSnapshotM15Exp)
-          : ('RED' as MarketState);
-
-        const comparisonExp = state.lastSnapshotM5Exp && state.lastSnapshotM15Exp && state.lastBacktestM5Exp
-          ? compareSignalWithHistoryExp(
-            { state: state.lastSnapshotM5Exp.state, elasticity: state.lastSnapshotM5Exp.elasticity, direction: state.lastSnapshotM5Exp.direction },
-            state.lastBacktestM5Exp
-          )
-          : null;
-
-        const fusedStateResultExp = state.lastSnapshotM5Exp && state.lastSnapshotM15Exp
-          ? fuseMarketState(finalStateExp, comparisonExp)
-          : { state: 'RED' as MarketState, explanation: 'Esperando datos...' };
-
-        list.push({
-          type: 'snapshot',
-          symbol: state.symbol,
-          m5: state.lastSnapshotM5,
-          m15: state.lastSnapshotM15,
-          finalState,
-          fusedState: fusedStateResult.state,
-          triggerState: state.triggerStateM5,
-          lastClosedElasticityM5: state.lastClosedElasticityM5,
-          prevClosedElasticityM5: state.prevClosedElasticityM5,
-          fusedExplanation: fusedStateResult.explanation,
-          fusedComparison: comparison,
-          backtest: state.lastBacktestM5,
-          experimental: state.lastSnapshotM5Exp && state.lastSnapshotM15Exp ? {
-            m5: state.lastSnapshotM5Exp,
-            m15: state.lastSnapshotM15Exp,
-            finalState: finalStateExp,
-            fusedState: fusedStateResultExp.state,
-            triggerState: state.triggerStateM5Exp,
-            pedestrianLight: state.pedestrianLight,
-            fusedExplanation: fusedStateResultExp.explanation,
-            fusedComparison: comparisonExp,
-            backtest: state.lastBacktestM5Exp,
-          } : undefined
-        });
+        const { finalState, comparison, fused } = this.evaluate(state, state.lastSnapshotM5, state.lastSnapshotM15);
+        list.push(this.snapshotPayload(state, state.lastSnapshotM5, state.lastSnapshotM15, finalState, fused, comparison));
       }
     }
     return list;
-  }
-
-  // Retorna el último snapshot para un símbolo en particular
-  public getLastSnapshotMessage(symbol?: string): BackendMessage | null {
-    const sym = symbol ?? this.symbolList[0] ?? 'EUR/USD';
-    const state = this.symbolStates.get(sym);
-    if (!state) return null;
-
-    if (state.lastSnapshotM5 && state.lastSnapshotM15) {
-      const finalState = resolveMultiTF(state.lastSnapshotM5, state.lastSnapshotM15);
-      const comparison = state.lastBacktestM5
-        ? compareSignalWithHistory(
-          { state: state.lastSnapshotM5.state, elasticity: state.lastSnapshotM5.elasticity },
-          state.lastBacktestM5
-        )
-        : null;
-      const fusedStateResult = fuseMarketState(finalState, comparison);
-
-      return {
-        type: 'snapshot',
-        symbol: state.symbol,
-        m5: state.lastSnapshotM5,
-        m15: state.lastSnapshotM15,
-        finalState,
-        fusedState: fusedStateResult.state,
-        triggerState: state.triggerStateM5,
-        lastClosedElasticityM5: state.lastClosedElasticityM5,
-        prevClosedElasticityM5: state.prevClosedElasticityM5,
-        fusedExplanation: fusedStateResult.explanation,
-        fusedComparison: comparison,
-        backtest: state.lastBacktestM5,
-      };
-    }
-    return null;
   }
 
   // Retorna el historial de velas en memoria
@@ -842,7 +797,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
 
       const path =
         `/time_series?symbol=${encodeURIComponent(symbol)}` +
-        `&interval=${interval}&outputsize=${outputSize}&apikey=${key}`;
+        `&interval=${interval}&outputsize=${outputSize}&timezone=UTC&apikey=${key}`;
 
       const req = https.request(
         { hostname: 'api.twelvedata.com', path, method: 'GET' },
@@ -889,7 +844,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
                 return;
               }
               const candles: Candle[] = [...data.values].reverse().map((c: any) => ({
-                time: new Date(c.datetime).getTime(),
+                time: Date.parse(String(c.datetime).replace(' ', 'T') + 'Z'),
                 open: parseFloat(c.open),
                 high: parseFloat(c.high),
                 low: parseFloat(c.low),
@@ -915,6 +870,92 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  private async loadZoneHistory(state: SymbolState): Promise<void> {
+    let bars: Candle[] = [];
+    try {
+      await new Promise((r) => setTimeout(r, 1000));
+      bars = await this.fetchHistoricalCandles(state.symbol, '5min', ZONE_HISTORY_OUTPUT);
+      this.takeFormingCandle(bars, 5 * 60_000);
+    } catch (err: any) {
+      console.warn(`[Zona] [${state.symbol}] No se pudo traer el historial largo (${err?.message}). Uso el historial en memoria.`);
+    }
+    if (bars.length < state.historicalM5.length) {
+      bars = state.historicalM5.map((c) => ({ ...c }));
+      state.zoneSource = `${bars.length} velas de 5m (respaldo: historial corto)`;
+    } else {
+      state.zoneSource = `${bars.length} velas de 5m`;
+    }
+    state.zoneBars = bars;
+    state.zoneM15Ema = lastValue(emaSeries(state.historicalM15.map((c) => c.close)));
+    this.refreshZone(state, true);
+
+    const emas = emaSeries(state.zoneBars.map((c) => c.close));
+    const restored = await this.alertsService.restore(state.symbol, state.zoneBars, emas, 5 * 60_000);
+    const m = state.zoneModel;
+    console.log(
+      `[Zona] [${state.symbol}] ${state.zoneSource} · ` +
+      (m ? `umbral ${m.gate.toFixed(2)} ATR · p50 ${m.q50.toFixed(2)} · p75 ${m.q75.toFixed(2)} · p90 ${m.q90.toFixed(2)} · ${m.episodes} episodios` : 'sin modelo') +
+      ` · alertas abiertas recuperadas: ${restored}`
+    );
+  }
+
+  private refreshZone(state: SymbolState, force: boolean): void {
+    if (state.zoneBars.length === 0) return;
+    const emas = emaSeries(state.zoneBars.map((c) => c.close));
+    const atrs = atrSeries(state.zoneBars);
+    state.zoneEma = lastValue(emas);
+    state.zoneAtr = lastValue(atrs);
+    const lastTime = state.zoneBars[state.zoneBars.length - 1].time;
+    const hour = Math.floor(lastTime / 3_600_000);
+    if (force || hour !== state.zoneModelHour) {
+      state.zoneModel = buildZoneModel(state.zoneBars);
+      state.zoneModelHour = hour;
+    }
+  }
+
+  private zoneView(state: SymbolState, price: number) {
+    const model = state.zoneModel;
+    const ema = state.zoneEma;
+    const atr = state.zoneAtr;
+    if (!model || ema === null || atr === null) return null;
+    const side: 1 | -1 = price > ema ? 1 : -1;
+    const level = (q: number) => ema + side * q * atr;
+    const pip = pipSize(state.symbol);
+    return {
+      direction: side === 1 ? 'SELL' : 'BUY',
+      ema,
+      atr,
+      distanceAtr: Math.abs(price - ema) / atr,
+      distancePips: Math.abs(price - ema) / pip,
+      q50: level(model.q50),
+      q75: level(model.q75),
+      q90: level(model.q90),
+      gateAtr: model.gate,
+      q75Atr: model.q75,
+      episodes: model.episodes,
+      residualMedianPips: (model.residual.median * atr) / pip,
+      residualP90Pips: (model.residual.p90 * atr) / pip,
+      residualMaxPips: (model.residual.max * atr) / pip,
+      touch4h: model.touchWithinBars.count ? model.touchWithinBars.touched / model.touchWithinBars.count : null,
+      source: state.zoneSource,
+      alerted: state.v2Alerted && state.v2Side === side,
+    };
+  }
+
+  private zoneLineForV1(state: SymbolState, price: number): string[] {
+    const view = this.zoneView(state, price);
+    if (!view) return [];
+    const inside = view.distanceAtr >= view.q75Atr;
+    return [`Zona v2: distancia ${view.distanceAtr.toFixed(1)} ATR (p75 ${view.q75Atr.toFixed(1)} ATR) → ${inside ? 'dentro de la zona' : 'todavía fuera de la zona'}`];
+  }
+
+  private takeFormingCandle(candles: Candle[], periodMs: number): Candle | null {
+    const last = candles[candles.length - 1];
+    if (!last || last.time + periodMs <= Date.now()) return null;
+    candles.pop();
+    return last;
+  }
+
   private warmUpBuilder(symbol: string, builder: CandleBuilder, candles: Candle[]): void {
     const state = this.symbolStates.get(symbol);
     candles.forEach((c) => {
@@ -925,16 +966,6 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
         if (builder.getTimeframe() === 'M5' && state) {
           state.prevClosedElasticityM5 = state.lastClosedElasticityM5;
           state.lastClosedElasticityM5 = elasticity;
-        }
-      }
-
-      // --- Versión Experimental ---
-      const elasticityExp = calculateElasticityForCandlesExp(builder.getCandles(), c.close);
-      if (elasticityExp !== null) {
-        pushPercentileHistoryExp(symbol, builder.getTimeframe(), elasticityExp);
-        if (builder.getTimeframe() === 'M5' && state) {
-          state.prevClosedElasticityM5Exp = state.lastClosedElasticityM5Exp;
-          state.lastClosedElasticityM5Exp = elasticityExp;
         }
       }
     });
@@ -977,25 +1008,26 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
           clearPercentileHistory(sym, 'M5');
           clearPercentileHistory(sym, 'M15');
 
-          // --- Versión Experimental ---
-          clearPercentileHistoryExp(sym, 'M5');
-          clearPercentileHistoryExp(sym, 'M15');
+          const formingM5 = this.takeFormingCandle(histM5, 5 * 60_000);
+          const formingM15 = this.takeFormingCandle(histM15, 15 * 60_000);
 
           state.historicalM5 = histM5;
           state.historicalM15 = histM15;
 
           this.warmUpBuilder(sym, state.builderM5, state.historicalM5);
           this.warmUpBuilder(sym, state.builderM15, state.historicalM15);
+          if (formingM5) state.builderM5.resumeCandle(formingM5);
+          if (formingM15) state.builderM15.resumeCandle(formingM15);
 
           state.lastBacktestM5 = runBacktest(state.historicalM5, { emaPeriod: 100, maxBarsToRevert: 20 });
-          state.lastBacktestM5Exp = runBacktestExp(state.historicalM5, { emaPeriod: 100, maxBarsToRevert: 20 });
           console.log(
-            `[MarketService] [${sym}] Historial cargado con éxito en segundo plano. Backtest M5 recalculado: WinRate: ${state.lastBacktestM5.winRate}% · Exp WinRate: ${state.lastBacktestM5Exp.winRate}%`
+            `[MarketService] [${sym}] Historial cargado con éxito en segundo plano. Backtest M5 recalculado: WinRate: ${state.lastBacktestM5.winRate}%`
           );
 
           // Calcular snapshot inicial con el último precio del historial cargado
-          const lastPrice = state.historicalM5[state.historicalM5.length - 1].close;
-          const ts = state.historicalM5[state.historicalM5.length - 1].time;
+          const lastCandle = formingM5 ?? state.historicalM5[state.historicalM5.length - 1];
+          const lastPrice = lastCandle.close;
+          const ts = lastCandle.time;
           const snap5 = calculateSnapshot(sym, state.builderM5.getCandles(), lastPrice, 'M5', ts);
           const snap15 = calculateSnapshot(sym, state.builderM15.getCandles(), lastPrice, 'M15', ts);
 
@@ -1007,15 +1039,8 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
             );
           }
 
-          // --- Versión Experimental ---
-          const snap5Exp = calculateSnapshotExp(sym, state.builderM5.getCandles(), lastPrice, 'M5', ts);
-          const snap15Exp = calculateSnapshotExp(sym, state.builderM15.getCandles(), lastPrice, 'M15', ts);
-          if (snap5Exp && snap15Exp) {
-            state.lastSnapshotM5Exp = snap5Exp;
-            state.lastSnapshotM15Exp = snap15Exp;
-          }
-
           state.historyLoaded = true;
+          await this.loadZoneHistory(state);
           return true;
         } catch (err: any) {
           attempts++;
@@ -1078,211 +1103,128 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
     state.lastSnapshotM5 = snapshotM5;
     state.lastSnapshotM15 = snapshotM15;
 
-    const finalState = resolveMultiTF(snapshotM5, snapshotM15);
+    const { finalState, comparison, fused: fusedStateResult } = this.evaluate(state, snapshotM5, snapshotM15);
 
-    const comparison = state.lastBacktestM5
-      ? compareSignalWithHistory(
-        { state: snapshotM5.state, elasticity: snapshotM5.elasticity },
-        state.lastBacktestM5
-      )
-      : null;
-    const fusedStateResult = fuseMarketState(finalState, comparison);
+    // ╔══════════════════════════════════════════════════════════════════════╗
+    // ║  Detector de Pico Experimental — 3 Capas de Protección            ║
+    // ║  Capa 1: Umbral adaptativo (stddev)                               ║
+    // ║  Capa 2: Persistencia en GREEN (N ticks antes de armar)           ║
+    // ║  Capa 3: Giro provisional → confirmado (M ticks sostenidos)       ║
+    // ╚══════════════════════════════════════════════════════════════════════╝
 
-    // Resolver el estado del gatillo M5 (Tradicional)
+    // Constantes del detector — calibrar con backtest en /experimental
+    const ADAPTIVE_K = 1.5;           // multiplicador de stddev
+    const ADAPTIVE_FLOOR = 0.08;      // piso mínimo de retroceso
+    const BUFFER_SIZE = 30;           // ticks para calcular stddev
+    const GREEN_PERSISTENCE = 5;     // ticks consecutivos en GREEN antes de armar
+    const CONFIRM_TICKS = 3;         // ticks sostenidos para confirmar giro
+
     if (fusedStateResult.state === 'GREEN') {
-      if (state.triggerStateM5 === 'reposo') {
-        state.triggerStateM5 = 'estirando';
+      // --- Capa 1: Alimentar buffer de elasticidad para umbral adaptativo ---
+      state.liveElasticityBuffer.push(snapshotM5.elasticity);
+      if (state.liveElasticityBuffer.length > BUFFER_SIZE) {
+        state.liveElasticityBuffer.shift();
       }
-      if (state.lastClosedElasticityM5 !== null && state.prevClosedElasticityM5 !== null) {
-        if (state.lastClosedElasticityM5 < state.prevClosedElasticityM5) {
-          state.triggerStateM5 = 'giro';
-        } else {
+
+      // --- Capa 2: Filtro de persistencia ---
+      state.greenTickCount++;
+
+      const detectorArmed = state.greenTickCount >= GREEN_PERSISTENCE;
+
+      if (!detectorArmed) {
+        // Aún no hay suficientes ticks en GREEN — trackear pico pero no disparar
+        if (snapshotM5.elasticity > state.maxLiveElasticity) {
+          state.maxLiveElasticity = snapshotM5.elasticity;
+        }
+        if (state.triggerStateM5 === 'reposo') {
           state.triggerStateM5 = 'estirando';
         }
+      } else {
+        // Detector armado — aplicar lógica de pico con umbral adaptativo
+
+        // Calcular umbral adaptativo basado en stddev del buffer
+        let adaptiveThreshold = ADAPTIVE_FLOOR;
+        if (state.liveElasticityBuffer.length >= 5) {
+          const buf = state.liveElasticityBuffer;
+          const mean = buf.reduce((a, b) => a + b, 0) / buf.length;
+          const variance = buf.reduce((a, v) => a + (v - mean) ** 2, 0) / buf.length;
+          const stddev = Math.sqrt(variance);
+          adaptiveThreshold = Math.max(ADAPTIVE_FLOOR, ADAPTIVE_K * stddev);
+        }
+
+        if (state.triggerStateM5 === 'reposo' || state.triggerStateM5 === 'estirando') {
+          // Fase de estiramiento — buscar pico máximo
+          if (snapshotM5.elasticity > state.maxLiveElasticity) {
+            state.maxLiveElasticity = snapshotM5.elasticity;
+            state.triggerStateM5 = 'estirando';
+            state.provisionalGiroTicks = 0; // reset si se actualiza el pico
+          } else if (state.maxLiveElasticity - snapshotM5.elasticity >= adaptiveThreshold) {
+            // --- Capa 3: Primer tick que cumple el umbral → giro provisional ---
+            state.triggerStateM5 = 'giro-provisional';
+            state.provisionalGiroTicks = 1;
+          }
+        } else if (state.triggerStateM5 === 'giro-provisional') {
+          // --- Capa 3: Confirmación del giro ---
+          if (snapshotM5.elasticity >= state.maxLiveElasticity) {
+            // Precio volvió a superar el pico → falso giro, cancelar
+            state.triggerStateM5 = 'estirando';
+            state.maxLiveElasticity = snapshotM5.elasticity;
+            state.provisionalGiroTicks = 0;
+          } else if (state.maxLiveElasticity - snapshotM5.elasticity >= adaptiveThreshold) {
+            // Sigue retrocediendo — sumar tick de confirmación
+            state.provisionalGiroTicks++;
+            if (state.provisionalGiroTicks >= CONFIRM_TICKS) {
+              state.triggerStateM5 = 'giro'; // ¡Confirmado!
+            }
+          } else {
+            // Retrocedió menos que el umbral — cancelar provisional
+            state.triggerStateM5 = 'estirando';
+            state.provisionalGiroTicks = 0;
+          }
+        }
+        // Si ya está en 'giro' confirmado, se queda ahí hasta que salga de GREEN
       }
     } else {
+      // Fuera de GREEN: reset completo del detector
+      state.maxLiveElasticity = 0;
       state.triggerStateM5 = 'reposo';
+      state.liveElasticityBuffer = [];
+      state.greenTickCount = 0;
+      state.provisionalGiroTicks = 0;
     }
 
-    // --- Versión Experimental ---
-    let finalStateExp = 'RED' as MarketState;
-    let fusedStateResultExp = { state: 'RED' as MarketState, explanation: 'Esperando datos...' };
-    let comparisonExp: SignalComparisonResult | null = null;
+    // Semáforo de peatón experimental
+    // Solo se activa con giro CONFIRMADO, no provisional
+    const checkAnomaly = finalState === 'GREEN' || finalState === 'YELLOW';
+    const checkBacktest = fusedStateResult.state === 'GREEN' || (comparison && comparison.winRate >= 65);
+    const checkTrigger = state.triggerStateM5 === 'giro';
 
-    const snapshotM5Exp = calculateSnapshotExp(symbol, state.builderM5.getCandles(), price, 'M5', timestamp);
-    const snapshotM15Exp = calculateSnapshotExp(symbol, state.builderM15.getCandles(), price, 'M15', timestamp);
+    // -- Integración de Pullback Shield --
+    const shieldSnap = this.consolidationService.getConsolidationSnapshot(symbol);
+    const isOpposedM5 = shieldSnap?.m5.detected && shieldSnap?.m5.alignment === 'opposed';
+    const isOpposedM15 = shieldSnap?.m15.detected && shieldSnap?.m15.alignment === 'opposed';
+    const shieldBlocked = isOpposedM5 || isOpposedM15 || shieldSnap?.superSignal.type === 'SUPER_STOP';
 
-    if (snapshotM5Exp && snapshotM15Exp) {
-      state.lastSnapshotM5Exp = snapshotM5Exp;
-      state.lastSnapshotM15Exp = snapshotM15Exp;
+    // -- Integración de Structure Engine (Sándwich de EMAs) --
+    const structureSnap = state.lastStructureM5;
+    const isCompression = structureSnap?.isCompressionSandwich === true;
 
-      finalStateExp = resolveMultiTFExp(snapshotM5Exp, snapshotM15Exp);
+    state.pedestrianLight = checkAnomaly && checkBacktest && checkTrigger ? 'WALK' : 'STOP';
 
-      comparisonExp = state.lastBacktestM5Exp
-        ? compareSignalWithHistoryExp(
-          { state: snapshotM5Exp.state, elasticity: snapshotM5Exp.elasticity, direction: snapshotM5Exp.direction },
-          state.lastBacktestM5Exp
-        )
-        : null;
+    // Guardar estado del escudo para las alertas Shield-Verified y el frontend
+    state.shieldBlocked = !!(shieldBlocked);
+    state.isCompression = !!(isCompression);
+    state.shieldExplanation = isCompression
+      ? '🚫 Sándwich de EMAs (EMA50 y EMA100 demasiado cerca).'
+      : shieldBlocked
+        ? (shieldSnap?.superSignal.recommendation || 'Consolidación en contra de la reversión.')
+        : '✅ Escudo despejado.';
 
-      fusedStateResultExp = fuseMarketState(finalStateExp, comparisonExp);
+    this.events.emit('broadcast', this.snapshotPayload(state, snapshotM5, snapshotM15, finalState, fusedStateResult, comparison));
 
-      // ╔══════════════════════════════════════════════════════════════════════╗
-      // ║  Detector de Pico Experimental — 3 Capas de Protección            ║
-      // ║  Capa 1: Umbral adaptativo (stddev)                               ║
-      // ║  Capa 2: Persistencia en GREEN (N ticks antes de armar)           ║
-      // ║  Capa 3: Giro provisional → confirmado (M ticks sostenidos)       ║
-      // ╚══════════════════════════════════════════════════════════════════════╝
-
-      // Constantes del detector — calibrar con backtest en /experimental
-      const ADAPTIVE_K = 1.5;           // multiplicador de stddev
-      const ADAPTIVE_FLOOR = 0.08;      // piso mínimo de retroceso
-      const BUFFER_SIZE = 30;           // ticks para calcular stddev
-      const GREEN_PERSISTENCE = 5;     // ticks consecutivos en GREEN antes de armar
-      const CONFIRM_TICKS = 3;         // ticks sostenidos para confirmar giro
-
-      if (fusedStateResultExp.state === 'GREEN') {
-        // --- Capa 1: Alimentar buffer de elasticidad para umbral adaptativo ---
-        state.liveElasticityBufferExp.push(snapshotM5Exp.elasticity);
-        if (state.liveElasticityBufferExp.length > BUFFER_SIZE) {
-          state.liveElasticityBufferExp.shift();
-        }
-
-        // --- Capa 2: Filtro de persistencia ---
-        state.greenTickCountExp++;
-
-        const detectorArmed = state.greenTickCountExp >= GREEN_PERSISTENCE;
-
-        if (!detectorArmed) {
-          // Aún no hay suficientes ticks en GREEN — trackear pico pero no disparar
-          if (snapshotM5Exp.elasticity > state.maxLiveElasticityExp) {
-            state.maxLiveElasticityExp = snapshotM5Exp.elasticity;
-          }
-          if (state.triggerStateM5Exp === 'reposo') {
-            state.triggerStateM5Exp = 'estirando';
-          }
-        } else {
-          // Detector armado — aplicar lógica de pico con umbral adaptativo
-
-          // Calcular umbral adaptativo basado en stddev del buffer
-          let adaptiveThreshold = ADAPTIVE_FLOOR;
-          if (state.liveElasticityBufferExp.length >= 5) {
-            const buf = state.liveElasticityBufferExp;
-            const mean = buf.reduce((a, b) => a + b, 0) / buf.length;
-            const variance = buf.reduce((a, v) => a + (v - mean) ** 2, 0) / buf.length;
-            const stddev = Math.sqrt(variance);
-            adaptiveThreshold = Math.max(ADAPTIVE_FLOOR, ADAPTIVE_K * stddev);
-          }
-
-          if (state.triggerStateM5Exp === 'reposo' || state.triggerStateM5Exp === 'estirando') {
-            // Fase de estiramiento — buscar pico máximo
-            if (snapshotM5Exp.elasticity > state.maxLiveElasticityExp) {
-              state.maxLiveElasticityExp = snapshotM5Exp.elasticity;
-              state.triggerStateM5Exp = 'estirando';
-              state.provisionalGiroTicksExp = 0; // reset si se actualiza el pico
-            } else if (state.maxLiveElasticityExp - snapshotM5Exp.elasticity >= adaptiveThreshold) {
-              // --- Capa 3: Primer tick que cumple el umbral → giro provisional ---
-              state.triggerStateM5Exp = 'giro-provisional';
-              state.provisionalGiroTicksExp = 1;
-            }
-          } else if (state.triggerStateM5Exp === 'giro-provisional') {
-            // --- Capa 3: Confirmación del giro ---
-            if (snapshotM5Exp.elasticity >= state.maxLiveElasticityExp) {
-              // Precio volvió a superar el pico → falso giro, cancelar
-              state.triggerStateM5Exp = 'estirando';
-              state.maxLiveElasticityExp = snapshotM5Exp.elasticity;
-              state.provisionalGiroTicksExp = 0;
-            } else if (state.maxLiveElasticityExp - snapshotM5Exp.elasticity >= adaptiveThreshold) {
-              // Sigue retrocediendo — sumar tick de confirmación
-              state.provisionalGiroTicksExp++;
-              if (state.provisionalGiroTicksExp >= CONFIRM_TICKS) {
-                state.triggerStateM5Exp = 'giro'; // ¡Confirmado!
-              }
-            } else {
-              // Retrocedió menos que el umbral — cancelar provisional
-              state.triggerStateM5Exp = 'estirando';
-              state.provisionalGiroTicksExp = 0;
-            }
-          }
-          // Si ya está en 'giro' confirmado, se queda ahí hasta que salga de GREEN
-        }
-      } else {
-        // Fuera de GREEN: reset completo del detector
-        state.maxLiveElasticityExp = 0;
-        state.triggerStateM5Exp = 'reposo';
-        state.liveElasticityBufferExp = [];
-        state.greenTickCountExp = 0;
-        state.provisionalGiroTicksExp = 0;
-      }
-
-      // Semáforo de peatón experimental
-      // Solo se activa con giro CONFIRMADO, no provisional
-      const checkAnomaly = finalStateExp === 'GREEN' || finalStateExp === 'YELLOW';
-      const checkBacktest = fusedStateResultExp.state === 'GREEN' || (comparisonExp && comparisonExp.winRate >= 65);
-      const checkTrigger = state.triggerStateM5Exp === 'giro';
-      
-      // -- Integración de Pullback Shield --
-      const shieldSnap = this.consolidationService.getConsolidationSnapshot(symbol);
-      const isOpposedM5 = shieldSnap?.m5.detected && shieldSnap?.m5.alignment === 'opposed';
-      const isOpposedM15 = shieldSnap?.m15.detected && shieldSnap?.m15.alignment === 'opposed';
-      const shieldBlocked = isOpposedM5 || isOpposedM15 || shieldSnap?.superSignal.type === 'SUPER_STOP';
-
-      // -- Integración de Structure Engine (Sándwich de EMAs) --
-      const structureSnap = state.lastStructureM5;
-      const isCompression = structureSnap?.isCompressionSandwich === true;
-      const isDoublePattern = structureSnap?.doublePattern === 'double_top' || structureSnap?.doublePattern === 'double_bottom';
-      
-      // Ya NO bloqueamos fusedStateResultExp ni pedestrianLight por el escudo.
-      // Las alertas experimentales ahora fluyen libremente.
-      // Las nuevas alertas "Shield-Verified" se encargan de filtrar por el escudo.
-      state.pedestrianLight = checkAnomaly && checkBacktest && checkTrigger ? 'WALK' : 'STOP';
-
-      // Guardar estado del escudo para las alertas Shield-Verified y el frontend
-      state.shieldBlocked = !!(shieldBlocked);
-      state.isCompression = !!(isCompression);
-      state.shieldExplanation = isCompression
-        ? '🚫 Sándwich de EMAs (EMA50 y EMA100 demasiado cerca).'
-        : shieldBlocked
-          ? (shieldSnap?.superSignal.recommendation || 'Consolidación en contra de la reversión.')
-          : '✅ Escudo despejado.';
-    }
-
-    // Broadcast a través de eventos (Tradicional + Experimental)
-    this.events.emit('broadcast', {
-      type: 'snapshot',
-      symbol,
-      m5: snapshotM5,
-      m15: snapshotM15,
-      finalState,
-      fusedState: fusedStateResult.state,
-      triggerState: state.triggerStateM5,
-      lastClosedElasticityM5: state.lastClosedElasticityM5,
-      prevClosedElasticityM5: state.prevClosedElasticityM5,
-      fusedExplanation: fusedStateResult.explanation,
-      fusedComparison: comparison,
-      backtest: state.lastBacktestM5,
-      experimental: snapshotM5Exp && snapshotM15Exp ? {
-        m5: snapshotM5Exp,
-        m15: snapshotM15Exp,
-        finalState: finalStateExp,
-        fusedState: fusedStateResultExp.state,
-        triggerState: state.triggerStateM5Exp,
-        pedestrianLight: state.pedestrianLight,
-        fusedExplanation: fusedStateResultExp.explanation,
-        fusedComparison: comparisonExp,
-        backtest: state.lastBacktestM5Exp,
-        lastClosedElasticityM5: state.lastClosedElasticityM5Exp,
-        prevClosedElasticityM5: state.prevClosedElasticityM5Exp,
-      } : undefined
-    } satisfies BackendMessage);
-
-    // Alerta de Telegram autónoma tradicional
-    this.checkAndSendTelegramAlert(state, fusedStateResult, finalState, snapshotM5, snapshotM15, comparison);
-
-    // Alerta de Telegram autónoma experimental
-    if (snapshotM5Exp && snapshotM15Exp) {
-      this.checkAndSendTelegramAlertExp(state, fusedStateResultExp, finalStateExp, snapshotM5Exp, snapshotM15Exp, comparisonExp);
-    }
+    this.checkAlertV1(state, fusedStateResult, snapshotM5, snapshotM15, comparison);
+    this.alertsService.onTick(symbol, price, timestamp, state.zoneEma);
+    this.checkAlertV2(state, price, fusedStateResult, snapshotM5, snapshotM15, comparison);
 
     if (Math.random() < 0.05) {
       console.log(
@@ -1298,513 +1240,222 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
     this.runFomowatchSimulation(symbol, snapshotM5.price);
   }
 
-  private async checkAndSendTelegramAlert(
+  private async checkAlertV1(
     state: SymbolState,
     fused: FusedStateResult,
-    finalState: MarketState,
-    m5: MarketSnapshot,
-    m15: MarketSnapshot,
-    comparison: any
+    m5: DirectionalSnapshot,
+    m15: DirectionalSnapshot,
+    comparison: SignalComparisonResult | null
   ): Promise<void> {
     const now = Date.now();
     const token = process.env.TELEGRAM_BOT_TOKEN;
     const chatId = process.env.TELEGRAM_CHAT_ID;
 
     if (!token || !chatId) {
-      state.previousFusedState = fused.state;
-      state.previousFinalState = finalState;
       state.previousTriggerStateM5 = state.triggerStateM5;
       return;
     }
 
-    const direction = m5.price > m5.ema100 ? 'SELL' : 'BUY';
-
-    // 🟢 Caso 1: Alerta Tipo A (Señal Confirmada e Históricamente Sólida)
-    const isNewFusedGreen = state.previousFusedState !== 'GREEN' && fused.state === 'GREEN';
-    const canAlertA = now - state.lastTelegramAlertTimeA > 300000; // 5 min cooldown
-
-    if (isNewFusedGreen && canAlertA) {
-      state.lastTelegramAlertTimeA = now;
-      await this.createPendingSignalAndSendTelegram(
-        state,
-        'Tipo A',
-        direction,
-        'normal',
-        m5.price,
-        fused.state,
-        m5.state,
-        m15.state,
-        m5.elasticity,
-        m15.elasticity,
-        comparison,
-        fused.explanation
-      );
-    }
-
-    // 🟡 Caso 2: Alerta Tipo B (Señal en Tiempo Real) — DESACTIVADA: no enviar a Telegram
-    // const isNewFinalGreen = state.previousFinalState !== 'GREEN' && finalState === 'GREEN';
-    // const canAlertB = now - state.lastTelegramAlertTimeB > 300000; // 5 min cooldown
-
-    // if (isNewFinalGreen && fused.state !== 'GREEN' && canAlertB) {
-    //   state.lastTelegramAlertTimeB = now;
-    //   await this.createPendingSignalAndSendTelegram(
-    //     state,
-    //     'Tipo B',
-    //     direction,
-    //     'normal',
-    //     m5.price,
-    //     fused.state,
-    //     m5.state,
-    //     m15.state,
-    //     m5.elasticity,
-    //     m15.elasticity,
-    //     comparison,
-    //     'Sobre-estirado en M5/M15 (finalState: GREEN) pero sin confluencia de backtest.'
-    //   );
-    // }
-
-    // 🪃 Caso 3: Alerta Tipo C (Gatillo de Agotamiento / Giro de Elasticidad)
     const isNewGiro = state.triggerStateM5 === 'giro' && state.previousTriggerStateM5 !== 'giro';
-    const canAlertTrigger = now - state.lastTelegramAlertTimeTrigger > 290000; // ~5 min cooldown
+    const canAlert = now - state.lastAlertTimeV1 > 290000;
 
-    if (isNewGiro && canAlertTrigger) {
-      state.lastTelegramAlertTimeTrigger = now;
-      const decaimiento = (state.prevClosedElasticityM5 ?? 0) - (state.lastClosedElasticityM5 ?? 0);
-      await this.createPendingSignalAndSendTelegram(
-        state,
-        'Tipo C',
-        direction,
-        'normal',
-        m5.price,
-        fused.state,
-        m5.state,
-        m15.state,
-        m5.elasticity,
-        m15.elasticity,
+    if (isNewGiro && canAlert) {
+      state.lastAlertTimeV1 = now;
+      await this.alertsService.sendAlert({
+        version: 'v1',
+        name: 'Giro',
+        symbol: state.symbol,
+        direction: m5.direction,
+        price: m5.price,
+        fusedState: fused.state,
+        m5State: m5.state,
+        m15State: m15.state,
+        m5Elasticity: m5.elasticity,
+        m15Elasticity: m15.elasticity,
         comparison,
-        `La elasticidad ha comenzado a ceder en M5 (decae -${decaimiento.toFixed(2)}).`
-      );
+        structure: state.lastStructureM5,
+        pedestrianLight: state.pedestrianLight,
+        shieldClear: !state.shieldBlocked && !state.isCompression,
+        shieldExplanation: state.shieldExplanation,
+        emaTarget: state.zoneEma ?? m5.ema100,
+        atr: state.zoneAtr,
+        detailLines: [
+          'Detalle: la elasticidad empezó a ceder en M5 (giro confirmado en la vela en curso).',
+          ...this.zoneLineForV1(state, m5.price),
+        ],
+        features: {
+          engineEma100: m5.ema100,
+          engineAtr: m5.atr,
+          maxLiveElasticity: state.maxLiveElasticity,
+          percentileM5: m5.percentile,
+          percentileM15: m15.percentile,
+          shieldExplanation: state.shieldExplanation,
+          zone: this.zoneView(state, m5.price),
+        },
+      });
     }
 
-    state.previousFusedState = fused.state;
-    state.previousFinalState = finalState;
     state.previousTriggerStateM5 = state.triggerStateM5;
   }
 
-  private async checkAndSendTelegramAlertExp(
+  private async checkAlertV2(
     state: SymbolState,
+    price: number,
     fused: FusedStateResult,
-    finalState: MarketState,
-    m5: MarketSnapshot & { direction: 'BUY' | 'SELL' },
-    m15: MarketSnapshot & { direction: 'BUY' | 'SELL' },
-    comparison: any
+    m5: DirectionalSnapshot,
+    m15: DirectionalSnapshot,
+    comparison: SignalComparisonResult | null
   ): Promise<void> {
-    const now = Date.now();
-    const token = process.env.TELEGRAM_BOT_TOKEN;
-    const chatId = process.env.TELEGRAM_CHAT_ID;
+    const model = state.zoneModel;
+    const ema = state.zoneEma;
+    const atr = state.zoneAtr;
+    if (!model || ema === null || atr === null || atr <= 0) return;
 
-    if (!token || !chatId) {
-      state.previousFusedStateExp = fused.state;
-      state.previousFinalStateExp = finalState;
-      state.previousTriggerStateM5Exp = state.triggerStateM5Exp;
-      state.previousPedestrianLight = state.pedestrianLight;
-      return;
+    if ((state.v2Side === 1 && price <= ema) || (state.v2Side === -1 && price >= ema)) {
+      state.v2Side = null;
+      state.v2Alerted = false;
+    }
+    const side: 1 | -1 = price > ema ? 1 : -1;
+    if (state.v2Side !== side) {
+      state.v2Side = side;
+      state.v2Alerted = false;
     }
 
-    const direction = m5.direction;
+    const level = ema + side * model.q75 * atr;
+    const crossed = side === 1 ? price >= level : price <= level;
+    const m15SameSide = state.zoneM15Ema !== null && (price > state.zoneM15Ema) === (side === 1);
+    if (!crossed || state.v2Alerted || !m15SameSide || model.episodes < ZONE_DEFAULTS.minEpisodes) return;
+    if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_CHAT_ID) return;
 
-    // 1️⃣ Alerta Experimental Tipo A
-    const isNewFusedGreen = state.previousFusedStateExp !== 'GREEN' && fused.state === 'GREEN';
-    const canAlertA = now - state.lastTelegramAlertTimeAExp > 300000;
+    state.v2Alerted = true;
+    const view = this.zoneView(state, price)!;
+    const decimals = state.symbol.includes('JPY') ? 3 : 5;
+    const days = (model.toTime - model.fromTime) / 86_400_000;
+    const touchText = view.touch4h === null
+      ? 'sin datos'
+      : `${Math.round(view.touch4h * 100)} % (${model.touchWithinBars.touched} de ${model.touchWithinBars.count})`;
 
-    if (isNewFusedGreen && canAlertA) {
-      state.lastTelegramAlertTimeAExp = now;
-      await this.createPendingSignalAndSendTelegram(
-        state,
-        'Tipo A',
-        direction,
-        'experimental',
-        m5.price,
-        fused.state,
-        m5.state,
-        m15.state,
-        m5.elasticity,
-        m15.elasticity,
-        comparison,
-        fused.explanation
-      );
-    }
-
-    // 2️⃣ Alerta Experimental Tipo B — DESACTIVADA: no enviar a Telegram
-    // const isNewFinalGreen = state.previousFinalStateExp !== 'GREEN' && finalState === 'GREEN';
-    // const canAlertB = now - state.lastTelegramAlertTimeBExp > 300000;
-
-    // if (isNewFinalGreen && fused.state !== 'GREEN' && canAlertB) {
-    //   state.lastTelegramAlertTimeBExp = now;
-    //   await this.createPendingSignalAndSendTelegram(
-    //     state,
-    //     'Tipo B',
-    //     direction,
-    //     'experimental',
-    //     m5.price,
-    //     fused.state,
-    //     m5.state,
-    //     m15.state,
-    //     m5.elasticity,
-    //     m15.elasticity,
-    //     comparison,
-    //     'Sobre-estirado en M5/M15 pero sin ventaja estadística en backtest.'
-    //   );
-    // }
-
-    // 3️⃣ Alerta Experimental Tipo C
-    const isNewGiro = state.triggerStateM5Exp === 'giro' && state.previousTriggerStateM5Exp !== 'giro';
-    const canAlertTrigger = now - state.lastTelegramAlertTimeTriggerExp > 290000;
-
-    if (isNewGiro && canAlertTrigger) {
-      state.lastTelegramAlertTimeTriggerExp = now;
-      await this.createPendingSignalAndSendTelegram(
-        state,
-        'Tipo C',
-        direction,
-        'experimental',
-        m5.price,
-        fused.state,
-        m5.state,
-        m15.state,
-        m5.elasticity,
-        m15.elasticity,
-        comparison,
-        'La elasticidad ha comenzado a ceder en tiempo real en M5 (Gatillo).'
-      );
-    }
-
-    // 4️⃣ Alerta del Semáforo de Peatón (Transición a WALK / Todas las confluencias correctas)
-    const isNewWalk = state.pedestrianLight === 'WALK' && state.previousPedestrianLight !== 'WALK';
-    const canAlertPedestrian = now - state.lastTelegramAlertTimePedestrian > 300000;
-
-    if (isNewWalk && canAlertPedestrian) {
-      state.lastTelegramAlertTimePedestrian = now;
-      await this.createPendingSignalAndSendTelegram(
-        state,
-        'Semáforo Peatón',
-        direction,
-        'experimental',
-        m5.price,
-        fused.state,
-        m5.state,
-        m15.state,
-        m5.elasticity,
-        m15.elasticity,
-        comparison,
-        '¡CAMINAR (WALK)! Todas las confluencias experimentales (Anomalía + Backtest + Giro) están alineadas.'
-      );
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // 🛡️ ALERTAS SHIELD-VERIFIED (solo disparan si el Pullback Shield aprueba)
-    // ═══════════════════════════════════════════════════════════════════════
-    const shieldClear = !state.shieldBlocked && !state.isCompression;
-
-    // 5️⃣ Alerta Shield-Verified Tipo A
-    if (isNewFusedGreen && shieldClear) {
-      const canAlertAShield = now - state.lastTelegramAlertTimeAShield > 300000;
-      if (canAlertAShield) {
-        state.lastTelegramAlertTimeAShield = now;
-        await this.createPendingSignalAndSendTelegram(
-          state,
-          '🛡️ Tipo A · Shield ✓',
-          direction,
-          'experimental',
-          m5.price,
-          fused.state,
-          m5.state,
-          m15.state,
-          m5.elasticity,
-          m15.elasticity,
-          comparison,
-          '🛡️✅ SHIELD VERIFIED — Señal confirmada Y escudo despejado. Sin pullbacks ni compresión detectados. Máxima convicción.'
-        );
-      }
-    }
-
-    // 6️⃣ Alerta Shield-Verified Tipo C (Giro)
-    if (isNewGiro && shieldClear) {
-      const canAlertCShield = now - state.lastTelegramAlertTimeCShield > 290000;
-      if (canAlertCShield) {
-        state.lastTelegramAlertTimeCShield = now;
-        await this.createPendingSignalAndSendTelegram(
-          state,
-          '🛡️ Tipo C · Shield ✓',
-          direction,
-          'experimental',
-          m5.price,
-          fused.state,
-          m5.state,
-          m15.state,
-          m5.elasticity,
-          m15.elasticity,
-          comparison,
-          '🛡️✅ SHIELD VERIFIED — Giro de elasticidad confirmado Y escudo despejado. Sin consolidación geométrica en contra.'
-        );
-      }
-    }
-
-    // 7️⃣ Alerta Shield-Verified Semáforo Peatón
-    if (isNewWalk && shieldClear) {
-      const canAlertPedestrianShield = now - state.lastTelegramAlertTimePedestrianShield > 300000;
-      if (canAlertPedestrianShield) {
-        state.lastTelegramAlertTimePedestrianShield = now;
-        await this.createPendingSignalAndSendTelegram(
-          state,
-          '🛡️ Semáforo Peatón · Shield ✓',
-          direction,
-          'experimental',
-          m5.price,
-          fused.state,
-          m5.state,
-          m15.state,
-          m5.elasticity,
-          m15.elasticity,
-          comparison,
-          '🛡️✅ SHIELD VERIFIED — ¡WALK! Todas las confluencias alineadas + Escudo despejado. Máxima convicción para operar.'
-        );
-      }
-    }
-
-    state.previousFusedStateExp = fused.state;
-    state.previousFinalStateExp = finalState;
-    state.previousTriggerStateM5Exp = state.triggerStateM5Exp;
-    state.previousPedestrianLight = state.pedestrianLight;
-  }
-
-  private async createPendingSignalAndSendTelegram(
-    symbolState: SymbolState,
-    alertName: string,
-    direction: 'BUY' | 'SELL',
-    tradeMode: 'normal' | 'experimental',
-    entryPrice: number,
-    fusedState: MarketState,
-    elasticityM5State: MarketState,
-    elasticityM15State: MarketState,
-    elasticityM5Value: number,
-    elasticityM15Value: number,
-    comparison: any,
-    explanation: string
-  ): Promise<void> {
-    await RequestContext.create(this.em, async () => {
-      const token = process.env.TELEGRAM_BOT_TOKEN;
-      const chatId = process.env.TELEGRAM_CHAT_ID;
-      if (!token || !chatId) return;
-
-      try {
-        const struct = symbolState.lastStructureM5;
-        let tpPrice = 0;
-        let slPrice = 0;
-        const decimals = symbolState.symbol.includes('JPY') ? 3 : 5;
-
-        if (struct && struct.nearestSR) {
-          const entry = entryPrice;
-          const srPrice = struct.nearestSR.price;
-          const srDistance = struct.nearestSR.distance;
-          const srType = struct.nearestSR.type;
-
-          if (srDistance > 0) {
-            const atr = Math.abs(entry - srPrice) / srDistance;
-            if (direction === 'BUY') {
-              if (srType === 'resistance') {
-                tpPrice = entry + (srPrice - entry) * 0.85;
-                slPrice = entry - 1.5 * atr;
-              } else {
-                slPrice = srPrice - 0.2 * atr;
-                tpPrice = entry + 1.5 * atr;
-              }
-            } else {
-              if (srType === 'support') {
-                tpPrice = entry - (entry - srPrice) * 0.85;
-                slPrice = entry + 1.5 * atr;
-              } else {
-                slPrice = srPrice + 0.2 * atr;
-                tpPrice = entry - 1.5 * atr;
-              }
-            }
-          }
-        }
-
-        if (tpPrice === 0 || slPrice === 0) {
-          const pips = symbolState.symbol.includes('JPY') ? 0.15 : 0.0015;
-          if (direction === 'BUY') {
-            tpPrice = entryPrice + pips;
-            slPrice = entryPrice - pips;
-          } else {
-            tpPrice = entryPrice - pips;
-            slPrice = entryPrice + pips;
-          }
-        }
-
-        tpPrice = Math.round(tpPrice * Math.pow(10, decimals)) / Math.pow(10, decimals);
-        slPrice = Math.round(slPrice * Math.pow(10, decimals)) / Math.pow(10, decimals);
-
-        const signal = new PendingSignal();
-        signal.symbol = symbolState.symbol;
-        signal.direction = direction;
-        signal.tradeMode = tradeMode;
-        signal.status = 'pending';
-        signal.entryPrice = entryPrice;
-        signal.tpPrice = tpPrice;
-        signal.slPrice = slPrice;
-        signal.session = detectSession(new Date());
-
-        signal.elasticityM5State = elasticityM5State;
-        signal.elasticityM15State = elasticityM15State;
-        signal.fusedState = fusedState;
-        signal.elasticityM5Value = elasticityM5Value;
-        signal.elasticityM15Value = elasticityM15Value;
-
-        if (struct) {
-          signal.structureState = alertName === 'Tipo A' ? 'STRONG' : struct.structureState;
-          signal.structureSignal = struct.signal;
-          signal.rsiAtEntry = struct.rsi;
-          signal.divergenceAtEntry = struct.divergence;
-          signal.ema200SlopeAtEntry = struct.ema200Slope;
-          if (struct.nearestSR) {
-            signal.nearestSRPrice = struct.nearestSR.price;
-            signal.nearestSRType = struct.nearestSR.type;
-            signal.nearestSRStrength = struct.nearestSR.strength;
-            signal.nearestSRDistance = struct.nearestSR.distance;
-          }
-        } else if (alertName === 'Tipo A') {
-          signal.structureState = 'STRONG';
-        }
-
-        signal.contextualWinRate = comparison ? comparison.winRate : null;
-        signal.contextualCases = comparison ? comparison.similarSignals : null;
-        signal.hasTypeC = alertName === 'Tipo C';
-        signal.hasPedestrianLight = alertName === 'Semáforo Peatón' || (tradeMode === 'experimental' && symbolState.pedestrianLight === 'WALK');
-        signal.openedAt = new Date();
-
-        this.em.persist(signal);
-        await this.em.flush();
-
-        const directionEmoji = direction === 'BUY' ? '🟢 COMPRA (BUY) 📈' : '🔴 VENTA (SELL) 📉';
-        const modeEmoji = tradeMode === 'experimental' ? '🧪 [EXPERIMENTAL]' : '💼 [NORMAL]';
-
-        let messageText = `${modeEmoji} 🚨 **ALERTA DE TRADING: ${alertName}**\n\n`;
-        messageText += `Símbolo: **${symbolState.symbol}**\n`;
-        messageText += `Sugerido: **${directionEmoji}**\n`;
-        messageText += `Precio: \`${entryPrice.toFixed(5)}\`\n`;
-        messageText += `TP Sugerido: \`${tpPrice.toFixed(5)}\` | SL Sugerido: \`${slPrice.toFixed(5)}\`\n\n`;
-
-        if (explanation) {
-          messageText += `Detalle: _${explanation}_\n\n`;
-        }
-        if (comparison) {
-          messageText += `Estadística Contextual:\n`;
-          messageText += `· Win Rate: **${comparison.winRate.toFixed(0)}%**\n`;
-          messageText += `· Casos Similares: **${comparison.similarSignals}**\n`;
-        }
-
-        const replyMarkup = {
-          inline_keyboard: [
-            [
-              { text: '✅ Registrar Trade', callback_data: `approve:${signal.id}` },
-              { text: '❌ Descartar Alerta', callback_data: `discard:${signal.id}` }
-            ]
-          ]
-        };
-
-        const url = `https://api.telegram.org/bot${token}/sendMessage`;
-        await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            chat_id: chatId,
-            text: messageText,
-            parse_mode: 'Markdown',
-            reply_markup: replyMarkup
-          }),
-        });
-
-        console.log(`[Pending-Signal] Alerta ${alertName} (${tradeMode}) #${signal.id} guardada y enviada a Telegram.`);
-      } catch (err) {
-        console.error(`[Pending-Signal] Error procesando señal pendiente ${alertName}:`, err);
-      }
+    await this.alertsService.sendAlert({
+      version: 'v2',
+      name: 'Zona de agotamiento',
+      symbol: state.symbol,
+      direction: side === 1 ? 'SELL' : 'BUY',
+      price,
+      fusedState: fused.state,
+      m5State: m5.state,
+      m15State: m15.state,
+      m5Elasticity: m5.elasticity,
+      m15Elasticity: m15.elasticity,
+      comparison,
+      structure: state.lastStructureM5,
+      pedestrianLight: state.pedestrianLight,
+      shieldClear: !state.shieldBlocked && !state.isCompression,
+      shieldExplanation: state.shieldExplanation,
+      emaTarget: ema,
+      atr,
+      detailLines: [
+        `Zona (donde terminaron los estirones pasados): p50 \`${view.q50.toFixed(decimals)}\` · p75 \`${view.q75.toFixed(decimals)}\` · p90 \`${view.q90.toFixed(decimals)}\``,
+        `Si sigue estirando (los que pasaron el p75): mediana +${view.residualMedianPips.toFixed(1)} pips · p90 +${view.residualP90Pips.toFixed(1)} · máx +${view.residualMaxPips.toFixed(1)}`,
+        `Volvieron a la EMA en 4 h: ${touchText} · Historial: ${model.episodes} episodios en ${days.toFixed(0)} días`,
+      ],
+      features: { zone: view, model },
     });
   }
 
   private async runFomowatchSimulation(symbol: string, currentPrice: number): Promise<void> {
-    await RequestContext.create(this.em, async () => {
-      try {
-        const activeSignals = await this.em.getRepository(PendingSignal).find({
-          symbol,
-          status: 'discarded_active'
-        });
+    await this.refreshFomowatchSignals(symbol);
+    const activeSignals = this.fomowatchSignals.get(symbol)?.signals ?? [];
+    if (activeSignals.length === 0) return;
 
-        if (activeSignals.length === 0) return;
+    try {
+      for (const signal of [...activeSignals]) {
+        const totalMinutes = (Date.now() - signal.openedAt.getTime()) / 60000;
+        let shouldClose = false;
+        let exitPrice = currentPrice;
+        let statusResult = signal.status;
 
-        let hasClosedAny = false;
-
-        for (const signal of activeSignals) {
-          const totalMinutes = (Date.now() - signal.openedAt.getTime()) / 60000;
-          let shouldClose = false;
-          let exitPrice = currentPrice;
-          let statusResult = signal.status;
-
-          if (signal.direction === 'BUY') {
-            if (currentPrice >= signal.tpPrice) {
-              shouldClose = true;
-              exitPrice = signal.tpPrice;
-              statusResult = 'discarded_win';
-            } else if (currentPrice <= signal.slPrice) {
-              shouldClose = true;
-              exitPrice = signal.slPrice;
-              statusResult = 'discarded_loss';
-            } else if (totalMinutes >= 240) { // 4 horas timeout
-              shouldClose = true;
-              exitPrice = currentPrice;
-              statusResult = 'discarded_timeout';
-            }
-          } else { // SELL
-            if (currentPrice <= signal.tpPrice) {
-              shouldClose = true;
-              exitPrice = signal.tpPrice;
-              statusResult = 'discarded_win';
-            } else if (currentPrice >= signal.slPrice) {
-              shouldClose = true;
-              exitPrice = signal.slPrice;
-              statusResult = 'discarded_loss';
-            } else if (totalMinutes >= 240) { // 4 horas timeout
-              shouldClose = true;
-              exitPrice = currentPrice;
-              statusResult = 'discarded_timeout';
-            }
+        if (signal.direction === 'BUY') {
+          if (currentPrice >= signal.tpPrice) {
+            shouldClose = true;
+            exitPrice = signal.tpPrice;
+            statusResult = 'discarded_win';
+          } else if (currentPrice <= signal.slPrice) {
+            shouldClose = true;
+            exitPrice = signal.slPrice;
+            statusResult = 'discarded_loss';
+          } else if (totalMinutes >= 240) { // 4 horas timeout
+            shouldClose = true;
+            exitPrice = currentPrice;
+            statusResult = 'discarded_timeout';
           }
-
-          if (shouldClose) {
-            const pip = signal.direction === 'BUY'
-              ? exitPrice - signal.entryPrice
-              : signal.entryPrice - exitPrice;
-
-            const pnl = (pip / signal.entryPrice) * 200 * 2.0; // apalancamiento x200, inversión $2.00
-
-            signal.status = statusResult;
-            signal.closedAt = new Date();
-            signal.totalMinutesOpen = Math.max(1, Math.round(totalMinutes));
-            signal.pnl = Math.round(pnl * 10000) / 10000;
-
-            this.em.persist(signal);
-            hasClosedAny = true;
-            console.log(`[Fomowatch] Alerta descartada #${signal.id} (${signal.symbol}) cerrada virtualmente como ${statusResult} (P&L: $${signal.pnl}, Minutos: ${signal.totalMinutesOpen}).`);
+        } else { // SELL
+          if (currentPrice <= signal.tpPrice) {
+            shouldClose = true;
+            exitPrice = signal.tpPrice;
+            statusResult = 'discarded_win';
+          } else if (currentPrice >= signal.slPrice) {
+            shouldClose = true;
+            exitPrice = signal.slPrice;
+            statusResult = 'discarded_loss';
+          } else if (totalMinutes >= 240) { // 4 horas timeout
+            shouldClose = true;
+            exitPrice = currentPrice;
+            statusResult = 'discarded_timeout';
           }
         }
 
-        if (hasClosedAny) {
-          await this.em.flush();
+        if (shouldClose) {
+          const pip = signal.direction === 'BUY'
+            ? exitPrice - signal.entryPrice
+            : signal.entryPrice - exitPrice;
+
+          const pnl = (pip / signal.entryPrice) * 200 * 2.0; // apalancamiento x200, inversión $2.00
+
+          const closedAt = new Date();
+          const totalMinutesOpen = Math.max(1, Math.round(totalMinutes));
+          const roundedPnl = Math.round(pnl * 10000) / 10000;
+
+          activeSignals.splice(activeSignals.indexOf(signal), 1);
+          const updated = await this.em.fork().nativeUpdate(
+            PendingSignal,
+            { id: signal.id, status: 'discarded_active' },
+            { status: statusResult, closedAt, totalMinutesOpen, pnl: roundedPnl },
+          );
+          if (updated > 0) {
+            console.log(`[Fomowatch] Alerta descartada #${signal.id} (${signal.symbol}) cerrada virtualmente como ${statusResult} (P&L: $${roundedPnl}, Minutos: ${totalMinutesOpen}).`);
+          }
         }
-      } catch (err) {
-        console.error('[Fomowatch] Error en bucle de simulación pasiva:', err);
       }
-    });
+    } catch (err) {
+      console.error('[Fomowatch] Error en bucle de simulación pasiva:', err);
+    }
+  }
+
+  private async refreshFomowatchSignals(symbol: string): Promise<void> {
+    const cached = this.fomowatchSignals.get(symbol);
+    if (cached && Date.now() - cached.loadedAt < FOMOWATCH_REFRESH_MS) return;
+    if (this.fomowatchLoading.has(symbol)) return;
+    this.fomowatchLoading.add(symbol);
+    try {
+      const rows = await this.em.fork().find(PendingSignal, { symbol, status: 'discarded_active' });
+      this.fomowatchSignals.set(symbol, {
+        loadedAt: Date.now(),
+        signals: rows.map((r) => ({
+          id: r.id,
+          symbol: r.symbol,
+          direction: r.direction,
+          status: r.status,
+          entryPrice: Number(r.entryPrice),
+          tpPrice: Number(r.tpPrice),
+          slPrice: Number(r.slPrice),
+          openedAt: new Date(r.openedAt),
+        })),
+      });
+    } catch (err) {
+      console.error('[Fomowatch] Error leyendo alertas descartadas:', err);
+    } finally {
+      this.fomowatchLoading.delete(symbol);
+    }
   }
 
   private recordDroppedTick(reason: string) {

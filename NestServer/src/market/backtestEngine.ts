@@ -1,7 +1,6 @@
-import type { Candle, BacktestConfig, BacktestResult, BacktestEvent, MarketState } from './types';
+import type { Candle, BacktestConfig, BacktestEvent, BacktestResult, MarketState } from './types';
 
-// ─── Percentile Engine Local para Backtesting ───────────────────────────────
-
+// ─── Percentile Engine Local para Backtesting Experimental ───────────────────
 class LocalPercentileEngine {
   private buffer: number[] = [];
   private windowSize: number;
@@ -28,15 +27,14 @@ class LocalPercentileEngine {
   }
 }
 
-// ─── Funciones Auxiliares del Motor ─────────────────────────────────────────
-
+// ─── Funciones Auxiliares ───────────────────────────────────────────────────
 function calculateElasticity(price: number, ema100: number, atr: number): number {
   if (atr <= 0) return 0;
   return Math.abs(price - ema100) / atr;
 }
 
 function resolveElasticityState(elasticity: number, percentile: number): MarketState {
-  if (percentile >= 80 && elasticity <= 10.0) {
+  if (percentile >= 80 && elasticity >= 1.0 && elasticity <= 10.0) {
     return 'GREEN';
   }
   if (percentile >= 60) {
@@ -45,8 +43,7 @@ function resolveElasticityState(elasticity: number, percentile: number): MarketS
   return 'RED';
 }
 
-// ─── Función Principal de Backtesting ───────────────────────────────────────
-
+// ─── Función principal de backtesting (EMA exponencial real) ─────────────────
 export function runBacktest(
   candles: Candle[],
   config: BacktestConfig
@@ -54,14 +51,29 @@ export function runBacktest(
   const percentileEngine = new LocalPercentileEngine(200);
   const events: BacktestEvent[] = [];
 
+  if (candles.length < config.emaPeriod) {
+    return { totalSignals: 0, wins: 0, winRate: 0, avgBarsToRevert: 0, events: [] };
+  }
+
+  // Pre-calcular la EMA100 exponencial real para todas las velas
+  const alpha = 2 / (config.emaPeriod + 1);
+  const emas: number[] = new Array(candles.length).fill(0);
+  
+  // Semilla inicial usando SMA del primer periodo
+  let currentEma = candles.slice(0, config.emaPeriod).reduce((sum, c) => sum + c.close, 0) / config.emaPeriod;
+  emas[config.emaPeriod - 1] = currentEma;
+
+  for (let i = config.emaPeriod; i < candles.length; i++) {
+    currentEma = alpha * candles[i].close + (1 - alpha) * currentEma;
+    emas[i] = currentEma;
+  }
+
+  // Bucle de simulación para recopilar eventos
   for (let i = config.emaPeriod; i < candles.length; i++) {
     const candle = candles[i];
+    const ema = emas[i];
 
-    // 1️⃣ EMA simple sobre las últimas `emaPeriod` velas
-    const slice = candles.slice(i - config.emaPeriod, i);
-    const ema = slice.reduce((sum, c) => sum + c.close, 0) / config.emaPeriod;
-
-    // 2️⃣ ATR14 rolling
+    // ATR14 rolling
     const atrStart = Math.max(1, i - 13);
     let atrSum = 0;
     let atrCount = 0;
@@ -77,30 +89,33 @@ export function runBacktest(
     }
     const atr = atrCount > 0 ? atrSum / atrCount : 0.0001;
 
-    // 3️⃣ Elasticidad
+    // Elasticidad y Percentil
     const elasticity = calculateElasticity(candle.close, ema, atr);
-
-    // 4️⃣ Percentil
     const percentile = percentileEngine.push(elasticity);
-
-    // 5️⃣ Estado
     const state = resolveElasticityState(elasticity, percentile);
 
-    // Solo registramos eventos cuando habría habido señal GREEN
     if (state !== 'GREEN') continue;
 
-    // 6️⃣ Buscar reversión en las siguientes `maxBarsToRevert` velas
+    // Determinar la dirección de la sobre-extensión
+    const direction: 'BUY' | 'SELL' = candle.close < ema ? 'BUY' : 'SELL';
+
+    // maxBarsToRevert adaptativo: señales más extremas necesitan más tiempo para revertir.
+    // elas 1.2 → 26 bars (2h10m) | elas 2.5 → 33 bars (2h45m) | elas 5.08 → 45 bars (3h45m)
+    const adaptiveMaxBars = Math.min(50, Math.round(config.maxBarsToRevert + 5 * elasticity));
+
+    // Buscar reversión en las siguientes velas (ventana adaptativa)
     let reverted = false;
 
     for (
       let j = 1;
-      j <= config.maxBarsToRevert && i + j < candles.length;
+      j <= adaptiveMaxBars && i + j < candles.length;
       j++
     ) {
       const future = candles[i + j];
+      const futureEma = emas[i + j];
 
-      const revertedDown = candle.close > ema && future.low <= ema;
-      const revertedUp = candle.close < ema && future.high >= ema;
+      const revertedDown = direction === 'SELL' && future.low <= futureEma;
+      const revertedUp = direction === 'BUY' && future.high >= futureEma;
 
       if (revertedDown || revertedUp) {
         events.push({
@@ -109,25 +124,25 @@ export function runBacktest(
           barsToRevert: j,
           state,
           elasticity,
+          direction,
         });
         reverted = true;
         break;
       }
     }
 
-    // Si no revirtió dentro del límite → loss (exitIndex = -1)
     if (!reverted) {
       events.push({
         entryIndex: i,
         exitIndex: -1,
-        barsToRevert: config.maxBarsToRevert,
+        barsToRevert: adaptiveMaxBars,
         state,
         elasticity,
+        direction,
       });
     }
   }
 
-  // 📊 Métricas finales
   const wins = events.filter((e) => e.exitIndex !== -1);
   const totalSignals = events.length;
 

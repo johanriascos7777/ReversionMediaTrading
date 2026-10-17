@@ -4,15 +4,21 @@ export function compareSignalWithHistory(
   current: {
     state: MarketState;
     elasticity: number;
+    direction: 'BUY' | 'SELL';
   },
   backtest: BacktestResult
 ): SignalComparisonResult {
-  // Filtra los eventos históricos del backtest que compartan el mismo estado 
-  // (GREEN) y cuya elasticidad difiera en menos de 0.1 respecto a la actual.
+  // Banda de similitud proporcional: escala con la elasticidad actual.
+  // Corrige la "paradoja de extremos" donde señales con elasticidad >3.0
+  // no encontraban eventos similares con la banda fija de ±0.1.
+  // Ej: elas 1.5 → ±0.15 | elas 3.0 → ±0.30 | elas 5.08 → ±0.508
+  const similarityBand = Math.max(0.15, 0.1 * current.elasticity);
+
   const similar = backtest.events.filter(
     (e) =>
       e.state === current.state &&
-      Math.abs(e.elasticity - current.elasticity) < 0.1
+      e.direction === current.direction &&
+      Math.abs(e.elasticity - current.elasticity) < similarityBand
   );
 
   const wins = similar.filter((e) => e.exitIndex !== -1).length;
