@@ -169,7 +169,7 @@ export function ElasticityCard({ symbol, m5, m15, fusedState }: ElasticityCardPr
       {/* Encabezado de columnas */}
       <div style={styles.tableHeader}>
         <span style={{ ...styles.colLabel, minWidth: 90 }}>Temporalidad</span>
-        <span style={{ ...styles.colLabel, flex: 1, paddingLeft: 4 }}>Elasticidad</span>
+        <span style={{ ...styles.colLabel, flex: 1, minWidth: 0, paddingLeft: 4 }}>Elasticidad</span>
         <span style={{ ...styles.colLabel, minWidth: 186, textAlign: 'right' }}>Estado</span>
       </div>
 

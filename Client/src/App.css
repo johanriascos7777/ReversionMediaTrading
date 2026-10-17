@@ -2,9 +2,16 @@
 
 #root {
   width: 100%;
+  box-sizing: border-box;
   margin: 0 auto;
   padding: 2rem;
   text-align: left;
+}
+
+@media (max-width: 600px) {
+  #root {
+    padding: 1rem;
+  }
 }
 
 body {

@@ -60,6 +60,26 @@ export type MultiSymbolConsolidation = {
 
 // ─── Market View Types ──────────────────────────────────────────────────────
 
+export type ZoneView = {
+  direction:          'BUY' | 'SELL'
+  ema:                number
+  atr:                number
+  distanceAtr:        number
+  distancePips:       number
+  q50:                number
+  q75:                number
+  q90:                number
+  gateAtr:            number
+  q75Atr:             number
+  episodes:           number
+  residualMedianPips: number
+  residualP90Pips:    number
+  residualMaxPips:    number
+  touch4h:            number | null
+  source:             string
+  alerted:            boolean
+}
+
 export type FinalMarketView = {
   symbol:           string
   m5:               MarketSnapshot
@@ -73,6 +93,7 @@ export type FinalMarketView = {
   fusedComparison:  any
   backtest:         any
   pedestrianLight?: 'STOP' | 'WALK'
+  zone?:            ZoneView | null
   experimental?: {
     m5:               MarketSnapshot & { direction: 'BUY' | 'SELL' }
     m15:              MarketSnapshot & { direction: 'BUY' | 'SELL' }
@@ -136,6 +157,8 @@ type BackendMessage =
       fusedExplanation: string
       fusedComparison:  any
       backtest:         any
+      pedestrianLight?: 'STOP' | 'WALK'
+      zone?:            ZoneView | null
       experimental?: {
         m5:               MarketSnapshot & { direction: 'BUY' | 'SELL' }
         m15:              MarketSnapshot & { direction: 'BUY' | 'SELL' }
@@ -246,6 +269,8 @@ export function useMarketData(): {
               fusedExplanation: msg.fusedExplanation,
               fusedComparison:  msg.fusedComparison,
               backtest:         msg.backtest,
+              pedestrianLight:  msg.pedestrianLight,
+              zone:             msg.zone,
               experimental:     msg.experimental,
             }
           }))

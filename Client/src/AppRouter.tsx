@@ -9,11 +9,6 @@ import { Routes, Route, Link, useLocation } from 'react-router-dom'
 import App from './App'
 import { TowerControl } from './pages/TowerControl'
 import { HolguraCalculator } from './pages/HolguraCalculator'
-import { ExperimentalDashboard } from './pages/ExperimentalDashboard'
-import { FullRevertionDashboard } from './pages/FullRevertionDashboard'
-import { TradingRecommendations } from './pages/TradingRecommendations'
-import { IdealSchedule } from './pages/IdealSchedule'
-import { UseCasesPage } from './pages/UseCasesPage'
 
 // ─── Barra de navegación global ──────────────────────────────────────────────
 
@@ -36,6 +31,8 @@ function NavBar() {
       alignItems: 'center',
       gap: 4,
       padding: '0 20px',
+      overflowX: 'auto',
+      whiteSpace: 'nowrap',
     }}>
       {/* Logo */}
       <span style={{ fontSize: 13, fontWeight: 800, color: '#fff', letterSpacing: '-0.3px', marginRight: 16 }}>
@@ -43,14 +40,9 @@ function NavBar() {
       </span>
 
       {/* Links */}
-      <NavLink to="/" label="📊 Dashboard" active={currentPath === '/'} />
-      <NavLink to="/full-revertion" label="🌊 Reversión Completa" active={currentPath === '/full-revertion'} />
-      <NavLink to="/horario-ideal" label="🎯 Horario Ideal" active={currentPath === '/horario-ideal'} />
-      <NavLink to="/recomendaciones" label="📖 Recomendaciones" active={currentPath === '/recomendaciones'} />
+      <NavLink to="/" label="📊 Señales" active={currentPath === '/'} />
       <NavLink to="/tower-control" label="🗼 Torre de Control" active={currentPath === '/tower-control'} />
       <NavLink to="/holgura-calculator" label="🧮 Calculadora de Holgura" active={currentPath === '/holgura-calculator'} />
-      <NavLink to="/experimental" label="🧪 Experimental" active={currentPath === '/experimental'} />
-      <NavLink to="/casos-de-uso" label="📚 Casos de Uso" active={currentPath === '/casos-de-uso'} />
     </nav>
   )
 }
@@ -86,14 +78,8 @@ export function AppRouter() {
       <div style={{ paddingTop: 44 }}>
         <Routes>
           <Route path="/" element={<App />} />
-          <Route path="/full-revertion" element={<FullRevertionDashboard />} />
-          <Route path="/horario-ideal" element={<IdealSchedule />} />
-          <Route path="/recomendaciones" element={<TradingRecommendations />} />
-          <Route path="/recoemndaciones" element={<TradingRecommendations />} />
           <Route path="/tower-control" element={<TowerControl />} />
           <Route path="/holgura-calculator" element={<HolguraCalculator />} />
-          <Route path="/experimental" element={<ExperimentalDashboard />} />
-          <Route path="/casos-de-uso" element={<UseCasesPage />} />
         </Routes>
       </div>
     </>
