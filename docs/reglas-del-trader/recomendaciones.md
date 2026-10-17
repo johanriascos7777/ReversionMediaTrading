@@ -1,0 +1,254 @@
+# Recomendaciones de trading
+
+Texto extraído automáticamente de `Client/src/pages/TradingRecommendations.tsx` (commit f094011) antes de quitar la página del frontend. El original completo sigue en el historial de git.
+
+- en-US
+- America/Bogota
+- …:…:… …
+- Domingo
+- Lunes
+- Martes
+- Miércoles
+- Jueves
+- Viernes
+- Sábado
+- sunday_open
+- low_liq
+- Horario Neutro
+- 🛑 ROL OVER CRÍTICO (SPREAD EXTREMO)
+- ¡ALERTA MÁXIMA! Los spreads de los brokers se ensanchan a niveles récord (hasta 50+ pips). Las alarmas de elasticidad son causadas por distorsión artificial. Cierra y no operes.
+- sunday_open
+- 🛑 APERTURA DOMINICAL (BAJA LIQUIDEZ)
+- El mercado de Sydney abre con bajísima liquidez. Es sumamente propenso a saltos de precio (Gaps) y spreads elevados. Espera a la sesión asiática fuerte (después de las 7 PM).
+- 🌟 ZONA DE ORO (LONDRES + NEW YORK)
+- Momento óptimo del día. Los spreads están en mínimos y las reversiones son matemáticas debido al cruce de las dos mayores sesiones del mundo. ¡Foco total!
+- 🟢 SESIÓN ACTIVA (OPERATIVA SEGURA)
+- Buena liquidez general en el mercado. Los pares principales como EUR/USD, GBP/USD y USD/JPY respetan con alta fidelidad las desviaciones promedio.
+- low_liq
+- 💤 MERCADO CERRADO
+- El mercado global de Forex se encuentra cerrado por fin de semana. Es el momento perfecto para descansar, analizar métricas y no realizar operaciones.
+- low_liq
+- 🟡 SESIÓN ASIÁTICA / RANGO BAJO
+- Sesión asiática activa. El volumen en pares principales es bajo, lo que puede causar movimientos lentos y rangos estrechos. Opera con precaución en AUD, NZD o JPY.
+- @keyframes pulse-glow { 0% { box-shadow: 0 0 12px rgba(244, 63, 94, 0.15); } 50% { box-shadow: 0 0 24px rgba(244, 63, 94, 0.45); } 100% { box-shadow: 0 0 12px rgba(244, 63, 94, 0.15); } } @keyframes needle-pulse { 0% { transform: scaleY(1); opacity: 0.8; } 50% { transform: scaleY(1.1); opacity: 1; } 100% { transform: scaleY(1); opacity: 0.8; } } .premium-card { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); position: relative; overflow: hidden; } .premium-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; border-radius: inherit; padding: 1px; background: linear-gradient(135deg, rgba(255,255,255,0.08), transparent 50%, rgba(255,255,255,0.02)); -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0); -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none; } .premium-card:hover { transform: translateY(-4px); box-shadow: 0 12px 30px rgba(0,0,0,0.5); border-color: rgba(255,255,255,0.12) !important; } .avoid-card:hover { transform: translateY(-4px); box-shadow: 0 12px 30px rgba(244, 63, 94, 0.15); border-color: rgba(244, 63, 94, 0.4) !important; } .golden-card:hover { transform: translateY(-4px); box-shadow: 0 12px 30px rgba(251, 191, 36, 0.15); border-color: rgba(251, 191, 36, 0.4) !important; }
+- MANUAL OPERATIVO & EVITACIÓN DE RIESGOS
+- V1.2
+- Reloj de liquidez en tiempo real, gestión ante picos de spread y confluencias estructurales de reversión.
+- 0 0 30px …
+- Estado del Mercado (Colombia)
+- 0 0 10px …
+- (COT, UTC-5)
+- Acción sugerida:
+- Ciclo de 24 Horas COT (Zona de Operación)
+- Hora Actual:
+- Asia (Bajo Volumen)
+- Apertura Londres
+- Solapamiento Oro (Londres/NY)
+- Tarde NY
+- Rollover Diario (Cierre)
+- Sesión Asia / Fin de Día
+- 16:45 (Rollover)
+- Evitar
+- Zona Oro
+- Sesión Activa
+- Bajo Volumen
+- ¿Por qué a las 5:00 PM COT el precio sube o baja salvajemente estirando las EMAs?
+- Este fenómeno se llama
+- Glow Spread & Liquidity Gap
+- y ocurre exactamente en el minuto del Rollover diario. Los bancos institucionales de todo el mundo están cerrando libros contables. Durante esta ventana de 30 minutos:
+- Los proveedores de liquidez retiran sus órdenes. El libro queda vacío. Cualquier pequeña orden arrastra el precio decenas de pips en milisegundos.
+- El broker ensancha el spread artificialmente. Al ensancharse la diferencia entre Bid y Ask, el precio promedio (o el "Last Tick") se calcula con saltos gigantescos, lo que el detector de elasticidad interpreta erróneamente como una desviación real extrema.
+- Resultado:
+- Te llegarán falsas alarmas de elasticidad verde (extremas) que en realidad son puro spread bancario. No representan un rebote operable a la EMA.
+- 🛡️ RECOMIENDA:
+- El motor
+- Full Reversion
+- cuenta con un filtro para mitigar esto: el
+- Giro de Elasticidad (M5 Candle Close)
+- . Éste no te deja entrar hasta que la vela de 5 minutos termine de cerrar y empiece a contraerse, impidiendo que entres en picos instantáneos de spread. Aún así, apaga tu operativa de 4:45 PM a 6:15 PM.
+- ¿Pasa esto al comienzo de otras sesiones? (Comportamiento del Spread & Volatilidad)
+- Sí, los cambios y comienzos de sesión son zonas de transición de liquidez. Aunque no son tan graves como el Rollover, generan comportamientos típicos que debes conocer:
+- 6:00 PM COT
+- Apertura Asiática
+- Ocurre justo después del Rollover. Los bancos asiáticos abren pero la liquidez global sigue curándose. Los spreads en pares europeos (EUR, GBP) siguen amplios por 1 hora más. En pares locales (AUD, NZD, JPY) se normalizan más rápido, pero al haber poco volumen, el precio se mueve lento en canales estrechos.
+- 2:00 AM COT
+- Apertura Europea
+- Entrada masiva de volumen europeo. Los spreads bajan inmediatamente a su nivel más bajo. Sin embargo, los primeros 15 minutos se caracterizan por una **cacería de liquidez**. El precio puede dar un latigazo fuerte en contra de la tendencia real (estirando el indicador) antes de tomar su dirección real.
+- 7:00 AM COT
+- Apertura Americana
+- Cruce de Londres + NY. Spreads en mínimos absolutos. Sin embargo, es el horario preferido por el gobierno estadounidense para liberar datos económicos clave (a las 7:30 AM COT). Durante la noticia, el spread se ensancha de golpe por segundos y el precio spikea violentamente.
+- 🚨 Zonas Rojas (Peligro de Spread)
+- DIARIO (LUNES A VIERNES)
+- El Rollover Diario (Forex Close)
+- 4:45 PM – 6:15 PM COT
+- Es el momento del día con menor liquidez del sistema interbancario global. Las órdenes activas se liquidan o renuevan, y los spreads del broker pueden dispararse a niveles descabellados. La estrategia se bloquea debido al spread.
+- Mantente fuera.
+- DOMINGO (APERTURA)
+- Apertura del Mercado Dominical
+- 4:00 PM – 7:00 PM COT
+- Sydney abre con poco volumen. Los spreads son muy amplios y los movimientos iniciales suelen ser manipulaciones o gaps de continuación que rompen las desviaciones. Operar aquí equivale a apostar con desventaja matemática.
+- ✅ Horarios de Oro (Máxima Probabilidad)
+- CUALQUIER DÍA LABORAL
+- Solapamiento Londres / Nueva York
+- 7:00 AM – 11:00 AM COT
+- Es la zona horaria dorada de la estrategia. La confluencia de volumen de los dos mayores centros financieros del mundo garantiza spreads mínimos y que los rebotes a la media EMA100 ocurran de manera matemática y rápida.
+- SESIONES PRINCIPALES
+- Apertura Europea a Cierre de NY
+- 2:00 AM – 4:00 PM COT
+- Ventana operativa muy limpia. Los pares con
+- EUR
+- GBP
+- USD
+- tienen excelente fluidez y se desvían de manera controlada. El algoritmo calcula con precisión sus retrocesos sin spreads que interfieran.
+- 🛡️
+- Manual de Reglas de Oro de Full Reversion
+- 1. Validar el Giro
+- Nunca entres de inmediato cuando el detector de elasticidad se ponga en verde. Espera el aviso de **Giro Confirmado** del bot. La primera vela M5 que cierra mostrando contracción es la confirmación matemática de que el agotamiento de volumen es real.
+- 2. Control de Pendiente
+- Si la EMA100 está muy inclinada y la pendiente es calificada como `STEEP` (rojo), no entres. Esto evita que intentes frenar un tren en marcha (pullback en tendencia fuerte). Opera sólo pendientes `FLAT` o `GENTLE`.
+- 3. Ratios de TP y SL
+- El Take Profit sugerido se sitúa en el retorno exacto a la EMA100. El Stop Loss se ubica dinámicamente a **1.8 * ATR** del precio de entrada para dar suficiente holgura contra el ruido normal y mechas de recolección de liquidez.
+- 4. Noticias Macro
+- Apaga el bot o evita operar 15 minutos antes y 15 minutos después de noticias de carpeta roja (como NFP o tasas de interés). En esos momentos, el análisis técnico y los algoritmos estadísticos pierden efectividad temporalmente.
+- ACADEMIA DE TRADING PROFESIONAL: EXPERTO DE 15 AÑOS
+- Guía operativa para dominar el Semáforo Viejo y Full Reversion con la psicología de cuentas reales y acción del precio.
+- 📋 Checklist Diario
+- 📈 Pullback vs Reversión
+- 🕯️ Patrones de Velas
+- 💬 Testimonios Reales
+- REGLA DE ORO: Validación de Alineación Fractal (Confluencia Multi-Temporal)
+- Antes de analizar cualquier indicador, abre el gráfico de tu par en
+- 1m, 5m y 15m
+- y compara la altura y el cruce de las EMAs:
+- Si hay Alineación Fractal (Confluencia):
+- Las EMAs de las 3 temporalidades tienen el mismo ángulo e inclinación, y el precio cabalga exactamente en la misma posición relativa respecto a ellas. Esto indica una tendencia fractal uniforme de alta inercia.
+- La Regla de Oro:
+- Ignora por completo las alertas de contra-tendencia del
+- Semáforo Viejo
+- (que pintará verde brillante en compras/ventas prematuras y te causará flotante negativo).
+- Apaga la operativa rápida y espera estrictamente al gatillo de Full Reversion (Giro de vela M5 confirmado)
+- con soporte/resistencia institucional de fondo.
+- Calendario Económico (Forex Factory / Investing)
+- Inspecciona si hay noticias de "carpeta roja" programadas para hoy. Las noticias de alto impacto causan saltos de spread y roturas de tendencia donde los indicadores matemáticos pierden efectividad.
+- Acción:
+- Si hay noticias para tus pares operados, apaga el bot 15 minutos antes y enciéndelo 15 minutos después del anuncio.
+- Verificación de Reloj de Sesiones
+- Identifica en qué sesión se encuentra el mercado actualmente.
+- Estrategia:
+- Si estás en la
+- Sesión Asiática (7 PM - 2 AM COT)
+- , enfócate en el
+- Semáforo Viejo
+- para capturar múltiples rebotes en canales laterales. Si estás en el
+- Solapamiento Londres/NY (7 AM - 11 AM COT)
+- , usa exclusivamente
+- Full Reversion
+- para protegerte de rompimientos veloces.
+- Filtro de Pendiente (Slope de EMA100) & Análisis Multi-Temporal
+- Inspecciona la pendiente de la EMA100 en el dashboard y aplica este criterio clínico de múltiples marcos temporales (M5/M15/H1) para el
+- Semáforo Viejo
+- Estado FLAT (Pendiente Plana, &lt; 0.5 ATR):
+- Rango lateral ideal.
+- En el gráfico:
+- Las EMAs 100 de M5 y M15 cruzan horizontalmente el medio del precio. H1 muestra velas de rango estrecho sin dirección clara.
+- Cómo actuar:
+- Confía con
+- máxima agresividad
+- en las alertas del Semáforo Viejo. Las reversiones son rápidas y simétricas. Puedes escalar posiciones (grids) con seguridad ya que la gravedad del mercado regresará el precio a la media.
+- Estado GENTLE (Pendiente Suave, 0.5 - 1.0 ATR):
+- Canal tendencial ordenado.
+- En el gráfico:
+- La EMA100 tiene inclinación moderada. El precio oscila arriba y abajo de ella pero con un sesgo (creciente o decreciente).
+- Cómo actuar:
+- Opera únicamente a favor de la pendiente de la EMA100
+- . Si la EMA sube, opera exclusivamente señales de COMPRA (BUY) del Semáforo Viejo cuando el precio toque el extremo inferior. Descarta o reduce lotaje a la mitad en señales contra-tendencia (SELLs), pues la EMA subirá a buscar al precio limitando tu margen de ganancia.
+- Estado STEEP (Pendiente Fuerte, &gt;= 1.0 ATR):
+- Tendencia vertical / Impulso violento.
+- En el gráfico:
+- Las velas en M5 "cabalgan" EMAs rápidas (EMA9/20) y están muy separadas de la EMA100. En M15 se observan velas consecutivas de rango amplio sin mechas. En H1 hay una vela de ruptura estructural.
+- Cómo actuar:
+- ¡PELIGRO! El Semáforo Viejo te pintará alertas verde brillante en pleno impulso. ¡Ignóralas!
+- Abre el gráfico en H1/M15 y busca si hay un nivel de Soporte o Resistencia mayor (Semanal/Diario de fuerza &gt;= 3). Si no hay un S/R fuerte defendido por instituciones, no operes. Si lo hay, no entres de inmediato: espera a que Full Reversion confirme el
+- Giro de Vela M5 (Candle Close)
+- para entrar con el primer retroceso seguro.
+- ⚡ ¿Cuándo es el momento exacto para usar FULL REVERSION?
+- Debes basar tu operativa en
+- Full Reversion
+- (ignorando al Semáforo Viejo) en los siguientes 4 escenarios clave:
+- Horario de alta velocidad (2:00 AM a 11:00 AM COT):
+- Aperturas de Londres y Nueva York. Las tendencias verticales barren al Semáforo Viejo. Full Reversion te protege bloqueando entradas en pendientes inclinadas.
+- Rupturas de canal (Slope STEEP en M5/M15):
+- Si el precio rompe con una vela elefante y estira las bandas, no intentes frenarlo. Espera a que Full Reversion marque
+- Giro Confirmado (M5 candle close)
+- y valide que está tocando un Soporte/Resistencia institucional de fuerza &gt;= 3.
+- Confluencia en M5 + M15 (Alerta FUSIONADA 🔱):
+- Cuando recibas la alerta de doble estiramiento con Giro confirmado. Es la señal del francotirador, con el Take Profit en la EMA100 y el Stop Loss a 1.8 * ATR.
+- Reversiones a favor de tendencias GENTLE:
+- Si la tendencia es alcista suave (GENTLE UP) y el precio sufre una caída violenta, espera el Giro de M5 para entrar en COMPRA con el descuento a favor de la inercia general del mercado.
+- Monitoreo de Spread en Vivo
+- Asegúrate de que tu broker no esté cobrando spreads excesivos debido a falta de liquidez temporal.
+- Cuidado:
+- Si el spread en pares mayores supera 1.5 - 2 pips, pospone cualquier entrada. Durante el
+- Rollover (4:45 PM - 6:15 PM COT)
+- el spread puede subir a 30-50 pips, lo que invalidará la precisión de tus Take Profit y Stop Loss.
+- Un error que cuesta miles de dólares a los traders novatos es confundir un
+- pullback en tendencia fuerte
+- con una oportunidad de reversión. Si la EMA100 está inclinada hacia abajo y el precio sube rápido, ¿debes vender? Si el precio baja rápido en una tendencia bajista fuerte, ¿debes comprar?
+- ⚠️ La Trampa: El Pullback Bajista
+- En una tendencia bajista estructurada (EMA100 STEEP DOWN), el precio realiza impulsos bajistas violentos y retrocesos (pullbacks) hacia la EMA100.
+- Si utilizas el
+- Semáforo Viejo
+- sin filtros, este detectará la desviación rápida del impulso y lanzará una señal de compra (BUY) en el extremo. Pero al ser una tendencia fuerte, el precio a menudo ignora la señal, retrocede muy poco y continúa cayendo con fuerza, rompiendo tu Stop Loss. Es intentar detener un tren con la mano.
+- 🛡️ El Escudo: Filtro Full Reversion
+- El motor
+- Full Reversion
+- soluciona esto con tres filtros lógicos simultáneos:
+- Pendiente de la EMA100 (Slope):
+- Si la inclinación es STEEP (superior a 1.0 ATR en 10 barras), la señal de compra se bloquea.
+- El Giro de Vela M5:
+- No se entra mientras el precio está cayendo. El algoritmo espera a que una vela M5 cierre mostrando contracción (la resortera empieza a ceder).
+- Confluencia de RSI y S/R:
+- Exige que haya una divergencia alcista en el RSI y un nivel de Soporte fuerte en la zona de entrada para asegurar que los compradores institucionales están defendiendo el precio.
+- 💡 Cómo operarlo clínicamente:
+- Cuando veas una señal del
+- Semáforo Viejo
+- en un par con tendencia definida, abre el gráfico. Si el precio está en un pullback bajista y no hay señal de
+- Full Reversion
+- (porque la pendiente es STEEP),
+- IGNORA la señal de compra del Semáforo Viejo
+- . En su lugar, espera a que el precio llegue a la EMA100 y busca una señal de continuación de tendencia (ventas). Usa el Semáforo Viejo únicamente cuando el mercado esté en consolidación lateral (Pendiente FLAT).
+- Las señales matemáticas del algoritmo ganan una efectividad abrumadora cuando las confirmas visualmente con
+- patrones de velas japonesas
+- en los extremos de la elasticidad (Zona Verde). Las velas representan la psicología de los operadores institucionales en tiempo real.
+- PIN BAR / RECHAZO
+- Martillo o Estrella Fugaz
+- Velas con una sombra o mecha muy larga (al menos 2/3 del tamaño total de la vela) que sobresale de las bandas de desviación y un cuerpo pequeño.
+- Significado:
+- Las instituciones empujaron el precio al extremo para cazar stops, pero la oferta/demanda contraria absorbió las órdenes de inmediato. Confirmación ideal de giro.
+- ENVOLVENTE
+- Bullish / Bearish Engulfing
+- Una vela que cierra en la dirección de la reversión y cuyo cuerpo cubre por completo el cuerpo de la vela anterior.
+- Significado:
+- Los compradores (en soporte) o vendedores (en resistencia) han tomado el control absoluto del mercado, superando con creces la fuerza de la tendencia previa. Gatillo de entrada de alta convicción.
+- ESTRELLA
+- Morning Star / Evening Star
+- Patrón de tres velas: una vela a favor del impulso, una vela de cuerpo muy pequeño (Doji o peonza) en el pico de elasticidad, y una tercera vela que cierra con fuerza en contra del impulso original.
+- Significado:
+- Muestra la desaceleración del precio (vela del medio) y la posterior inyección de volumen institucional en reversión.
+- La combinación ganadora:
+- Si recibes una pre-alerta fusionada de
+- Full Reversion (M5+M15 en verde)
+- , espera al cierre de la vela de M5. Si esa vela de cierre forma una
+- Pin Bar
+- Vela Envolvente
+- justo sobre un nivel de Soporte/Resistencia marcado en el panel, tienes una operación con más del 80% de probabilidad de éxito. Pon tu Stop Loss a 1.8 ATR y tu Take Profit en la EMA100.
+- Hemos recopilado las mejores prácticas de blogs especializados y testimonios de traders reales que operan cuentas con sistemas basados en elasticidad y reversión a la media:
+- 💬 FORO FOREX FACTORY - TRADER DE REVERSIÓN
+- FTMO Funded Trader (Cuenta $100K)
+- "Opero reversión a la media y el filtro de pendiente me salvó la vida. Antes de usarlo, solía comprar cada vez que el precio caía con fuerza. En las tendencias de noticias perdía 3 o 4 operaciones seguidas intentando atrapar el cuchillo que caía. Ahora, si la EMA100 tiene pendiente, simplemente no opero el par. Mis pérdidas se redujeron un 70%. Mi consejo: la disciplina de no operar en pendientes inclinadas es la diferencia entre ser rentable y quemar tu cuenta."
+- 💬 BLOG 'EL CAMINO DEL TRADER CON CONSISTENCIA'
+- Operador de Cuentas Reales de Retail Broker
+- "El Semáforo Viejo es una maravilla para acumular pequeños beneficios durante las sesiones de Tokio y Sydney. El mercado es muy predecible allí, rebota como pelota en los extremos. Pero el secreto es la transición a la sesión de Londres. A las 2:00 AM COT, las reglas cambian. Si dejas el Semáforo sin vigilar, te devora el Drawdown. Recomiendo migrar al motor Full Reversion con confirmación de vela cerrada. El gatillo del Giro evita entradas prematuras en el impulso inicial de apertura."
+- 💬 REDDIT R/FOREX - DISCUSIÓN DE REVERSIÓN A LA MEDIA
+- Trader de Gestión de Capital
+- "La regla del rollover a las 5:00 PM COT no es negociable. Muchos programan bots de reversión y los dejan correr 24/7. Luego se quejan de que a las 5 PM se abren operaciones gigantes y se cierran en stop loss de inmediato. No es que el mercado se haya vuelto loco, es que a esa hora los bancos liquidan y los spreads spreads suben un 1000%. La regla del manual de apagar la plataforma y desactivar alertas en Telegram de 4:45 PM a 6:15 PM es obligatoria si quieres sobrevivir más de un mes en Forex."

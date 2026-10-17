@@ -1,0 +1,137 @@
+# Casos de uso
+
+Texto extraído automáticamente de `Client/src/pages/UseCasesPage.tsx` (commit f094011) antes de quitar la página del frontend. El original completo sigue en el historial de git.
+
+- OPERAR
+- EVITAR
+- ALERTA
+- Alineación Fractal Perfecta
+- Confluencia extrema en múltiples temporalidades (M1, M5, M15)
+- OPERAR
+- Alta Probabilidad de Reversión
+- Las EMAs en todas las temporalidades tienen el mismo ángulo e inclinación. El precio ha corrido con fuerza expandiéndose (estirando el elástico) muy por encima de la EMA50 (celeste) y de la EMA100 (oscura). La tensión elástica es máxima y la dirección del fractal es unánime.
+- Las pendientes de la EMA50 y EMA100 en M1, M5 y M15 son paralelas.
+- El precio está en zona de sobrecompra/sobreventa extrema respecto a ambas EMAs.
+- Se busca una entrada rápida apostando a que el precio colapsará de regreso hacia la EMA100 (retorno a la media).
+- ZONA ENTRY
+- Reversión a la 100
+- ZONA ENTRY
+- Reversión a la 100
+- Cruce de Pendiente (Golden / Death Cross)
+- Cruce de EMAs en 5m indicando fuerza en la nueva tendencia
+- EVITAR
+- Peligro de Tendencia Fuerte
+- La EMA50 (celeste) cruza la EMA100 (oscura) con una inclinación muy pronunciada. Aunque el precio retrocede hacia la EMA100, el cruce reciente genera una enorme inercia y fuerza de continuación de la tendencia. Operar reversión en contra del cruce suele terminar en rotura violenta.
+- La EMA50 acaba de cruzar la EMA100 hace pocas velas.
+- Ambas líneas se abren con ángulo divergente, demostrando aceleración.
+- Si el precio regresa a la EMA100, NO busques reversión; la EMA100 actuará como soporte/resistencia dinámica para lanzar el precio a favor del cruce.
+- CRUCE RECIENTE
+- Fuerza Trend
+- CRUCE RECIENTE
+- Fuerza Trend
+- Sándwich de EMAs (Compresión)
+- Rango de baja volatilidad, precio atrapado en zona muerta
+- ALERTA
+- Sin Operación / Ruido Alto
+- El precio se encuentra oscilando en un rango muy estrecho entre la EMA50 y la EMA100. Ambas medias móviles están planas y no hay separación clara. La elasticidad es casi nula. Entrar aquí significa pagar comisiones e irse a pérdida en un mercado sin tendencia clara.
+- EMA50 y EMA100 están casi horizontales (pendientes planas).
+- La distancia entre ambas EMAs es muy pequeña.
+- El precio corta continuamente ambas líneas sin decisión. Se debe esperar que el precio rompa y las EMAs se separen.
+- ZONA MUERTA (COMPRESIÓN)
+- Divergencia de Momentum
+- EMA100 mantiene tendencia pero EMA50 se aplana (Agotamiento)
+- OPERAR
+- Confirmación de Agotamiento
+- La tendencia mayor (EMA100) sigue subiendo/bajando, pero la EMA50 empieza a curvarse y ponerse completamente plana. Esto demuestra que la fuerza del corto plazo ha finalizado, incrementando drásticamente la probabilidad de que el precio regrese y cruce temporalmente la EMA100.
+- La EMA100 tiene pendiente alcista/bajista clara.
+- La EMA50 (celeste) se aplana o apunta en dirección opuesta (curvatura de hombro).
+- El precio ya ha cruzado la EMA50 y se dirige inexorablemente a buscar la EMA100.
+- EMA50 SE APLANA
+- Objetivo EMA100
+- EMA50 SE APLANA
+- Objetivo EMA100
+- Trampa de Expansión Inicial (Desalineación M15)
+- EMAs estiradas en M1/M5, pero apenas abriendo en M15
+- EVITAR
+- Falsa Extensión / Trampa
+- En las temporalidades menores (M1 y M5) el precio parece estar extremadamente estirado lejos de las EMAs, invitando a operar una reversión. Sin embargo, al mirar M15, las EMAs 50 y 100 apenas se están cruzando o comenzando a separarse. Esto indica que el gran movimiento macro acaba de nacer y tiene una enorme inercia. Operar en contra de esta naciente expansión de M15 es una trampa mortal, pues el precio ignorará la "sobrecompra" temporal y seguirá empujando a favor de M15.
+- En M1 y M5 hay alta elasticidad (aparente oportunidad excelente de reversión).
+- Al mirar M15, las EMAs 50 y 100 recién se cruzan o apenas empiezan a abrirse en abanico.
+- La regla es clara: No operar en reversión cuando la temporalidad mayor (M15) apenas está iniciando su fase de expansión.
+- TRAMPA
+- INICIO M15
+- arrow-red-trap-m5
+- TRAMPA
+- INICIO M15
+- 🛡️ Shield Verified (Máxima Convicción)
+- EMAs abiertas + sin pullback geométrico = campo libre para reversión
+- OPERAR
+- Máxima Convicción — Shield Despejado
+- Las EMAs 50 y 100 están bien separadas (≥ 0.5 ATR), confirmando una tendencia estructural clara. El Pullback Shield ha analizado 10,000 velas históricas y no detecta ningún patrón geométrico de consolidación opuesto (ni banderas, ni canales, ni cuñas en contra). El precio se ha sobre-extendido y el giro de elasticidad ya fue confirmado por el Peak Detector. Es el escenario ideal para una reversión a la media.
+- La distancia entre EMA50 y EMA100 es ≥ 0.5 ATR (sin compresión/sándwich).
+- El Pullback Shield (10,000 velas) no detecta patrones geométricos opuestos.
+- El Win Rate segmentado por dirección es ≥ 65% y el giro de elasticidad está confirmado.
+- Comparar con el caso "Sándwich de EMAs" donde las medias están pegadas y el Shield bloquea.
+- 🛡️ SHIELD VERIFIED
+- ≥ 0.5 ATR
+- Bien separadas
+- ✅ Sin Pullback
+- 10,000 velas analizadas
+- ZONA ENTRY
+- Reversión a 100
+- Peak Detectado
+- EMA 50 (Celeste)
+- EMA 100 (Oscura)
+- 🛡️ SHIELD VERIFIED
+- ≥ 0.5 ATR
+- Bien separadas
+- ✅ Sin Pullback
+- 10,000 velas analizadas
+- ZONA ENTRY
+- Reversión a 100
+- Peak Detectado
+- EMA 50 (Celeste)
+- EMA 100 (Oscura)
+- 🚫 Shield Blocked (Sándwich de EMAs)
+- EMAs pegadas (< 0.5 ATR) = Bloqueo por compresión. Solo alerta experimental.
+- EVITAR
+- Bloqueado — Zona Muerta
+- A diferencia del caso anterior, aquí la EMA50 y la EMA100 están demasiado cerca la una de la otra (< 0.5 ATR). Esto significa que el mercado está en compresión y no tiene dirección estructural. Aunque el precio parezca sobre-extendido, intentar regresar a una zona comprimida es altamente riesgoso porque el precio puede romper violentamente en cualquier dirección. La alerta "Shield Verified" es bloqueada para proteger tu capital.
+- La distancia entre EMA50 y EMA100 es < 0.5 ATR.
+- El mercado carece de tendencia fuerte, está consolidando.
+- Se cancela la alerta 🛡️ Shield Verified.
+- Solo recibes la alerta 🧪 Experimental para estar al tanto, pero no debes operar la reversión.
+- 🚫 SHIELD BLOCKED
+- &lt; 0.5 ATR
+- Sándwich (Comprimidas)
+- ⚠️ Sin Tendencia
+- Posible rotura inminente
+- ZONA PELIGRO
+- Bloqueado
+- EMA 50 (Celeste)
+- EMA 100 (Oscura)
+- 🚫 SHIELD BLOCKED
+- &lt; 0.5 ATR
+- Sándwich (Comprimidas)
+- ⚠️ Sin Tendencia
+- Posible rotura inminente
+- ZONA PELIGRO
+- Bloqueado
+- EMA 50 (Celeste)
+- EMA 100 (Oscura)
+- 💡 Guía Estratégica
+- Casos de Uso: EMAs 50p vs 100p
+- Analiza y comprende el comportamiento del precio en temporalidad de 5 minutos (M5) cuando interactúa con las EMAs. Aprende a identificar cuándo la desalineación o comportamiento de la EMA50 (azul celeste) anula o potencia tu estrategia de reversión a la EMA100 (azul oscura).
+- 🟢 Escenario Alcista (Compras)
+- 🔴 Escenario Bajista (Ventas)
+- blur(16px)
+- Sugerencia Operativa
+- EMA 50 (Celeste)
+- EMA 100 (Oscura)
+- 📖 Dinámica del Comportamiento
+- 📌 Reglas y Validaciones
+- 🛡️
+- Aclaración sobre la Regla de Oro (Alineación Fractal)
+- La alineación fractal perfecta en múltiples temporalidades (M1, M5, M15) es la señal de confluencia más fuerte de la inercia del mercado. Sin embargo, la EMA50 en M5 es un filtro crítico de corto plazo: si observas un cruce reciente con fuerza (caso 2) o compresión extrema (caso 3), la probabilidad de reversión a la media exitosa disminuye drásticamente. El caso ideal es el
+- 🛡️ Shield Verified
+- (caso 5): EMAs bien abiertas, sin patrones geométricos en contra y con el giro de elasticidad confirmado por el Peak Detector.

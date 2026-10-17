@@ -1,0 +1,102 @@
+# Horario ideal
+
+Texto extraído automáticamente de `Client/src/pages/IdealSchedule.tsx` (commit f094011) antes de quitar la página del frontend. El original completo sigue en el historial de git.
+
+- Semáforo Viejo
+- Full Reversion
+- Ambos Fusión
+- Prohibido Operar
+- en-US
+- America/Bogota
+- Solapamiento de Oro (Londres/NY)
+- 7:00 AM – 11:00 AM COT
+- Full Reversion
+- El motor Full Reversion brilla en este horario. Al cruzar las dos sesiones de mayor volumen, el precio respeta las confluencias estructurales y el filtro de pendiente de la EMA100 te protege de rompimientos directos.
+- EUR/USD
+- GBP/USD
+- USD/JPY
+- AUD/USD
+- El pico del volumen mundial. Los spreads están en mínimos históricos del broker y el mercado presenta tendencias limpias y rápidas. Las reversiones ocurren con precisión matemática al retorno de la media.
+- Mientras el Semáforo Viejo puede entrar prematuramente si el volumen acelera, Full Reversion espera el "Giro de Vela M5" y filtra pendientes inclinadas (STEEP), actuando como el escudo perfecto en este horario de alta velocidad.
+- Confirmar divergencia de RSI de fuerza >= 3
+- Verificar que el soporte o resistencia más cercano esté a menos de 0.5 ATR
+- Asegurarse de que el estado de pendiente sea FLAT o GENTLE
+- Sesión Asiática (Lateral & Rangos)
+- 7:00 PM – 2:00 AM COT
+- Semáforo Viejo
+- Es el territorio rey del Semáforo Viejo. Al ser una sesión de bajo momentum tendencial, el precio tiende a oscilar de forma predecible en canales de consolidación lateral, lo que permite al indicador antiguo exprimir múltiples rebotes.
+- USD/JPY
+- AUD/USD
+- NZD/USD
+- AUD/JPY
+- Sesión caracterizada por movimientos pausados. El precio raramente forma tendencias verticales y suele respetar los extremos de desviación típicos del Semáforo, convirtiendo el mercado en una máquina de reversiones laterales.
+- Full Reversion puede tardar en disparar señales debido a sus exigentes confluencias de giro y soporte. En cambio, el Semáforo Viejo actúa rápido en los extremos del rango, resultando sumamente rentable en la quietud asiática.
+- Operar principalmente pares con JPY, AUD y NZD
+- Validar soporte y resistencia del rango lateral
+- Evitar operar pares con EUR o GBP ya que quedan congelados sin volumen
+- Apertura Europea / Londres
+- 2:00 AM – 7:00 AM COT
+- Ambos Fusión
+- La inyección de capital europeo crea movimientos rápidos. Usar ambos indicadores coordinados te da lo mejor de dos mundos: entradas de rango rápidas del Semáforo y protección contra tendencias de Full Reversion.
+- EUR/USD
+- GBP/USD
+- EUR/GBP
+- GBP/JPY
+- El mercado de divisas despierta con fuerza. Los spreads colapsan a mínimos, pero los primeros 15-30 minutos pueden presentar latigazos bruscos para barrer stops.
+- El Semáforo Viejo detecta la desviación inicial de la apertura de Londres. Si el impulso continúa y amenaza con ser una tendencia real, Full Reversion lo califica como STEEP bloqueando las entradas, protegiendo tus ganancias previas.
+- Esperar de 15 a 20 minutos después de la apertura (2:00 AM) para evitar barridos de spread
+- Buscar alineación M5 + M15 antes de entrar
+- Monitorear noticias de la Libra (GBP) y el Euro (EUR) al inicio de la sesión
+- Tarde Americana (Distribución)
+- 11:00 AM – 4:00 PM COT
+- Ambos Fusión
+- El volumen decrece progresivamente. Es ideal buscar entradas con confirmaciones mutuas (cuando tanto el Semáforo Viejo como Full Reversion detectan el agotamiento en conjunto).
+- EUR/USD
+- USD/CAD
+- USD/JPY
+- Londres cierra a las 11:00 AM COT y Nueva York queda sola. El mercado reduce su velocidad y suele realizar movimientos lentos o consolidaciones secundarias.
+- Al haber menos volumen, el precio puede tardar en volver a la EMA100. Full Reversion calcula el Take Profit dinámico para asegurar salidas rápidas, mientras el Semáforo Viejo ayuda a refinar el punto exacto de giro.
+- Reducir el lotaje un 25% debido al menor volumen de la tarde
+- Tener paciencia con el tiempo de retorno a la media (puede tardar más de 30 bar)
+- Evitar operar después de las 3:30 PM COT
+- Rollover Diario & Sunday Open
+- 4:45 PM – 6:15 PM COT / Domingos 4-7 PM
+- Prohibido Operar
+- Riesgo extremo e inoperable. Ningún análisis matemático ni indicador es válido cuando los spreads de los brokers se abren artificialmente a causa del cierre diario interbancario.
+- Ninguno - Mantenerse Fuera
+- El fin del día de Forex (5 PM COT) drena toda la liquidez global. Los bancos liquidan órdenes y los spreads escalan exponencialmente. Los domingos por la tarde el mercado abre con Gaps erráticos.
+- Tanto el Semáforo Viejo como Full Reversion pueden detectar desviaciones gigantescas y lanzar alertas en verde. ¡Son trampas del spread! El precio en el broker parece estirado pero es solo el costo del spread ampliado.
+- Cerrar cualquier operación abierta antes de las 4:30 PM COT
+- Desactivar alertas de Telegram o ignorarlas de 4:45 PM a 6:15 PM COT
+- No operar los domingos por la tarde hasta que abra Tokio (7:00 PM COT)
+- ny_afternoon
+- @keyframes border-glow { 0% { box-shadow: 0 0 10px rgba(251, 191, 36, 0.1); } 50% { box-shadow: 0 0 25px rgba(251, 191, 36, 0.35); } 100% { box-shadow: 0 0 10px rgba(251, 191, 36, 0.1); } } .glow-button { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); } .glow-button:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.15) !important; } .session-tab { transition: all 0.2s ease; } .gauge-pulse { animation: border-glow 2s infinite alternate; }
+- CENTRO DE PLANIFICACIÓN: HORARIO IDEAL
+- Combina dinámicamente tu estrategia rentable del Semáforo Viejo y la precisión del motor Full Reversion.
+- 0 0 20px …22
+- …22
+- SESIÓN ACTUAL EN COLOMBIA
+- es-CO
+- 2-digit
+- COT
+- Recomendación en vivo:
+- 0 0 15px …11
+- …22
+- Ver Análisis de Sesión Actual 🔍
+- Selecciona una Franja Horaria
+- 0 8px 25px …15
+- EN VIVO
+- 0 12px 40px rgba(0,0,0,0.5), 0 0 30px …08
+- ⏰ Ventana horaria:
+- …, 100
+- Efectividad
+- 💎 Premium
+- 🟢 Altamente Confiable
+- 🛑 Alto Riesgo
+- Indicador Recomendado:
+- 🤝 Cómo se complementan
+- 💱 Pares Óptimos
+- * Evita pares sin volumen del mercado local en curso.
+- 📋 Lista de Verificación Táctica (Checklist)
+- La clave de la Rentabilidad Consistente
+- Tu **Semáforo Viejo** ha demostrado ser altamente rentable gracias a su reactividad inmediata en rangos estables. El propósito del nuevo módulo **Full Reversion** no es reemplazarlo, sino servir de filtro inteligente para las ventanas del día de alta velocidad (como Londres y NY). Alternar las estrategias y saber qué indicador lidera según el reloj de sesiones maximizará tu rendimiento y resguardará tu capital frente a rachas de tendencia.
