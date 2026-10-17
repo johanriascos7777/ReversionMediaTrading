@@ -1,0 +1,66 @@
+{
+ "descripcion": "Alertas Tipo C experimental del código f094011 sobre la grabación 2026-10-05T11:00Z → 2026-10-17T00:00Z. La v1 Giro tiene que salir en estos mismos instantes.",
+ "desde": "2026-10-05T11:00:00Z",
+ "hasta": "2026-10-17T00:00:00Z",
+ "v1": [
+  {
+   "iso": "2026-10-06T11:19:20.000Z",
+   "symbol": "EUR/USD",
+   "direction": "SELL",
+   "price": 1.12539
+  },
+  {
+   "iso": "2026-10-09T05:42:02.000Z",
+   "symbol": "EUR/GBP",
+   "direction": "SELL",
+   "price": 0.84849
+  },
+  {
+   "iso": "2026-10-09T13:51:02.000Z",
+   "symbol": "EUR/GBP",
+   "direction": "BUY",
+   "price": 0.84662
+  },
+  {
+   "iso": "2026-10-09T14:11:02.000Z",
+   "symbol": "EUR/GBP",
+   "direction": "BUY",
+   "price": 0.84638
+  },
+  {
+   "iso": "2026-10-09T15:36:02.000Z",
+   "symbol": "EUR/GBP",
+   "direction": "BUY",
+   "price": 0.84607
+  },
+  {
+   "iso": "2026-10-16T11:13:02.000Z",
+   "symbol": "EUR/USD",
+   "direction": "SELL",
+   "price": 1.12562
+  },
+  {
+   "iso": "2026-10-16T12:32:02.000Z",
+   "symbol": "EUR/GBP",
+   "direction": "BUY",
+   "price": 0.84328
+  },
+  {
+   "iso": "2026-10-16T12:43:02.000Z",
+   "symbol": "EUR/GBP",
+   "direction": "BUY",
+   "price": 0.84323
+  }
+ ],
+ "lineaBaseTodasLasAlertas": {
+  "experimental · Tipo A": 92,
+  "experimental · 🛡️ Tipo A · Shield ✓": 62,
+  "normal · Tipo A": 77,
+  "normal · Tipo C": 38,
+  "experimental · Tipo C": 8,
+  "experimental · Semáforo Peatón": 8,
+  "experimental · 🛡️ Tipo C · Shield ✓": 6,
+  "experimental · 🛡️ Semáforo Peatón · Shield ✓": 6
+ },
+ "mensajesTelegramLineaBase": 361
+}
