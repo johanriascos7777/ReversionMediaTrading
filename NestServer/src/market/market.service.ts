@@ -2,9 +2,8 @@ import { Injectable, OnModuleInit, OnModuleDestroy, Inject, forwardRef } from '@
 import { EventEmitter } from 'events';
 import https from 'https';
 import http from 'http';
-import * as fs from 'fs';
-import * as path from 'path';
 import { TwelveDataClient } from './twelveDataClient';
+import { ApiKeyPool } from './apiKeyPool';
 import { CandleBuilder } from './candleBuilder';
 import { isFxClosed } from './fxCalendar';
 import { calculateSnapshot, resolveMultiTF, calculateElasticityForCandles, pushPercentileHistory, clearPercentileHistory } from './marketEngine';
@@ -102,6 +101,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
   private readonly symbolStates = new Map<string, SymbolState>();
 
   private readonly twelveClients: TwelveDataClient[] = [];
+  private readonly keyPool: ApiKeyPool;
 
   private readonly fomowatchSignals = new Map<string, { loadedAt: number; signals: FomowatchSignal[] }>();
   private readonly fomowatchLoading = new Set<string>();
@@ -110,71 +110,6 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
   private engineRunning = false;
   private historyLoaded = false;
   private schedulerInterval: NodeJS.Timeout | null = null;
-  /**
-   * Llaves agotadas: Map<key, timestampAgotamiento>.
-   * Las llaves agotadas por límite de MINUTO (rate-limit) se auto-liberan
-   * después de 65 segundos. Solo las que alcanzan los 800 créditos totales
-   * se consideran permanentemente agotadas, pero dado que TwelveData
-   * no distingue en la respuesta, tratamos todo como rate-limit temporal
-   * para no consumir innecesariamente todo el pool en un bucle.
-   */
-  private readonly exhaustedKeys = new Map<string, number>(); // key -> timestamp agotamiento
-  private readonly dailyLimitExhaustedKeys = new Set<string>();
-  private lastResetDay = new Date().getUTCDate();
-  private static readonly KEY_RATE_LIMIT_COOLDOWN_MS = 65_000; // 65s > 1 min de ventana TwelveData
-
-  private checkDailyReset(): void {
-    const today = new Date().getUTCDate();
-    if (today !== this.lastResetDay) {
-      this.dailyLimitExhaustedKeys.clear();
-      this.saveDailyExhaustedKeys(); // Limpiar el archivo de persistencia
-      this.lastResetDay = today;
-      console.log('[MarketService] ☀️ Nuevo día UTC detectado. Restableciendo límites de créditos diarios de todas las llaves API.');
-    }
-  }
-
-  private loadDailyExhaustedKeys(): void {
-    const filePath = path.join(process.cwd(), 'exhausted_keys.json');
-    try {
-      if (fs.existsSync(filePath)) {
-        const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-        if (data.date === new Date().getUTCDate() && Array.isArray(data.keys)) {
-          for (const key of data.keys) {
-            this.dailyLimitExhaustedKeys.add(key);
-          }
-          console.log(`[MarketService] 💾 Cargadas ${this.dailyLimitExhaustedKeys.size} llaves agotadas diarias desde persistencia.`);
-        } else {
-          // Si es otro día, borrar el archivo
-          fs.unlinkSync(filePath);
-        }
-      }
-    } catch (e) {
-      console.error('[MarketService] Error cargando llaves agotadas persistidas:', e);
-    }
-  }
-
-  private saveDailyExhaustedKeys(): void {
-    const filePath = path.join(process.cwd(), 'exhausted_keys.json');
-    try {
-      const data = {
-        date: new Date().getUTCDate(),
-        keys: Array.from(this.dailyLimitExhaustedKeys)
-      };
-      fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
-    } catch (e) {
-      console.error('[MarketService] Error guardando llaves agotadas persistidas:', e);
-    }
-  }
-
-  private readonly activeAssignments = new Map<string, string>();
-  private readonly keyStats = new Map<string, {
-    totalRequests: number;
-    requestTimestamps: number[];
-    minutelyMax: number;
-  }>();
-
-  // Ya no usamos bloqueo global de créditos diarios, rotamos la llave por símbolo.
-
   // Métricas
   public readonly serverMetrics = {
     droppedTicksTotal: 0,
@@ -221,7 +156,11 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
     });
 
     // Cargar llaves agotadas diariamente desde la persistencia
-    this.loadDailyExhaustedKeys();
+    this.keyPool = new ApiKeyPool(this.apiKeyList, this.symbolList, (msg) => this.events.emit('broadcast', msg));
+  }
+
+  public getKeysPoolStatus(): BackendMessage {
+    return this.keyPool.getKeysPoolStatus();
   }
 
   async onModuleInit() {
@@ -322,7 +261,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
           this.symbolStates.set(sym, state);
 
           // Asignar key exclusiva inicial para este símbolo
-          this.getAvailableApiKey(sym);
+          this.keyPool.getAvailableApiKey(sym);
 
           // Configurar manejadores de eventos de velas (se configuran una sola vez)
           state.builderM5.on('dropped_tick', (reason: string) => this.recordDroppedTick(reason));
@@ -373,7 +312,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       // 2. Conectar cada par a su key exclusiva del pool
       this.twelveClients.length = 0;
       for (const sym of this.symbolList) {
-        const key = this.getAvailableApiKey(sym);
+        const key = this.keyPool.getAvailableApiKey(sym);
 
         console.log(`[MarketService] Iniciando cliente para ${sym} usando clave: ...${key.slice(-6)}`);
         const client = new TwelveDataClient(key, sym);
@@ -402,20 +341,19 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
 
         // Escuchar solicitudes API para conteo de créditos
         client.on('api-request', (reqKey: string) => {
-          this.incrementKeyRequest(reqKey);
+          this.keyPool.incrementKeyRequest(reqKey);
         });
 
         // Rotar key automáticamente si se agotan los créditos
         client.on('key-exhausted', (exhaustedKey: string, type?: 'rate' | 'daily') => {
           if (type === 'daily') {
-            this.dailyLimitExhaustedKeys.add(exhaustedKey);
-            this.saveDailyExhaustedKeys(); // Persistir
+            this.keyPool.markDailyExhausted(exhaustedKey);
             console.warn(`[MarketService] [${sym}] Llave ...${exhaustedKey.slice(-6)} marcada como AGOTADA DIARIA. Rotando...`);
           } else {
-            this.exhaustedKeys.set(exhaustedKey, Date.now());
+            this.keyPool.markRateLimited(exhaustedKey);
             console.warn(`[MarketService] [${sym}] Llave ...${exhaustedKey.slice(-6)} marcada como AGOTADA TEMPORAL (rate-limit). Rotando...`);
           }
-          const newKey = this.getAvailableApiKey(sym, exhaustedKey);
+          const newKey = this.keyPool.getAvailableApiKey(sym, exhaustedKey);
           client.updateApiKey(newKey);
 
           // Forzar la recarga de historial en el próximo tick del poller REST
@@ -461,260 +399,6 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
     const dailyBudget = Math.max(1, this.apiKeyList.length) * REST_CREDITS_PER_KEY_PER_DAY;
     const ms = Math.min(5 * 60_000, Math.max(60_000, Math.ceil((86_400_000 * restClients.length) / dailyBudget / 60_000) * 60_000));
     for (const client of restClients) client.setRestPollInterval(ms);
-  }
-
-  // ─── Gestión Dinámica de API Keys (Pool de 32 llaves) ────────────────────────
-
-  /**
-   * Verifica si una llave está agotada (considerando el cooldown por minuto).
-   * Las llaves se auto-liberan después de KEY_RATE_LIMIT_COOLDOWN_MS.
-   */
-  private isKeyExhausted(key: string): boolean {
-    const exhaustedAt = this.exhaustedKeys.get(key);
-    if (exhaustedAt === undefined) return false;
-    const elapsed = Date.now() - exhaustedAt;
-    if (elapsed >= MarketService.KEY_RATE_LIMIT_COOLDOWN_MS) {
-      // Auto-liberar la llave: el minuto ya pasó
-      this.exhaustedKeys.delete(key);
-      console.log(`[MarketService] ✅ Llave ...${key.slice(-6)} liberada del cooldown (${(elapsed / 1000).toFixed(0)}s transcurridos). Disponible nuevamente.`);
-      return false;
-    }
-    return true;
-  }
-
-  private getAvailableApiKey(symbol: string, currentExhaustedKey?: string): string {
-    if (currentExhaustedKey) {
-      if (!this.dailyLimitExhaustedKeys.has(currentExhaustedKey)) {
-        this.exhaustedKeys.set(currentExhaustedKey, Date.now());
-        console.log(`[MarketService] Llave ...${currentExhaustedKey.slice(-6)} marcada como agotada temporal (cooldown ${MarketService.KEY_RATE_LIMIT_COOLDOWN_MS / 1000}s).`);
-      }
-      this.broadcastKeysStatus();
-    }
-
-    // Llaves ya asignadas a otros símbolos (excluir la del símbolo actual)
-    const assignedToOthers = new Set(this.activeAssignments.values());
-    const myCurrentKey = this.activeAssignments.get(symbol);
-    if (myCurrentKey) assignedToOthers.delete(myCurrentKey);
-
-    // Priorizar llaves ordenándolas según uso de créditos y métricas por minuto (de menor a mayor uso)
-    const sortedKeys = [...this.apiKeyList].sort((a, b) => {
-      const statsA = this.keyStats.get(a) || { totalRequests: 0, minutelyMax: 0 };
-      const statsB = this.keyStats.get(b) || { totalRequests: 0, minutelyMax: 0 };
-      if (statsA.minutelyMax !== statsB.minutelyMax) {
-        return statsA.minutelyMax - statsB.minutelyMax;
-      }
-      return statsA.totalRequests - statsB.totalRequests;
-    });
-
-    // 1. Buscar primera llave libre (no rate-limit agotada, no daily agotada, no asignada a otro símbolo)
-    for (const key of sortedKeys) {
-      if (!this.isKeyExhausted(key) && !this.dailyLimitExhaustedKeys.has(key) && !assignedToOthers.has(key)) {
-        this.activeAssignments.set(symbol, key);
-        console.log(`[MarketService] [${symbol}] Llave activa asignada: ...${key.slice(-6)}`);
-        this.broadcastKeysStatus();
-        return key;
-      }
-    }
-
-    // 2. Fallback: llave no agotada (ni rate, ni daily) aunque compartida temporalmente
-    for (const key of sortedKeys) {
-      if (!this.isKeyExhausted(key) && !this.dailyLimitExhaustedKeys.has(key)) {
-        this.activeAssignments.set(symbol, key);
-        console.warn(`[MarketService] [${symbol}] ⚠️ Llave compartida ...${key.slice(-6)} (escasez temporal)`);
-        this.broadcastKeysStatus();
-        return key;
-      }
-    }
-
-    // 3. Fallback: usar una llave en cooldown temporal (no daily agotada)
-    for (const key of sortedKeys) {
-      if (!this.dailyLimitExhaustedKeys.has(key)) {
-        this.activeAssignments.set(symbol, key);
-        console.warn(`[MarketService] [${symbol}] ⚠️ Usando llave en cooldown temporal ...${key.slice(-6)}`);
-        this.broadcastKeysStatus();
-        return key;
-      }
-    }
-
-    // 4. Fallback absoluto (todas agotadas — situación crítica)
-    console.error(`[MarketService] [${symbol}] ❌ CRÍTICO: Todas las ${this.apiKeyList.length} llaves están agotadas.`);
-
-    // Alerta de agotamiento absoluto para el frontend
-    this.events.emit('broadcast', {
-      type: 'keys-exhausted-alert',
-      symbol,
-      message: `❌ ¡ALERTA CRÍTICA! Se han agotado todas las ${this.apiKeyList.length} llaves API para el símbolo ${symbol}. No es posible obtener más datos.`
-    } satisfies BackendMessage);
-
-    this.broadcastKeysStatus();
-    return this.apiKeyList[0] || '';
-  }
-
-  /**
-   * Obtiene el estado actual detallado de todas las llaves API y sus estadísticas de uso.
-   */
-  public getKeysPoolStatus(): BackendMessage {
-    this.checkDailyReset();
-    const now = Date.now();
-
-    // Mapeo inverso de llaves activas a símbolos
-    const keyToSymbol = new Map<string, string>();
-    for (const [sym, key] of this.activeAssignments.entries()) {
-      keyToSymbol.set(key, sym);
-    }
-
-    // Construir la lista completa de todas las 35 llaves del pool
-    const poolDetailsList = this.apiKeyList.map((key, index) => {
-      const keyMasked = `...${key.slice(-6)}`;
-      const assignedSymbol = keyToSymbol.get(key) || null;
-
-      let status: 'active' | 'shared' | 'rate-limit' | 'daily-limit' = 'active';
-      let cooldownRemaining = 0;
-
-      if (this.dailyLimitExhaustedKeys.has(key)) {
-        status = 'daily-limit';
-      } else {
-        const exhaustedAt = this.exhaustedKeys.get(key);
-        if (exhaustedAt !== undefined) {
-          const remaining = MarketService.KEY_RATE_LIMIT_COOLDOWN_MS - (now - exhaustedAt);
-          if (remaining > 0) {
-            status = 'rate-limit';
-            cooldownRemaining = Math.ceil(remaining / 1000);
-          } else {
-            this.exhaustedKeys.delete(key);
-          }
-        }
-      }
-
-      if (status === 'active' && assignedSymbol) {
-        const sharingCount = Array.from(this.activeAssignments.values()).filter(k => k === key).length;
-        if (sharingCount > 1) {
-          status = 'shared';
-        }
-      }
-
-      let totalRequests = 0;
-      let minutelyRate = 0;
-      let minutelyMax = 0;
-
-      if (this.keyStats.has(key)) {
-        const stats = this.keyStats.get(key)!;
-        stats.requestTimestamps = stats.requestTimestamps.filter(ts => now - ts <= 60000);
-        totalRequests = stats.totalRequests;
-        minutelyRate = stats.requestTimestamps.length;
-        minutelyMax = stats.minutelyMax;
-      }
-
-      return {
-        index: index + 1,
-        keyMasked,
-        status,
-        requestsCount: totalRequests,
-        minutelyRate,
-        minutelyMax,
-        cooldownRemaining,
-        assignedSymbol
-      };
-    });
-
-    // Assignments per symbol (for active currency cards)
-    const assignmentsList = this.symbolList.map(sym => {
-      const activeKey = this.activeAssignments.get(sym);
-      const activeKeyMasked = activeKey ? `...${activeKey.slice(-6)}` : 'Ninguna';
-
-      let status: 'active' | 'shared' | 'exhausted' = 'active';
-      if (this.apiKeyList.every(k => this.isKeyExhausted(k) || this.dailyLimitExhaustedKeys.has(k))) {
-        status = 'exhausted';
-      } else if (activeKey) {
-        if (this.isKeyExhausted(activeKey) || this.dailyLimitExhaustedKeys.has(activeKey)) {
-          status = 'exhausted';
-        } else {
-          const sharingSymbolsCount = Array.from(this.activeAssignments.values()).filter(k => k === activeKey).length;
-          if (sharingSymbolsCount > 1) {
-            status = 'shared';
-          }
-        }
-      }
-
-      let totalRequests = 0;
-      let minutelyRate = 0;
-      let minutelyMax = 0;
-
-      if (activeKey && this.keyStats.has(activeKey)) {
-        const stats = this.keyStats.get(activeKey)!;
-        stats.requestTimestamps = stats.requestTimestamps.filter(ts => now - ts <= 60000);
-        totalRequests = stats.totalRequests;
-        minutelyRate = stats.requestTimestamps.length;
-        minutelyMax = stats.minutelyMax;
-      }
-
-      return {
-        symbol: sym,
-        activeKeyMasked,
-        status,
-        requestsCount: totalRequests,
-        minutelyRate,
-        minutelyMax
-      };
-    });
-
-    const exhaustedKeysCount = poolDetailsList.filter(k => k.status === 'rate-limit' || k.status === 'daily-limit').length;
-    const allExhausted = poolDetailsList.every(k => k.status === 'rate-limit' || k.status === 'daily-limit');
-
-    const exhaustedKeysDetails = poolDetailsList
-      .filter(k => k.status === 'rate-limit')
-      .map(k => ({
-        keyMasked: k.keyMasked,
-        cooldownRemaining: k.cooldownRemaining
-      }));
-
-    return {
-      type: 'keys-status',
-      totalKeys: this.apiKeyList.length,
-      exhaustedKeysCount,
-      allExhausted,
-      assignments: assignmentsList,
-      exhaustedKeys: exhaustedKeysDetails,
-      poolDetails: poolDetailsList
-    } satisfies BackendMessage;
-  }
-
-  /**
-   * Incrementa el contador de peticiones de una API Key y limpia los registros de más de 60 segundos.
-   */
-  private incrementKeyRequest(key: string): void {
-    if (!key) return;
-
-    if (!this.keyStats.has(key)) {
-      this.keyStats.set(key, {
-        totalRequests: 0,
-        requestTimestamps: [],
-        minutelyMax: 0
-      });
-    }
-
-    const stats = this.keyStats.get(key)!;
-    stats.totalRequests++;
-
-    const now = Date.now();
-    stats.requestTimestamps.push(now);
-
-    // Limpiar peticiones de más de 60 segundos
-    stats.requestTimestamps = stats.requestTimestamps.filter(ts => now - ts <= 60000);
-
-    // Actualizar máximo
-    if (stats.requestTimestamps.length > stats.minutelyMax) {
-      stats.minutelyMax = stats.requestTimestamps.length;
-    }
-
-    this.broadcastKeysStatus();
-  }
-
-  /**
-   * Transmite el estado actual de las llaves API a todos los clientes.
-   */
-  private broadcastKeysStatus(): void {
-    this.events.emit('broadcast', this.getKeysPoolStatus());
   }
 
   private snapshotPayload(
@@ -790,10 +474,10 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
   ): Promise<Candle[]> {
     return new Promise((resolve, reject) => {
       // Usar la key asignada dinámicamente al símbolo (pool de rotación)
-      const key = this.activeAssignments.get(symbol) ?? this.apiKeyList[0] ?? '';
+      const key = this.keyPool.assignedKey(symbol) ?? this.apiKeyList[0] ?? '';
 
       // Registrar petición de crédito
-      this.incrementKeyRequest(key);
+      this.keyPool.incrementKeyRequest(key);
 
       const path =
         `/time_series?symbol=${encodeURIComponent(symbol)}` +
@@ -819,10 +503,9 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
 
                 if (isDailyLimit) {
                   console.error(`[History] [${symbol}] 🚫 CRÉDITOS DIARIOS AGOTADOS en llave actual. Mensaje: ${msg}`);
-                  this.dailyLimitExhaustedKeys.add(key);
-                  this.saveDailyExhaustedKeys(); // Persistir
-                  this.getAvailableApiKey(symbol, key); // Rotar llave
-                  this.broadcastKeysStatus();
+                  this.keyPool.markDailyExhausted(key);
+                  this.keyPool.getAvailableApiKey(symbol, key); // Rotar llave
+                  this.keyPool.broadcastKeysStatus();
                   reject(new Error('DAILY_LIMIT_EXHAUSTED'));
                   return;
                 }
@@ -830,16 +513,16 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
                 const isRateLimit = msg.toLowerCase().includes('rate limit') || msg.toLowerCase().includes('too many requests') || msg.toLowerCase().includes('per minute limit');
                 if (isRateLimit) {
                   console.warn(`[History] [${symbol}] Límite por minuto alcanzado. Rotando llave...`);
-                  this.exhaustedKeys.set(key, Date.now());
-                  this.getAvailableApiKey(symbol, key); // Rotar llave
-                  this.broadcastKeysStatus();
+                  this.keyPool.markRateLimited(key);
+                  this.keyPool.getAvailableApiKey(symbol, key); // Rotar llave
+                  this.keyPool.broadcastKeysStatus();
                   reject(new Error('RATE_LIMIT'));
                   return;
                 }
 
                 console.error(`[History] [${symbol}] Error ${interval} de TwelveData (Rotando llave):`, msg || data);
-                this.getAvailableApiKey(symbol, key); // Rotar llave
-                this.broadcastKeysStatus();
+                this.keyPool.getAvailableApiKey(symbol, key); // Rotar llave
+                this.keyPool.broadcastKeysStatus();
                 reject(new Error('API_ERROR'));
                 return;
               }
