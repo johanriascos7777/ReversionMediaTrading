@@ -12,9 +12,10 @@ async function main() {
   const out = process.argv[2];
   const from = Date.parse(process.argv[3] ?? '2026-10-05T11:00:00Z');
   const to = Date.parse(process.argv[4] ?? '2026-10-17T00:00:00Z');
+  const live = process.argv.includes('--24h');
   if (!out) {
     console.error(
-      'Uso: ts-node --transpile-only test/replay/run-replay.ts <salida.json> [desde ISO] [hasta ISO] [--check]',
+      'Uso: ts-node --transpile-only test/replay/run-replay.ts <salida.json> [desde ISO] [hasta ISO] [--check] [--24h]',
     );
     process.exit(1);
   }
@@ -25,7 +26,12 @@ async function main() {
   }
 
   const started = Date.now();
-  const result = await runReplay({ barsBySymbol, from, to });
+  const result = await runReplay({
+    barsBySymbol,
+    from,
+    to,
+    ignoreSchedule: live,
+  });
   fs.writeFileSync(out, JSON.stringify(result, null, 1));
 
   const counts = new Map<string, number>();
@@ -42,7 +48,11 @@ async function main() {
   if (process.argv.includes('--check')) {
     const golden = JSON.parse(
       fs.readFileSync(
-        path.join(__dirname, 'golden', 'v1-expected.json'),
+        path.join(
+          __dirname,
+          'golden',
+          live ? 'v1-expected-24h.json' : 'v1-expected.json',
+        ),
         'utf8',
       ),
     ) as {

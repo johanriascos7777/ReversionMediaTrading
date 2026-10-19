@@ -96,6 +96,7 @@ export async function runReplay(opts: {
   from: number;
   to: number;
   historySize?: number;
+  ignoreSchedule?: boolean;
 }): Promise<ReplayResult> {
   const historySize = opts.historySize ?? 1000;
   const symbols = Object.keys(opts.barsBySymbol);
@@ -104,7 +105,8 @@ export async function runReplay(opts: {
   const realDateNow = Date.now;
   Date.now = () => now;
 
-  delete process.env.IGNORE_SCHEDULE;
+  if (opts.ignoreSchedule) process.env.IGNORE_SCHEDULE = 'true';
+  else delete process.env.IGNORE_SCHEDULE;
   process.env.TELEGRAM_BOT_TOKEN = 'replay';
   process.env.TELEGRAM_CHAT_ID = 'replay';
   process.env.TWELVE_DATA_API_KEY = 'replay-key';
