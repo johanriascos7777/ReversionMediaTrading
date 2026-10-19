@@ -30,10 +30,28 @@
 
 MAE = pips en contra después de la alerta hasta tocar la EMA 100 (historial largo) o 24 h. Es una comprobación de funcionamiento, no una validación: son pocas alertas y una sola grabación.
 
+En vivo el `.env` tiene `IGNORE_SCHEDULE=true`: el motor corre las 24 h de lunes a viernes. Los números que valen para la prueba en demo son los de "24 h". Los de "horario" usan el horario COT del código (sin madrugadas ni viernes por la tarde) y sirven para comparar con el código original.
+
 | | Alertas | MAE mediana | MAE p90 | MAE máx | Toca EMA en 4 h |
 |---|---|---|---|---|---|
-| v1 · Giro | 8 | 7,6 | 17,6 | 24,7 | 38 % |
-| v2 · Zona | 28 | 7,0 | 38,1 | 75,4 | 57 % |
-| (antes) Tipo C normal | 38 | 3,6 | 6,4 | 41,1 | 74 % |
+| v1 · Giro (24 h, como en vivo) | 16 | 8,7 | 16,1 | 29,3 | 62 % |
+| v2 · Zona (24 h, como en vivo) | 32 | 5,2 | 36,0 | 77,6 | 59 % |
+| v1 · Giro (horario) | 8 | 7,6 | 17,6 | 24,7 | 38 % |
+| v2 · Zona (horario) | 28 | 7,0 | 38,1 | 75,4 | 57 % |
+| (antes) Tipo C normal (horario) | 38 | 3,6 | 6,4 | 41,1 | 74 % |
+
+Con 24 h las alertas v1 no son las 8 de antes más otras 8: solo una coincide, porque procesar también las madrugadas cambia el estado del motor. El viernes 16 la v1 avisó 7 veces la misma compra de EUR/GBP entre las 07:19 y las 09:09 (COT): la primera tuvo 16,9 pips en contra y las últimas entre 8 y 10.
 
 La EMA 100 del motor de la v1 (150 velas) se separó hasta 17,9 pips de la EMA 100 con historial largo (mediana 1,3).
+
+## ELAS-67 y ELAS-68 medidas en la grabación (2026-10-17)
+
+Twelve Data entrega sábados y domingos completos: el 24 % de las barras grabadas. Son cotizaciones sintéticas con velas de 1 minuto pequeñas (0,5 pips contra 1,2 en día hábil) que igual recorren mucho (el sábado 10 de octubre, 62 pips en EUR/USD y 50 en EUR/GBP). Entran en el historial que se carga al arrancar.
+
+| Variante | v1 horario | v1 24 h | v2 24 h |
+|---|---|---|---|
+| Actual | 8 | 16 | 32 |
+| ELAS-68 (vela duplicada al cierre) | 8, las mismas | 16, las mismas | 32 |
+| ELAS-67 (sin barras de fin de semana en el historial) | 8: una sale 14 min antes, con 36 pips en contra en vez de 24,7 | 20: una cambia de hora y salen 4 más, todas compras de EUR/GBP la noche del 6 al 7 de octubre, con 25–29 pips en contra | 28 |
+
+Ninguna de las dos se aplica antes de la prueba: ELAS-68 no cambia nada en esta grabación y ELAS-67 la empeora en el único arranque grabado.

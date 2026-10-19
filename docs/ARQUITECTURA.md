@@ -17,7 +17,8 @@ Cada alerta crea un `pending_signal` (botones "Registrar Trade" / "Descartar" de
 
 1. `market/twelveDataClient.ts`: WebSocket de Twelve Data. Si el plan rechaza el par (EUR/GBP en el plan gratuito), pide **velas de 1 minuto por REST** y las pasa al motor como 4 ticks (apertura, extremos, cierre). El intervalo se ajusta a las llaves y pares por REST (60 s con 2 llaves y 1 par).
 2. `market/market.service.ts`:
-   - Pool de llaves (`TWELVE_DATA_API_KEY`, separadas por coma) y horario operativo. Con el forex cerrado (viernes 17:00 → domingo 17:00 de Nueva York) el motor duerme aunque `IGNORE_SCHEDULE=true`.
+   - Horario operativo. Con el forex cerrado (viernes 17:00 → domingo 17:00 de Nueva York) el motor duerme aunque `IGNORE_SCHEDULE=true`.
+   - Pool de llaves (`TWELVE_DATA_API_KEY`, separadas por coma) en `market/apiKeyPool.ts`: una llave por par, rotación, enfriamiento de 65 s, llaves agotadas del día (`exhausted_keys.json`) y el estado que muestra la sección de llaves.
    - Historial al arrancar: 1000 velas de 5m y 15m (en UTC, sin la vela que aún no cierra) y 5000 velas de 5m para la zona de la v2.
    - `processTick`: arma velas (`candleBuilder.ts`), calcula elasticidad y percentil (`marketEngine.ts`), backtest interno (`backtestEngine.ts`, `compareSignal.ts`, `fuseMarketState.ts`), detector de pico, escudo y emite el snapshot por WebSocket al frontend.
 3. Servicios que escuchan el snapshot: `structure/` (S/R, RSI, sándwich de EMAs) y `consolidation/` (escudo de consolidación). Ya no mandan Telegram.
@@ -41,11 +42,12 @@ Tres pantallas: **`/` Señales** (pares, semáforo, tarjeta de elasticidad, zona
 
 ```bash
 cd NestServer
-npm test                                   # motor de la zona, seguimiento de resultados, velas REST
+npm test                                   # motor de la zona, seguimiento de resultados, velas REST, pool de llaves
 npm run replay -- /tmp/r.json 2026-10-05T11:00:00Z 2026-10-17T00:00:00Z --check
+npm run replay -- /tmp/r.json 2026-10-05T11:00:00Z 2026-10-17T00:00:00Z --check --24h   # como en vivo (IGNORE_SCHEDULE=true)
 ```
 
-`npm run replay` corre el motor real sobre velas de 1 minuto grabadas (`test/replay/fixtures/`, EUR/USD y EUR/GBP del 2026-09-21 al 2026-10-17) sin red, sin base de datos y sin Telegram. Con `--check` falla si la v1 deja de salir en los mismos 8 instantes que la "Tipo C experimental" del código original (`test/replay/golden/v1-expected.json`). Es la red de seguridad para cualquier refactor.
+`npm run replay` corre el motor real sobre velas de 1 minuto grabadas (`test/replay/fixtures/`, EUR/USD y EUR/GBP del 2026-09-21 al 2026-10-17) sin red, sin base de datos y sin Telegram. Con `--check` falla si la v1 deja de salir en los mismos 8 instantes que la "Tipo C experimental" del código original (`test/replay/golden/v1-expected.json`). Con `--24h` corre como en vivo, sin el horario COT, y compara con las 16 alertas de `v1-expected-24h.json` (sacadas del código actual, no del original). Es la red de seguridad para cualquier refactor.
 
 ## Tableros
 
