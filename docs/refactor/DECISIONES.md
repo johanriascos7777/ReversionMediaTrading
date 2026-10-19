@@ -11,6 +11,7 @@
 | 2026-10-17 | Usar solo dos llaves de Twelve Data (cuenta tor7dev y una segunda cuenta) y dos pares: EUR/USD y otro. |
 | 2026-10-17 | Documentar en Jira lo probado y lo nuevo, y tener un tablero con el plan antes de ejecutar. |
 | 2026-10-17 | Probar desde el lunes 2026-10-19 en cuenta demo con las alertas, "hasta nuevo aviso". |
+| 2026-10-19 | Pasar de 2 a 5 llaves de Twelve Data (ninguna compartida con fable5 ni con el bot de django-trading) y agregar un tercer par. Deja la elección del par a Claude. |
 
 ## Tomadas por Claude el 2026-10-17 (revisables por el trader)
 
@@ -19,6 +20,7 @@
 | La v1 es la antigua "Tipo C experimental", con el escudo y el semáforo dentro del mismo mensaje. | Es la que el trader considera más precisa. En la grabación, Peatón y Tipo C · Shield ✓ salían en el mismo instante: un evento, tres mensajes. |
 | La v2 es la "Zona de agotamiento" (ELAS-20), marcada como experimental. | Idea nueva: compara el estirón con dónde terminaron los estirones pasados, no con todas las velas. Regla fijada antes de probarla. |
 | Segundo par: EUR/GBP. | Las alertas de ejemplo que el trader considera precisas son de EUR/GBP y es un cruce que suele volver a la media. |
+| Tercer par (2026-10-19): GBP/USD, no USD/JPY. | Completa el triángulo con EUR/USD y EUR/GBP: deja ver si un estirón de EUR/GBP es del euro o de la libra, y graba desde ya los datos para medir esa idea después. Con 5 llaves cabe un solo par REST más (unos 1.050 créditos de margen). USD/JPY queda para cuando haya 2 llaves libres más. |
 | Backend en el puerto 8083. | El backend de fable5 corre como servicio en el 8082. |
 | El par que va por REST pide velas de 1 minuto (cada 60 s o más según llaves) en vez del precio cada 10 s. | Cada 10 s gastaba 8.640 créditos al día; con 2 llaves hay 1.600. |
 | El motor duerme con el forex cerrado aunque `IGNORE_SCHEDULE=true`. | Twelve Data entrega velas de fin de semana; gastan créditos y meten ruido en la EMA. |
