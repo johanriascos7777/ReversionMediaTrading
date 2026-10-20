@@ -31,6 +31,7 @@ Para otro broker (por ejemplo OANDA) se agrega un adaptador y se registra en `bu
 - Desde el frontend: sección "Operaciones abiertas" de `/`.
 - **Entrada automática** (interruptor del panel, `POST /execution/auto`): cada alerta que sale abre la operación en el broker por defecto con el SL de la alerta. El mensaje de Telegram llega con la línea "🤖🔒 Abierta automáticamente…" y sin el botón "Entrar". Si falla, llega con el motivo y el botón. El estado se guarda en `NestServer/execution_settings.json` (sobrevive a reinicios; arranca con `EXECUTION_AUTO=true` si el archivo no existe). En cuenta real solo se puede activar con `EXECUTION_AUTO_LIVE=true`.
 - El cierre es manual (interruptor del panel). Si el broker ya la había cerrado (SL), se marca `ya-cerrada-en-broker`.
+- **Seguimiento rojo/verde** (`execution/tracking/`): cada 3 s (`EXECUTION_TRACK_MS`) lee del broker las posiciones abiertas (`GET /api/v1/positions` en Capital.com) y guarda por operación las fases en rojo (holgura) y en verde, con hora de inicio y fin, duración, P&L al empezar, último y extremo. Lo hace con dos cuentas: el `upl` real de Capital.com (su spread) y la misma operación con 1 pip de spread total (`upl + ((spread de entrada + spread actual)/2 − 1 pip) × tamaño`, pasado a USD con la tasa del broker). Verde es P&L > 0; cero cuenta como rojo. Una posición vieja empieza a medirse cuando el seguimiento la ve (`tracking_since`). Si el broker deja de tenerla 3 lecturas seguidas (SL), se marca `broker_gone_at` y se deja de seguir. El panel muestra la fase actual en las columnas "P&L Capital.com" y "P&L 1 pip", y el botón "fases" la lista completa (`GET /execution/positions/:id/phases`).
 - API: `GET /execution/config`, `GET /execution/positions?status=open`, `POST /execution/positions`, `POST /execution/positions/:id/close`. Sin autenticación: el backend no debe quedar expuesto fuera de la red local.
 
 ## Por dónde entra un precio
@@ -51,6 +52,8 @@ Para otro broker (por ejemplo OANDA) se agrega un adaptador y se registra en `bu
 | `pending_signal` | Cada alerta enviada, con TP/SL sugeridos | `alerts/alerts.service.ts` |
 | `alert_log` | Cada alerta con su versión, valores al disparar y resultado: MAE, MFE, si tocó la EMA 100 y en cuántos minutos | `alerts/alerts.service.ts` (se actualiza al cierre de cada vela de 5m; tras un reinicio se recalcula con el historial) |
 | `execution_position` | Cada operación abierta desde el panel o desde Telegram: broker, par, dirección, tamaño, `dealId`, precio de entrada y de cierre, SL/TP, estado (`open`, `closed`, `failed`) y la alerta que la originó | `execution/execution.service.ts` (la tabla se crea sola al arrancar) |
+| `execution_pnl_phase` | Fases rojo/verde de cada operación, por modelo (`capital`, `pip1`): inicio, fin, duración, P&L inicial, último y extremo, segundos sin lecturas | `execution/tracking/` |
+| `execution_pnl_sample` | Una lectura por minuto de cada operación abierta: bid, offer, `upl` y P&L de los dos modelos | `execution/tracking/` |
 | `historical_candle` | Caché de velas del escudo de consolidación (fechas guardadas con desfase de 5 h, ver pendientes) | `historical/` |
 
 API nueva: `GET /alerts?limit=100` y `GET /alerts/summary` (marcador por versión).

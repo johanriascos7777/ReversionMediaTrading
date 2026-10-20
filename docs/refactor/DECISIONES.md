@@ -16,6 +16,7 @@
 | 2026-10-19 | Con una operación abierta en un par no llegan más alertas de ese par a Telegram hasta cerrarla a mano en el panel. |
 | 2026-10-19 | Abrir operaciones desde el panel y desde la alerta de Telegram, para cualquier par configurado, con el broker aislado para poder cambiarlo (por ejemplo OANDA en real). |
 | 2026-10-19 | Cada alerta abre la operación de inmediato en su par (entrada automática en la demo de Capital.com). |
+| 2026-10-19 | Dejar las operaciones abiertas y cerrarlas a mano para medir cuánto tiempo pasa en rojo (holgura) y en verde, y cada cambio, con hora y fecha; con el spread de Capital.com y con 1 pip. |
 
 ## Tomadas por Claude el 2026-10-17 (revisables por el trader)
 
