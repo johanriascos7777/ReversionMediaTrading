@@ -54,7 +54,8 @@ function CloseToggle({ position, busy, onClose }: { position: ExecutionPosition;
 }
 
 export function ExecutionPanel({ execution }: { execution: ReturnType<typeof useExecution> }) {
-  const { config, positions, error, busy, open, close } = execution
+  const { config, positions, error, busy, open, close, setAuto } = execution
+  const [askingAuto, setAskingAuto] = useState(false)
   const [symbolChoice, setSymbol] = useState('')
   const [direction, setDirection] = useState<'BUY' | 'SELL'>('BUY')
   const [sizeChoice, setSize] = useState('')
@@ -96,6 +97,33 @@ export function ExecutionPanel({ execution }: { execution: ReturnType<typeof use
       <p style={{ margin: '0 0 12px', fontSize: 12, color: '#9ca3af', lineHeight: 1.4 }}>
         Mientras un par tenga una operación abierta, sus alertas se guardan en el marcador pero no llegan a Telegram. Se cierran a mano con el interruptor.
       </p>
+      {config && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', margin: '0 0 12px', padding: '8px 12px', borderRadius: 8, fontSize: 12, background: config.auto ? 'rgba(16,185,129,0.1)' : 'rgba(255,255,255,0.03)', border: `1px solid ${config.auto ? 'rgba(16,185,129,0.4)' : 'rgba(255,255,255,0.08)'}`, color: '#d1d5db' }}>
+          <span
+            role="switch"
+            aria-checked={config.auto}
+            onClick={() => !busy && config.autoAllowed && setAskingAuto(true)}
+            style={{ width: 34, height: 18, borderRadius: 9, background: config.auto ? '#10b981' : '#4b5563', position: 'relative', display: 'inline-block', cursor: config.autoAllowed ? 'pointer' : 'not-allowed', opacity: config.autoAllowed ? 1 : 0.5 }}
+          >
+            <span style={{ position: 'absolute', top: 2, left: config.auto ? 18 : 2, width: 14, height: 14, borderRadius: 7, background: '#fff' }} />
+          </span>
+          <strong style={{ color: config.auto ? '#34d399' : '#9ca3af' }}>
+            Entrada automática {config.auto ? 'ACTIVADA' : 'apagada'}
+          </strong>
+          <span style={{ color: '#9ca3af' }}>
+            {config.autoAllowed
+              ? `cada alerta abre ${config.defaultSize} u. en ${config.brokers.find((b) => b.id === config.defaultBroker)?.label ?? config.defaultBroker} con el SL de la alerta`
+              : 'necesita un broker en demo'}
+          </span>
+          {askingAuto && (
+            <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+              <span style={{ color: '#fbbf24' }}>{config.auto ? '¿Apagar?' : '¿Activar?'}</span>
+              <button style={button('#2563eb')} disabled={busy} onClick={async () => { await setAuto(!config.auto); setAskingAuto(false) }}>Sí</button>
+              <button style={button('#374151')} disabled={busy} onClick={() => setAskingAuto(false)}>No</button>
+            </span>
+          )}
+        </div>
+      )}
       {error && <p style={{ margin: '0 0 12px', fontSize: 12, color: '#f87171' }}>{error}</p>}
 
       <div style={{ overflowX: 'auto', marginBottom: 16 }}>
@@ -130,7 +158,7 @@ export function ExecutionPanel({ execution }: { execution: ReturnType<typeof use
                 <td style={{ ...cell, color: p.live ? '#fbbf24' : undefined }} title={p.note ?? undefined}>
                   {p.brokerLabel}{p.note ? ' ⚠️' : ''}
                 </td>
-                <td style={cell}>{p.source === 'telegram' ? `alerta${p.alertLogId ? ` #${p.alertLogId}` : ''}` : 'panel'}</td>
+                <td style={cell}>{p.source === 'frontend' ? 'panel' : `${p.source === 'auto' ? 'auto · ' : ''}alerta${p.alertLogId ? ` #${p.alertLogId}` : ''}`}</td>
                 <td style={cell}><CloseToggle position={p} busy={busy} onClose={close} /></td>
               </tr>
             ))}

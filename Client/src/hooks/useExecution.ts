@@ -4,6 +4,8 @@ import { API_URL } from '@/config/env'
 export type BrokerInfo = { id: string; label: string; live: boolean }
 
 export type ExecutionConfig = {
+  auto: boolean
+  autoAllowed: boolean
   brokers: BrokerInfo[]
   defaultBroker: string
   symbols: string[]
@@ -20,7 +22,7 @@ export type ExecutionPosition = {
   direction: 'BUY' | 'SELL'
   size: number
   status: 'open' | 'closed' | 'failed'
-  source: 'frontend' | 'telegram'
+  source: 'frontend' | 'telegram' | 'auto'
   alertLogId: number | null
   openPrice: number | null
   stopLevel: number | null
@@ -116,5 +118,17 @@ export function useExecution(refreshMs = 15_000) {
     [run],
   )
 
-  return { config, positions, error, busy, open, close }
+  const setAuto = useCallback(
+    (enabled: boolean) =>
+      run(() =>
+        fetch(`${API_URL}/execution/auto`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled }),
+        }),
+      ),
+    [run],
+  )
+
+  return { config, positions, error, busy, open, close, setAuto }
 }

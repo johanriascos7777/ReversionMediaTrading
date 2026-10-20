@@ -93,7 +93,7 @@ export function AlertsTable({ alerts, summary, error }: { alerts: AlertRow[]; su
                 <td style={cell}>{fmt(a.mfePips)}</td>
                 <td style={cell}>{statusText[a.status]}</td>
                 <td style={cell}>{a.minutesToEma ?? '—'}</td>
-                <td style={cell}>{a.features?.telegramSuppressedBy ? `🔒 no enviada (op. #${a.features.telegramSuppressedBy})` : 'enviada'}</td>
+                <td style={cell}>{a.features?.telegramSuppressedBy ? `🔒 no enviada${a.features.telegramSuppressedBy > 0 ? ` (op. #${a.features.telegramSuppressedBy})` : ''}` : 'enviada'}</td>
               </tr>
             ))}
           </tbody>
