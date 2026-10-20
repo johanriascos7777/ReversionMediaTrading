@@ -29,6 +29,7 @@ Para otro broker (por ejemplo OANDA) se agrega un adaptador y se registra en `bu
 - Una operación abierta por par. Los pares salen de `TWELVE_DATA_SYMBOL`. Tamaño por defecto `EXECUTION_DEFAULT_SIZE` (1000 unidades) y máximo `EXECUTION_MAX_SIZE` (10000).
 - Desde Telegram: botón "🤖 Entrar en …" en cada alerta (`exec:<pending_signal>`), abre con el SL sugerido por la alerta y sin TP: el cierre es manual.
 - Desde el frontend: sección "Operaciones abiertas" de `/`.
+- **Entrada automática** (interruptor del panel, `POST /execution/auto`): cada alerta que sale abre la operación en el broker por defecto con el SL de la alerta. El mensaje de Telegram llega con la línea "🤖🔒 Abierta automáticamente…" y sin el botón "Entrar". Si falla, llega con el motivo y el botón. El estado se guarda en `NestServer/execution_settings.json` (sobrevive a reinicios; arranca con `EXECUTION_AUTO=true` si el archivo no existe). En cuenta real solo se puede activar con `EXECUTION_AUTO_LIVE=true`.
 - El cierre es manual (interruptor del panel). Si el broker ya la había cerrado (SL), se marca `ya-cerrada-en-broker`.
 - API: `GET /execution/config`, `GET /execution/positions?status=open`, `POST /execution/positions`, `POST /execution/positions/:id/close`. Sin autenticación: el backend no debe quedar expuesto fuera de la red local.
 

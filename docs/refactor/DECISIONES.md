@@ -15,6 +15,7 @@
 | 2026-10-19 | Cuenta demo CFD en Capital.com solo para ejecutar operaciones y medir el sistema (no como fuente de precios). El spread extra se resta en el registro. |
 | 2026-10-19 | Con una operación abierta en un par no llegan más alertas de ese par a Telegram hasta cerrarla a mano en el panel. |
 | 2026-10-19 | Abrir operaciones desde el panel y desde la alerta de Telegram, para cualquier par configurado, con el broker aislado para poder cambiarlo (por ejemplo OANDA en real). |
+| 2026-10-19 | Cada alerta abre la operación de inmediato en su par (entrada automática en la demo de Capital.com). |
 
 ## Tomadas por Claude el 2026-10-17 (revisables por el trader)
 
@@ -27,6 +28,8 @@
 | La alerta silenciada por una operación abierta se sigue guardando en `alert_log` (2026-10-19). | El marcador v1/v2 tiene que medir todas las alertas, no solo las que llegan. |
 | La operación abierta desde Telegram lleva el SL sugerido por la alerta y no lleva TP (2026-10-19). | El cierre es manual, como pidió el trader; el SL protege si nadie mira. |
 | La conexión a Capital.com real queda bloqueada salvo `CAPITAL_ALLOW_LIVE=true` (2026-10-19). | Dinero real: que pasar a real sea un cambio explícito del trader en el `.env`. |
+| La entrada automática vale para v1 y v2; con un par ya abierto, la alerta siguiente de ese par no abre otra (2026-10-19). | Una operación por par. Cada operación guarda la alerta que la abrió (`alert_log_id`), así se puede separar el resultado por versión. |
+| La entrada automática se enciende y apaga desde el panel y no se puede activar en cuenta real sin `EXECUTION_AUTO_LIVE=true` (2026-10-19). | Dinero real: pasar a real tiene que ser un cambio explícito del trader. |
 | Backend en el puerto 8083. | El backend de fable5 corre como servicio en el 8082. |
 | El par que va por REST pide velas de 1 minuto (cada 60 s o más según llaves) en vez del precio cada 10 s. | Cada 10 s gastaba 8.640 créditos al día; con 2 llaves hay 1.600. |
 | El motor duerme con el forex cerrado aunque `IGNORE_SCHEDULE=true`. | Twelve Data entrega velas de fin de semana; gastan créditos y meten ruido en la EMA. |
