@@ -80,6 +80,21 @@ export class ExecutionPosition {
   })
   closePrice?: number;
 
+  @Property({
+    type: 'decimal',
+    precision: 12,
+    scale: 6,
+    nullable: true,
+    fieldName: 'entry_spread',
+  })
+  entrySpread?: number;
+
+  @Property({ nullable: true, fieldName: 'tracking_since' })
+  trackingSince?: Date;
+
+  @Property({ nullable: true, fieldName: 'broker_gone_at' })
+  brokerGoneAt?: Date;
+
   @Property({ fieldName: 'opened_at' })
   openedAt!: Date;
 

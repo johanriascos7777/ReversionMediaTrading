@@ -21,6 +21,20 @@ export type CloseResult = {
   alreadyClosed: boolean;
 };
 
+export type Quote = { bid: number; offer: number };
+
+export type BrokerPositionMark = {
+  dealId: string;
+  dealReference: string | null;
+  brokerSymbol: string;
+  direction: Direction;
+  size: number;
+  level: number;
+  upl: number | null;
+  bid: number;
+  offer: number;
+};
+
 export interface BrokerAdapter {
   readonly id: string;
   readonly label: string;
@@ -31,6 +45,8 @@ export interface BrokerAdapter {
     dealId: string | null;
     dealReference: string | null;
   }): Promise<CloseResult>;
+  positions?(): Promise<BrokerPositionMark[]>;
+  quotes?(symbols: string[]): Promise<Record<string, Quote>>;
 }
 
 export class BrokerError extends Error {

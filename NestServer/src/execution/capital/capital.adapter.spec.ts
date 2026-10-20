@@ -123,6 +123,42 @@ describe('CapitalAdapter', () => {
     expect(res.dealId).toBe('d2');
     expect(calls.filter((c) => c.url.endsWith('/session')).length).toBe(2);
   });
+  it('lee las posiciones abiertas con su precio actual y su upl', async () => {
+    const { fn } = fakeFetch([
+      login,
+      (c) =>
+        c.method === 'GET' && c.url.endsWith('/api/v1/positions')
+          ? {
+              status: 200,
+              body: {
+                positions: [
+                  {
+                    position: { dealId: 'pos-1', dealReference: 'p_pos-1', direction: 'SELL', size: 1000, level: 1.12314, upl: -0.2 },
+                    market: { epic: 'EURUSD', bid: 1.12327, offer: 1.12334 },
+                  },
+                ],
+              },
+            }
+          : null,
+    ]);
+    const a = new CapitalAdapter(config, fn, async () => {});
+    expect(await a.positions()).toEqual([
+      { dealId: 'pos-1', dealReference: 'p_pos-1', brokerSymbol: 'EURUSD', direction: 'SELL', size: 1000, level: 1.12314, upl: -0.2, bid: 1.12327, offer: 1.12334 },
+    ]);
+  });
+
+  it('lee cotizaciones por símbolo desde marketDetails', async () => {
+    const { fn, calls } = fakeFetch([
+      login,
+      (c) =>
+        c.url.includes('/api/v1/markets?epics=GBPUSD')
+          ? { status: 200, body: { marketDetails: [{ instrument: { epic: 'GBPUSD' }, snapshot: { bid: 1.3001, offer: 1.3003 } }] } }
+          : null,
+    ]);
+    const a = new CapitalAdapter(config, fn, async () => {});
+    expect(await a.quotes(['GBP/USD'])).toEqual({ 'GBP/USD': { bid: 1.3001, offer: 1.3003 } });
+    expect(calls.at(-1)?.method).toBe('GET');
+  });
 });
 
 describe('capitalConfigFromEnv', () => {

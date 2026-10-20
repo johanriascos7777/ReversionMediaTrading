@@ -1,9 +1,11 @@
 import {
   BrokerError,
   type BrokerAdapter,
+  type BrokerPositionMark,
   type CloseResult,
   type OpenRequest,
   type OpenResult,
+  type Quote,
 } from '../broker.types';
 
 export type CapitalConfig = {
@@ -144,6 +146,47 @@ export class CapitalAdapter implements BrokerAdapter {
       level: confirm && typeof confirm.level === 'number' ? confirm.level : null,
       alreadyClosed: false,
     };
+  }
+
+  async positions(): Promise<BrokerPositionMark[]> {
+    const res = await this.request('GET', '/api/v1/positions');
+    const list: any[] = Array.isArray(res?.positions) ? res.positions : [];
+    const marks: BrokerPositionMark[] = [];
+    for (const item of list) {
+      const p = item?.position;
+      const m = item?.market;
+      if (!p?.dealId || typeof m?.bid !== 'number' || typeof m?.offer !== 'number')
+        continue;
+      marks.push({
+        dealId: p.dealId,
+        dealReference: p.dealReference ?? null,
+        brokerSymbol: m.epic ?? '',
+        direction: p.direction,
+        size: Number(p.size),
+        level: Number(p.level),
+        upl: typeof p.upl === 'number' ? p.upl : null,
+        bid: m.bid,
+        offer: m.offer,
+      });
+    }
+    return marks;
+  }
+
+  async quotes(symbols: string[]): Promise<Record<string, Quote>> {
+    const bySymbol = new Map(symbols.map((s) => [this.epicFor(s), s]));
+    if (!bySymbol.size) return {};
+    const epics = [...bySymbol.keys()].map(encodeURIComponent).join(',');
+    const res = await this.request('GET', `/api/v1/markets?epics=${epics}`);
+    const list: any[] = res?.marketDetails ?? res?.markets ?? [];
+    const out: Record<string, Quote> = {};
+    for (const item of list) {
+      const symbol = bySymbol.get(item?.instrument?.epic ?? item?.epic);
+      const bid = item?.snapshot?.bid ?? item?.bid;
+      const offer = item?.snapshot?.offer ?? item?.offer;
+      if (symbol && typeof bid === 'number' && typeof offer === 'number')
+        out[symbol] = { bid, offer };
+    }
+    return out;
   }
 
   private positionDealId(confirm: any): string | null {

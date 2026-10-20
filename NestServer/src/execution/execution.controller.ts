@@ -9,6 +9,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { ExecutionError, ExecutionService } from './execution.service';
+import { ExecutionTrackerService } from './tracking/execution-tracker.service';
 
 const toHttp = (err: unknown): never => {
   if (err instanceof ExecutionError)
@@ -24,7 +25,10 @@ const optionalNumber = (v: unknown): number | undefined => {
 
 @Controller('execution')
 export class ExecutionController {
-  constructor(private readonly execution: ExecutionService) {}
+  constructor(
+    private readonly execution: ExecutionService,
+    private readonly tracker: ExecutionTrackerService,
+  ) {}
 
   @Get('config')
   config() {
@@ -32,9 +36,19 @@ export class ExecutionController {
   }
 
   @Get('positions')
-  list(@Query('status') status?: string, @Query('limit') limit?: string) {
+  async list(
+    @Query('status') status?: string,
+    @Query('limit') limit?: string,
+  ) {
     const n = Math.min(Math.max(Number(limit) || 50, 1), 200);
-    return this.execution.list(status || undefined, n);
+    const rows = await this.execution.list(status || undefined, n);
+    const tracking = await this.tracker.tracking(rows);
+    return rows.map((r) => ({ ...r, tracking: tracking[r.id] ?? null }));
+  }
+
+  @Get('positions/:id/phases')
+  phases(@Param('id', ParseIntPipe) id: number) {
+    return this.tracker.phases(id);
   }
 
   @Post('positions')

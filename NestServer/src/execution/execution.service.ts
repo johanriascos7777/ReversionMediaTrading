@@ -77,6 +77,10 @@ export class ExecutionService {
     this.maxSize = Number(env.EXECUTION_MAX_SIZE) || 10000;
   }
 
+  adapter(id: string): BrokerAdapter | undefined {
+    return this.adapters.get(id);
+  }
+
   get defaultBroker(): BrokerAdapter | null {
     for (const a of this.adapters.values()) if (a.id !== 'manual') return a;
     return null;
@@ -310,6 +314,9 @@ export class ExecutionService {
       profitLevel: num(r.profitLevel),
       closePrice: num(r.closePrice),
       openedAt: r.openedAt,
+      trackingSince: r.trackingSince ?? null,
+      entrySpread: num(r.entrySpread),
+      brokerGoneAt: r.brokerGoneAt ?? null,
       closedAt: r.closedAt ?? null,
       closeReason: r.closeReason ?? null,
       note: r.note ?? null,
