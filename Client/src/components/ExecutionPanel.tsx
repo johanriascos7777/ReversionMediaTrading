@@ -1,5 +1,6 @@
-import { useState } from 'react'
-import type { useExecution, ExecutionPosition, OpenOrder } from '../hooks/useExecution'
+import { Fragment, useEffect, useState } from 'react'
+import { fetchPhases } from '../hooks/useExecution'
+import type { useExecution, ExecutionPosition, ModelSummary, OpenOrder, PhaseView, PnlModel } from '../hooks/useExecution'
 
 const cell: React.CSSProperties = { padding: '6px 8px', borderBottom: '1px solid rgba(255,255,255,0.05)', whiteSpace: 'nowrap' }
 const head: React.CSSProperties = { ...cell, color: '#6b7280', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', textAlign: 'left' }
@@ -26,6 +27,116 @@ const button = (bg: string, active = true): React.CSSProperties => ({
 const decimals = (symbol: string) => (symbol.includes('JPY') ? 3 : 5)
 const price = (symbol: string, n: number | null) => (n === null ? '—' : n.toFixed(decimals(symbol)))
 const optional = (v: string) => (v.trim() === '' ? undefined : Number(v))
+const pipFactor = (symbol: string) => (symbol.includes('JPY') ? 100 : 10_000)
+const dur = (sec: number) => {
+  const h = Math.floor(sec / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  const s = sec % 60
+  return h ? `${h}h ${m}m` : m ? `${m}m ${s}s` : `${s}s`
+}
+const usd = (n: number) => `${n > 0 ? '+' : ''}${Math.abs(n) < 0.01 && n !== 0 ? n.toFixed(3) : n.toFixed(2)} USD`
+const stamp = (iso: string) =>
+  new Date(iso).toLocaleString('es-CO', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+const MODELS: { id: PnlModel; label: string }[] = [
+  { id: 'capital', label: 'Spread de Capital.com' },
+  { id: 'pip1', label: 'Spread de 1 pip' },
+]
+
+function PnlCell({ value, summary }: { value: number | undefined; summary: ModelSummary | undefined }) {
+  const current = summary?.current
+  if (!summary || !current) return <td style={cell}>—</td>
+  const green = current.state === 'green'
+  const pnl = value ?? current.lastPnl
+  const title = `Fase ${current.seq} · rojo total ${dur(summary.redSec)} · verde total ${dur(summary.greenSec)}${
+    summary.firstGreenAfterSec !== null ? ` · primer verde a los ${dur(summary.firstGreenAfterSec)}` : ' · aún sin verde'
+  }`
+  return (
+    <td style={{ ...cell, color: green ? '#34d399' : '#f87171' }} title={title}>
+      {green ? '🟢' : '🔴'} {usd(pnl)} · {dur(current.durationSec)}
+    </td>
+  )
+}
+
+function PhaseTable({ phases }: { phases: PhaseView[] }) {
+  if (phases.length === 0) return <p style={{ margin: 0, color: '#6b7280' }}>Sin datos todavía.</p>
+  return (
+    <table style={{ borderCollapse: 'collapse', fontSize: 11 }}>
+      <thead>
+        <tr>
+          <th style={head}>#</th>
+          <th style={head}>Estado</th>
+          <th style={head}>Desde</th>
+          <th style={head}>Hasta</th>
+          <th style={head}>Duración</th>
+          <th style={head}>P&L inicio → último</th>
+          <th style={head}>Extremo</th>
+        </tr>
+      </thead>
+      <tbody>
+        {phases.map((ph) => (
+          <tr key={ph.seq} style={{ color: ph.state === 'green' ? '#34d399' : '#f87171' }}>
+            <td style={cell}>{ph.seq}</td>
+            <td style={cell}>{ph.state === 'green' ? '🟢 ganancia' : '🔴 holgura'}</td>
+            <td style={cell}>{stamp(ph.startedAt)}</td>
+            <td style={cell}>{ph.endedAt ? stamp(ph.endedAt) : 'en curso'}</td>
+            <td style={cell} title={ph.gapSec ? `Hubo ${dur(ph.gapSec)} sin lecturas` : undefined}>
+              {dur(ph.durationSec)}{ph.gapSec ? ' ⚠️' : ''}
+            </td>
+            <td style={cell}>{usd(ph.startPnl)} → {usd(ph.lastPnl)}</td>
+            <td style={cell}>{usd(ph.extremePnl)} · {stamp(ph.extremeAt)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
+function PhasesRow({ position, colSpan }: { position: ExecutionPosition; colSpan: number }) {
+  const [data, setData] = useState<Record<PnlModel, PhaseView[]> | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    const load = () =>
+      fetchPhases(position.id)
+        .then((d) => {
+          if (alive) setData(d)
+        })
+        .catch((err: unknown) => {
+          if (alive) setError(err instanceof Error ? err.message : String(err))
+        })
+    load()
+    const timer = setInterval(load, 10_000)
+    return () => {
+      alive = false
+      clearInterval(timer)
+    }
+  }, [position.id])
+
+  const late = position.trackingSince && new Date(position.trackingSince).getTime() - new Date(position.openedAt).getTime() > 120_000
+  return (
+    <tr>
+      <td style={{ ...cell, whiteSpace: 'normal', background: 'rgba(255,255,255,0.02)' }} colSpan={colSpan}>
+        <div style={{ color: '#9ca3af', marginBottom: 8 }}>
+          {position.trackingSince ? `Medida desde ${stamp(position.trackingSince)}` : 'Aún sin lecturas'}
+          {position.entrySpread !== null && ` · spread de entrada ${(position.entrySpread * pipFactor(position.symbol)).toFixed(1)} pips`}
+          {position.tracking?.live && ` · spread ahora ${(position.tracking.live.spread * pipFactor(position.symbol)).toFixed(1)} pips`}
+          {late && ' · ⚠️ empezó a medirse después de abrir: lo anterior no quedó registrado'}
+          {position.brokerGoneAt && ` · ⚠️ el broker ya no la tiene abierta desde ${stamp(position.brokerGoneAt)}`}
+        </div>
+        {error && <p style={{ margin: '0 0 8px', color: '#f87171' }}>{error}</p>}
+        <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+          {MODELS.map((m) => (
+            <div key={m.id}>
+              <div style={{ color: '#d1d5db', fontWeight: 700, marginBottom: 4 }}>{m.label}</div>
+              <PhaseTable phases={data?.[m.id] ?? []} />
+            </div>
+          ))}
+        </div>
+      </td>
+    </tr>
+  )
+}
 
 function CloseToggle({ position, busy, onClose }: { position: ExecutionPosition; busy: boolean; onClose: (id: number) => void }) {
   const [asking, setAsking] = useState(false)
@@ -63,6 +174,14 @@ export function ExecutionPanel({ execution }: { execution: ReturnType<typeof use
   const [profit, setProfit] = useState('')
   const [brokerChoice, setBroker] = useState('')
   const [pending, setPending] = useState<OpenOrder | null>(null)
+  const [expanded, setExpanded] = useState<Set<number>>(new Set())
+  const toggle = (id: number) =>
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
 
   const locked = new Set(positions.map((p) => p.symbol))
   const symbol = symbolChoice || config?.symbols.find((s) => !locked.has(s)) || config?.symbols[0] || ''
@@ -139,15 +258,18 @@ export function ExecutionPanel({ execution }: { execution: ReturnType<typeof use
               <th style={head}>TP</th>
               <th style={head}>Broker</th>
               <th style={head}>Origen</th>
+              <th style={head}>P&L Capital.com</th>
+              <th style={head}>P&L 1 pip</th>
               <th style={head}></th>
             </tr>
           </thead>
           <tbody>
             {positions.length === 0 && (
-              <tr><td style={cell} colSpan={10}>No hay operaciones abiertas.</td></tr>
+              <tr><td style={cell} colSpan={12}>No hay operaciones abiertas.</td></tr>
             )}
             {positions.map((p) => (
-              <tr key={p.id}>
+              <Fragment key={p.id}>
+              <tr>
                 <td style={cell}>{new Date(p.openedAt).toLocaleString('es-CO', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
                 <td style={{ ...cell, color: '#fbbf24' }}>🔒 {p.symbol}</td>
                 <td style={{ ...cell, color: p.direction === 'BUY' ? '#34d399' : '#f87171' }}>{p.direction}</td>
@@ -159,8 +281,19 @@ export function ExecutionPanel({ execution }: { execution: ReturnType<typeof use
                   {p.brokerLabel}{p.note ? ' ⚠️' : ''}
                 </td>
                 <td style={cell}>{p.source === 'frontend' ? 'panel' : `${p.source === 'auto' ? 'auto · ' : ''}alerta${p.alertLogId ? ` #${p.alertLogId}` : ''}`}</td>
-                <td style={cell}><CloseToggle position={p} busy={busy} onClose={close} /></td>
+                <PnlCell value={p.tracking?.live?.capital} summary={p.tracking?.models.capital} />
+                <PnlCell value={p.tracking?.live?.pip1} summary={p.tracking?.models.pip1} />
+                <td style={cell}>
+                  <span style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}>
+                    <button style={button('#374151')} onClick={() => toggle(p.id)}>
+                      fases {expanded.has(p.id) ? '▴' : '▾'}
+                    </button>
+                    <CloseToggle position={p} busy={busy} onClose={close} />
+                  </span>
+                </td>
               </tr>
+              {expanded.has(p.id) && <PhasesRow position={p} colSpan={12} />}
+              </Fragment>
             ))}
           </tbody>
         </table>

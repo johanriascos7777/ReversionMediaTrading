@@ -13,6 +13,35 @@ export type ExecutionConfig = {
   maxSize: number
 }
 
+export type PnlModel = 'capital' | 'pip1'
+
+export type PhaseView = {
+  seq: number
+  state: 'red' | 'green'
+  startedAt: string
+  endedAt: string | null
+  durationSec: number
+  startPnl: number
+  lastPnl: number
+  extremePnl: number
+  extremeAt: string
+  samples: number
+  gapSec: number
+}
+
+export type ModelSummary = {
+  current: PhaseView | null
+  phases: number
+  redSec: number
+  greenSec: number
+  firstGreenAfterSec: number | null
+}
+
+export type PositionTracking = {
+  live: { at: string; bid: number; offer: number; spread: number; upl: number | null; capital: number; pip1: number } | null
+  models: Record<PnlModel, ModelSummary>
+}
+
 export type ExecutionPosition = {
   id: number
   broker: string
@@ -29,6 +58,10 @@ export type ExecutionPosition = {
   profitLevel: number | null
   closePrice: number | null
   openedAt: string
+  trackingSince: string | null
+  entrySpread: number | null
+  brokerGoneAt: string | null
+  tracking: PositionTracking | null
   closedAt: string | null
   closeReason: string | null
   note: string | null
@@ -52,7 +85,13 @@ async function readError(res: Response): Promise<string> {
   }
 }
 
-export function useExecution(refreshMs = 15_000) {
+export async function fetchPhases(id: number): Promise<Record<PnlModel, PhaseView[]>> {
+  const res = await fetch(`${API_URL}/execution/positions/${id}/phases`)
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export function useExecution(refreshMs = 5_000) {
   const [config, setConfig] = useState<ExecutionConfig | null>(null)
   const [positions, setPositions] = useState<ExecutionPosition[]>([])
   const [error, setError] = useState<string | null>(null)
