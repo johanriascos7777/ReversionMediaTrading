@@ -13,6 +13,25 @@ Sigue EUR/USD y EUR/GBP en velas de 5 y 15 minutos, mide qué tan lejos está el
 
 Cada alerta crea un `pending_signal` (botones "Registrar Trade" / "Descartar" del diario) y una fila en `alert_log` con su resultado.
 
+Si el par tiene una operación abierta en `execution_position`, la alerta se guarda igual (`alert_log`, con `features.telegramSuppressedBy`) pero no se manda a Telegram. El marcador v1/v2 no cambia.
+
+## Ejecución en un broker (`execution/`)
+
+Módulo aislado para abrir y cerrar operaciones. El broker es una pieza intercambiable (`BrokerAdapter` en `execution/broker.types.ts`):
+
+| Adaptador | Qué hace | Se activa con |
+|---|---|---|
+| `capital` (`execution/capital/capital.adapter.ts`) | API REST de Capital.com: sesión, `POST /positions`, confirmación en `/confirms`, `DELETE /positions/{dealId}` | `CAPITAL_IDENTIFIER`, `CAPITAL_API_KEY`, `CAPITAL_API_PASSWORD`; `CAPITAL_ENV=demo` (real exige además `CAPITAL_ALLOW_LIVE=true`); `CAPITAL_EPIC_MAP` opcional (`XAU/USD=GOLD,...`) |
+| `manual` | No llama a nadie: solo bloquea el par (operación hecha fuera del bot) | siempre |
+
+Para otro broker (por ejemplo OANDA) se agrega un adaptador y se registra en `buildAdapters` de `execution/execution.service.ts`; nada más cambia.
+
+- Una operación abierta por par. Los pares salen de `TWELVE_DATA_SYMBOL`. Tamaño por defecto `EXECUTION_DEFAULT_SIZE` (1000 unidades) y máximo `EXECUTION_MAX_SIZE` (10000).
+- Desde Telegram: botón "🤖 Entrar en …" en cada alerta (`exec:<pending_signal>`), abre con el SL sugerido por la alerta y sin TP: el cierre es manual.
+- Desde el frontend: sección "Operaciones abiertas" de `/`.
+- El cierre es manual (interruptor del panel). Si el broker ya la había cerrado (SL), se marca `ya-cerrada-en-broker`.
+- API: `GET /execution/config`, `GET /execution/positions?status=open`, `POST /execution/positions`, `POST /execution/positions/:id/close`. Sin autenticación: el backend no debe quedar expuesto fuera de la red local.
+
 ## Por dónde entra un precio
 
 1. `market/twelveDataClient.ts`: WebSocket de Twelve Data. Si el plan rechaza el par (EUR/GBP en el plan gratuito), pide **velas de 1 minuto por REST** y las pasa al motor como 4 ticks (apertura, extremos, cierre). El intervalo se ajusta a las llaves y pares por REST (60 s con 2 llaves y 1 par).
@@ -30,6 +49,7 @@ Cada alerta crea un `pending_signal` (botones "Registrar Trade" / "Descartar" de
 | `trade` | Diario del trader (Torre de Control) | Telegram "Registrar Trade" y el frontend. **No se toca.** |
 | `pending_signal` | Cada alerta enviada, con TP/SL sugeridos | `alerts/alerts.service.ts` |
 | `alert_log` | Cada alerta con su versión, valores al disparar y resultado: MAE, MFE, si tocó la EMA 100 y en cuántos minutos | `alerts/alerts.service.ts` (se actualiza al cierre de cada vela de 5m; tras un reinicio se recalcula con el historial) |
+| `execution_position` | Cada operación abierta desde el panel o desde Telegram: broker, par, dirección, tamaño, `dealId`, precio de entrada y de cierre, SL/TP, estado (`open`, `closed`, `failed`) y la alerta que la originó | `execution/execution.service.ts` (la tabla se crea sola al arrancar) |
 | `historical_candle` | Caché de velas del escudo de consolidación (fechas guardadas con desfase de 5 h, ver pendientes) | `historical/` |
 
 API nueva: `GET /alerts?limit=100` y `GET /alerts/summary` (marcador por versión).
@@ -42,7 +62,7 @@ Tres pantallas: **`/` Señales** (pares, semáforo, tarjeta de elasticidad, zona
 
 ```bash
 cd NestServer
-npm test                                   # motor de la zona, seguimiento de resultados, velas REST, pool de llaves
+npm test                                   # motor de la zona, seguimiento de resultados, velas REST, pool de llaves, ejecución
 npm run replay -- /tmp/r.json 2026-10-05T11:00:00Z 2026-10-17T00:00:00Z --check
 npm run replay -- /tmp/r.json 2026-10-05T11:00:00Z 2026-10-17T00:00:00Z --check --24h   # como en vivo (IGNORE_SCHEDULE=true)
 ```

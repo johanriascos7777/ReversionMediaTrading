@@ -12,6 +12,9 @@
 | 2026-10-17 | Documentar en Jira lo probado y lo nuevo, y tener un tablero con el plan antes de ejecutar. |
 | 2026-10-17 | Probar desde el lunes 2026-10-19 en cuenta demo con las alertas, "hasta nuevo aviso". |
 | 2026-10-19 | Pasar de 2 a 5 llaves de Twelve Data (ninguna compartida con fable5 ni con el bot de django-trading) y agregar un tercer par. Deja la elección del par a Claude. |
+| 2026-10-19 | Cuenta demo CFD en Capital.com solo para ejecutar operaciones y medir el sistema (no como fuente de precios). El spread extra se resta en el registro. |
+| 2026-10-19 | Con una operación abierta en un par no llegan más alertas de ese par a Telegram hasta cerrarla a mano en el panel. |
+| 2026-10-19 | Abrir operaciones desde el panel y desde la alerta de Telegram, para cualquier par configurado, con el broker aislado para poder cambiarlo (por ejemplo OANDA en real). |
 
 ## Tomadas por Claude el 2026-10-17 (revisables por el trader)
 
@@ -21,6 +24,9 @@
 | La v2 es la "Zona de agotamiento" (ELAS-20), marcada como experimental. | Idea nueva: compara el estirón con dónde terminaron los estirones pasados, no con todas las velas. Regla fijada antes de probarla. |
 | Segundo par: EUR/GBP. | Las alertas de ejemplo que el trader considera precisas son de EUR/GBP y es un cruce que suele volver a la media. |
 | Tercer par (2026-10-19): GBP/USD, no USD/JPY. | Completa el triángulo con EUR/USD y EUR/GBP: deja ver si un estirón de EUR/GBP es del euro o de la libra, y graba desde ya los datos para medir esa idea después. Con 5 llaves cabe un solo par REST más (unos 1.050 créditos de margen). USD/JPY queda para cuando haya 2 llaves libres más. |
+| La alerta silenciada por una operación abierta se sigue guardando en `alert_log` (2026-10-19). | El marcador v1/v2 tiene que medir todas las alertas, no solo las que llegan. |
+| La operación abierta desde Telegram lleva el SL sugerido por la alerta y no lleva TP (2026-10-19). | El cierre es manual, como pidió el trader; el SL protege si nadie mira. |
+| La conexión a Capital.com real queda bloqueada salvo `CAPITAL_ALLOW_LIVE=true` (2026-10-19). | Dinero real: que pasar a real sea un cambio explícito del trader en el `.env`. |
 | Backend en el puerto 8083. | El backend de fable5 corre como servicio en el 8082. |
 | El par que va por REST pide velas de 1 minuto (cada 60 s o más según llaves) en vez del precio cada 10 s. | Cada 10 s gastaba 8.640 créditos al día; con 2 llaves hay 1.600. |
 | El motor duerme con el forex cerrado aunque `IGNORE_SCHEDULE=true`. | Twelve Data entrega velas de fin de semana; gastan créditos y meten ruido en la EMA. |
