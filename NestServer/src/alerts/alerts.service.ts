@@ -3,7 +3,10 @@ import { EntityManager } from '@mikro-orm/mysql';
 import { RequestContext } from '@mikro-orm/core';
 import { PendingSignal } from '../trade/pending-signal.entity';
 import { detectSession } from '../trade/trade.service';
-import { ExecutionService } from '../execution/execution.service';
+import {
+  ExecutionError,
+  ExecutionService,
+} from '../execution/execution.service';
 import type {
   Candle,
   MarketState,
@@ -239,8 +242,42 @@ export class AlertsService {
           return;
         }
 
-        const text = this.composeMessage(ctx, tpPrice, slPrice);
-        const broker = this.execution?.defaultBroker ?? null;
+        let autoLine: string | null = null;
+        let autoOpened = false;
+        if (this.execution?.autoEnabled) {
+          try {
+            const p = await this.execution.openFromSignal(signal.id, 'auto');
+            autoOpened = true;
+            const decimals = priceDecimals(ctx.symbol);
+            autoLine = `🤖🔒 Abierta automáticamente en ${p.brokerLabel}: operación #${p.id} · ${p.size} u. · entrada ${p.openPrice !== null ? p.openPrice.toFixed(decimals) : 'sin confirmar'} · SL ${p.stopLevel !== null ? p.stopLevel.toFixed(decimals) : '—'}. No llegarán más alertas de ${ctx.symbol} hasta cerrarla en el panel.${p.note ? ` ⚠️ ${p.note}` : ''}`;
+          } catch (err) {
+            if (err instanceof ExecutionError && err.status === 409) {
+              const other = await this.lockingPositionId(ctx.symbol);
+              await this.em.nativeUpdate(
+                AlertLog,
+                { id: log.id },
+                {
+                  features: {
+                    ...ctx.features,
+                    telegramSuppressedBy: other ?? -1,
+                  },
+                },
+              );
+              console.log(
+                `[Alertas] ${ctx.version} ${ctx.name} ${ctx.symbol} #${signal.id} guardada sin enviar a Telegram: ${err.message}`,
+              );
+              return;
+            }
+            autoLine = `⚠️ No se abrió automáticamente: ${err instanceof Error ? err.message : String(err)}`;
+          }
+        }
+
+        const text = [this.composeMessage(ctx, tpPrice, slPrice), autoLine]
+          .filter(Boolean)
+          .join('\n');
+        const broker = autoOpened
+          ? null
+          : (this.execution?.defaultBroker ?? null);
         const replyMarkup = {
           inline_keyboard: [
             [

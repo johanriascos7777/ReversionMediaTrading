@@ -55,6 +55,15 @@ export class ExecutionController {
     }
   }
 
+  @Post('auto')
+  setAuto(@Body() body: any) {
+    try {
+      return this.execution.setAuto(body?.enabled === true);
+    } catch (err) {
+      return toHttp(err);
+    }
+  }
+
   @Post('positions/:id/close')
   async close(@Param('id', ParseIntPipe) id: number) {
     try {

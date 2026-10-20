@@ -118,3 +118,47 @@ describe('ExecutionService', () => {
     expect(broker.opened[0]).toMatchObject({ stopLevel: 0.845, profitLevel: undefined });
   });
 });
+
+describe('ExecutionService · entrada automática', () => {
+  const fs = jest.requireActual('fs');
+  const os = jest.requireActual('os');
+  const path = jest.requireActual('path');
+  let file: string;
+
+  beforeEach(() => {
+    jest.spyOn(console, 'log').mockImplementation(() => {});
+    file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'exec-')), 'execution_settings.json');
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  it('arranca apagada salvo EXECUTION_AUTO=true', () => {
+    const { em } = memoryEm();
+    expect(new ExecutionService(em, [new FakeBroker()], env, file).autoEnabled).toBe(false);
+    expect(new ExecutionService(em, [new FakeBroker()], { ...env, EXECUTION_AUTO: 'true' }, file).autoEnabled).toBe(true);
+  });
+
+  it('el interruptor se guarda y sobrevive a un reinicio', () => {
+    const { em } = memoryEm();
+    const s = new ExecutionService(em, [new FakeBroker()], env, file);
+    expect(s.setAuto(true).auto).toBe(true);
+    expect(new ExecutionService(em, [new FakeBroker()], env, file).autoEnabled).toBe(true);
+    s.setAuto(false);
+    expect(new ExecutionService(em, [new FakeBroker()], { ...env, EXECUTION_AUTO: 'true' }, file).autoEnabled).toBe(false);
+  });
+
+  it('no se activa sin broker ni en cuenta real sin permiso explícito', () => {
+    const { em } = memoryEm();
+    expect(() => new ExecutionService(em, [new ManualAdapter()], env, file).setAuto(true)).toThrow('No hay broker');
+    const live = Object.assign(new FakeBroker(), { live: true });
+    const s = new ExecutionService(em, [live], env, file);
+    expect(() => s.setAuto(true)).toThrow('EXECUTION_AUTO_LIVE');
+    expect(new ExecutionService(em, [live], { ...env, EXECUTION_AUTO_LIVE: 'true' }, file).setAuto(true).auto).toBe(true);
+  });
+
+  it('abre desde la alerta con origen auto', async () => {
+    const { em } = memoryEm({ signals: [{ id: 9, symbol: 'GBP/USD', direction: 'BUY', slPrice: '1.33000' }], logs: [] });
+    const s = new ExecutionService(em, [new FakeBroker()], env, file);
+    const p = await s.openFromSignal(9, 'auto');
+    expect(p).toMatchObject({ source: 'auto', symbol: 'GBP/USD', stopLevel: 1.33 });
+  });
+});

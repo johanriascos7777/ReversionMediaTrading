@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import { Injectable } from '@nestjs/common';
 import { EntityManager } from '@mikro-orm/mysql';
 import { PendingSignal } from '../trade/pending-signal.entity';
@@ -52,13 +54,21 @@ export class ExecutionService {
   readonly symbols: string[];
   readonly defaultSize: number;
   readonly maxSize: number;
+  private readonly allowAutoLive: boolean;
+  private auto: boolean;
 
   constructor(
     private readonly em: EntityManager,
     adapters: BrokerAdapter[] = buildAdapters(process.env),
     env: NodeJS.ProcessEnv = process.env,
+    private readonly settingsFile = path.join(
+      process.cwd(),
+      'execution_settings.json',
+    ),
   ) {
     for (const a of adapters) this.adapters.set(a.id, a);
+    this.allowAutoLive = env.EXECUTION_AUTO_LIVE === 'true';
+    this.auto = this.readSettings()?.auto ?? env.EXECUTION_AUTO === 'true';
     this.symbols = (env.TWELVE_DATA_SYMBOL ?? '')
       .split(',')
       .map((s) => s.trim())
@@ -72,8 +82,47 @@ export class ExecutionService {
     return null;
   }
 
+  get autoAllowed(): boolean {
+    const broker = this.defaultBroker;
+    return !!broker && (!broker.live || this.allowAutoLive);
+  }
+
+  get autoEnabled(): boolean {
+    return this.auto && this.autoAllowed;
+  }
+
+  setAuto(enabled: boolean) {
+    if (enabled && !this.autoAllowed)
+      throw new ExecutionError(
+        this.defaultBroker
+          ? 'La entrada automática en cuenta real exige EXECUTION_AUTO_LIVE=true'
+          : 'No hay broker configurado para la entrada automática',
+        400,
+      );
+    this.auto = enabled;
+    try {
+      fs.writeFileSync(this.settingsFile, JSON.stringify({ auto: enabled }));
+    } catch (err) {
+      console.error('[Ejecución] No se pudo guardar la configuración:', err);
+    }
+    console.log(
+      `[Ejecución] Entrada automática ${enabled ? 'ACTIVADA' : 'desactivada'}.`,
+    );
+    return this.config();
+  }
+
+  private readSettings(): { auto?: boolean } | null {
+    try {
+      return JSON.parse(fs.readFileSync(this.settingsFile, 'utf8'));
+    } catch {
+      return null;
+    }
+  }
+
   config() {
     return {
+      auto: this.autoEnabled,
+      autoAllowed: this.autoAllowed,
       brokers: [...this.adapters.values()].map((a) => ({
         id: a.id,
         label: a.label,
@@ -187,7 +236,10 @@ export class ExecutionService {
     }
   }
 
-  async openFromSignal(pendingSignalId: number) {
+  async openFromSignal(
+    pendingSignalId: number,
+    source: ExecutionSource = 'telegram',
+  ) {
     const em = this.em.fork();
     const signal = await em.findOne(PendingSignal, pendingSignalId);
     if (!signal)
@@ -197,7 +249,7 @@ export class ExecutionService {
       symbol: signal.symbol,
       direction: signal.direction,
       stopLevel: num(signal.slPrice) ?? undefined,
-      source: 'telegram',
+      source,
       pendingSignalId,
       alertLogId: log?.id,
     });

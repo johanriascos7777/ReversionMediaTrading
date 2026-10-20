@@ -1,7 +1,7 @@
 import { Entity, PrimaryKey, Property } from '@mikro-orm/decorators/legacy';
 
 export type ExecutionStatus = 'open' | 'closed' | 'failed';
-export type ExecutionSource = 'frontend' | 'telegram';
+export type ExecutionSource = 'frontend' | 'telegram' | 'auto';
 
 @Entity({ tableName: 'execution_position' })
 export class ExecutionPosition {
