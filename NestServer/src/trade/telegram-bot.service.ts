@@ -5,6 +5,7 @@ import { PendingSignal } from './pending-signal.entity';
 import { Trade } from './trade.entity';
 import { TradeService } from './trade.service';
 import { RequestContext } from '@mikro-orm/core';
+import { ExecutionService } from '../execution/execution.service';
 
 @Injectable()
 export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
@@ -21,6 +22,7 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     private readonly tradeRepo: EntityRepository<Trade>,
     private readonly tradeService: TradeService,
     private readonly em: EntityManager,
+    private readonly execution: ExecutionService,
   ) {
     this.botToken = process.env.TELEGRAM_BOT_TOKEN || '';
     this.chatId = process.env.TELEGRAM_CHAT_ID || '';
@@ -96,6 +98,11 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
       const signalId = parseInt(idStr, 10);
       if (isNaN(signalId)) return;
 
+      if (action === 'exec') {
+        await this.handleExecute(fromChatId, messageId, signalId);
+        return;
+      }
+
       // Buscar la señal pendiente
       const signal = await this.pendingSignalRepo.findOne(signalId);
       if (!signal) {
@@ -132,6 +139,26 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
         );
       }
     });
+  }
+
+  private async handleExecute(chatId: number, messageId: number, signalId: number) {
+    if (String(chatId) !== String(this.chatId)) return;
+    try {
+      const p = await this.execution.openFromSignal(signalId);
+      const price = p.openPrice !== null ? p.openPrice.toFixed(5) : 'sin confirmar';
+      const stop = p.stopLevel !== null ? p.stopLevel.toFixed(5) : '—';
+      await this.sendTelegramMessage(
+        chatId,
+        `🤖 Operación #${p.id} abierta en ${p.brokerLabel}\n${p.symbol} ${p.direction} · ${p.size} unidades · precio ${price} · SL ${stop}\n🔒 No llegarán más alertas de ${p.symbol} hasta que la cierres en el panel.${p.note ? `\n⚠️ ${p.note}` : ''}`,
+        messageId,
+      );
+    } catch (err) {
+      await this.sendTelegramMessage(
+        chatId,
+        `❌ No se abrió la operación: ${err instanceof Error ? err.message : String(err)}`,
+        messageId,
+      );
+    }
   }
 
   private async handleMessage(msg: any) {

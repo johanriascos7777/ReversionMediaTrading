@@ -1,8 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { EntityManager } from '@mikro-orm/mysql';
 import { RequestContext } from '@mikro-orm/core';
 import { PendingSignal } from '../trade/pending-signal.entity';
 import { detectSession } from '../trade/trade.service';
+import { ExecutionService } from '../execution/execution.service';
 import type {
   Candle,
   MarketState,
@@ -112,7 +113,23 @@ export function suggestTpSl(
 export class AlertsService {
   private readonly trackers = new Map<number, TrackedAlert>();
 
-  constructor(private readonly em: EntityManager) {}
+  constructor(
+    private readonly em: EntityManager,
+    @Optional() private readonly execution?: ExecutionService,
+  ) {}
+
+  private async lockingPositionId(symbol: string): Promise<number | null> {
+    if (!this.execution) return null;
+    try {
+      return (await this.execution.openPositionFor(symbol))?.id ?? null;
+    } catch (err) {
+      console.error(
+        `[Alertas] No se pudo revisar si ${symbol} tiene una operación abierta:`,
+        err,
+      );
+      return null;
+    }
+  }
 
   async sendAlert(ctx: AlertContext): Promise<void> {
     await RequestContext.create(this.em, async () => {
@@ -172,6 +189,7 @@ export class AlertsService {
         this.em.persist(signal);
         await this.em.flush();
 
+        const lockedBy = await this.lockingPositionId(ctx.symbol);
         const createdAt = new Date(Date.now());
         const log = new AlertLog();
         log.version = ctx.version;
@@ -188,7 +206,10 @@ export class AlertsService {
           : undefined;
         log.shieldClear = ctx.shieldClear;
         log.walk = ctx.pedestrianLight === 'WALK';
-        log.features = ctx.features;
+        log.features =
+          lockedBy === null
+            ? ctx.features
+            : { ...ctx.features, telegramSuppressedBy: lockedBy };
         log.pendingSignalId = signal.id;
         log.createdAt = createdAt;
         log.status = 'open';
@@ -211,7 +232,15 @@ export class AlertsService {
           dirty: false,
         });
 
+        if (lockedBy !== null) {
+          console.log(
+            `[Alertas] ${ctx.version} ${ctx.name} ${ctx.symbol} #${signal.id} guardada sin enviar a Telegram: operación #${lockedBy} abierta.`,
+          );
+          return;
+        }
+
         const text = this.composeMessage(ctx, tpPrice, slPrice);
+        const broker = this.execution?.defaultBroker ?? null;
         const replyMarkup = {
           inline_keyboard: [
             [
@@ -224,6 +253,16 @@ export class AlertsService {
                 callback_data: `discard:${signal.id}`,
               },
             ],
+            ...(broker
+              ? [
+                  [
+                    {
+                      text: `🤖 Entrar en ${broker.label}`,
+                      callback_data: `exec:${signal.id}`,
+                    },
+                  ],
+                ]
+              : []),
           ],
         };
         await this.sendTelegram(text, replyMarkup);
