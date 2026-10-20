@@ -91,6 +91,63 @@ export async function fetchPhases(id: number): Promise<Record<PnlModel, PhaseVie
   return res.json()
 }
 
+export type PhasesByModel = Record<PnlModel, PhaseView[]>
+
+export function usePhases(ids: number[], refreshMs = 15_000) {
+  const [phases, setPhases] = useState<Record<number, PhasesByModel>>({})
+  const key = ids.join(',')
+
+  useEffect(() => {
+    let alive = true
+    const load = async () => {
+      const list = key ? key.split(',').map(Number) : []
+      const entries = await Promise.all(list.map(async (id) => [id, await fetchPhases(id).catch(() => null)] as const))
+      if (!alive) return
+      const next: Record<number, PhasesByModel> = {}
+      for (const [id, data] of entries) if (data) next[id] = data
+      setPhases(next)
+    }
+    void load()
+    const timer = setInterval(load, refreshMs)
+    return () => {
+      alive = false
+      clearInterval(timer)
+    }
+  }, [key, refreshMs])
+
+  return phases
+}
+
+export function useClosedPositions(limit = 30, refreshMs = 30_000) {
+  const [positions, setPositions] = useState<ExecutionPosition[]>([])
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    const load = async () => {
+      try {
+        const res = await fetch(`${API_URL}/execution/positions?status=closed&limit=${limit}`)
+        if (!res.ok) throw new Error(await readError(res))
+        const rows: ExecutionPosition[] = await res.json()
+        if (alive) {
+          setPositions(rows)
+          setError(null)
+        }
+      } catch (err) {
+        if (alive) setError(err instanceof Error ? err.message : String(err))
+      }
+    }
+    void load()
+    const timer = setInterval(load, refreshMs)
+    return () => {
+      alive = false
+      clearInterval(timer)
+    }
+  }, [limit, refreshMs])
+
+  return { positions, error }
+}
+
 export function useExecution(refreshMs = 5_000) {
   const [config, setConfig] = useState<ExecutionConfig | null>(null)
   const [positions, setPositions] = useState<ExecutionPosition[]>([])

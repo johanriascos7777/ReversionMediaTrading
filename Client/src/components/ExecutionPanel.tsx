@@ -1,6 +1,6 @@
-import { Fragment, useEffect, useState } from 'react'
-import { fetchPhases } from '../hooks/useExecution'
-import type { useExecution, ExecutionPosition, ModelSummary, OpenOrder, PhaseView, PnlModel } from '../hooks/useExecution'
+import { Fragment, useState } from 'react'
+import { useClosedPositions, usePhases } from '../hooks/useExecution'
+import type { useExecution, ExecutionPosition, ModelSummary, OpenOrder, PhasesByModel, PhaseView, PnlModel } from '../hooks/useExecution'
 
 const cell: React.CSSProperties = { padding: '6px 8px', borderBottom: '1px solid rgba(255,255,255,0.05)', whiteSpace: 'nowrap' }
 const head: React.CSSProperties = { ...cell, color: '#6b7280', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', textAlign: 'left' }
@@ -42,7 +42,18 @@ const MODELS: { id: PnlModel; label: string }[] = [
   { id: 'pip1', label: 'Spread de 1 pip' },
 ]
 
-function PnlCell({ value, summary }: { value: number | undefined; summary: ModelSummary | undefined }) {
+function Blocks({ phases }: { phases: PhaseView[] | undefined }) {
+  if (!phases) return null
+  const red = phases.filter((ph) => ph.state === 'red').length
+  const green = phases.filter((ph) => ph.state === 'green').length
+  return (
+    <span style={{ color: '#d1d5db' }} title={`${red} bloques en holgura y ${green} en ganancia`}>
+      🔴×{red} 🟢×{green}
+    </span>
+  )
+}
+
+function PnlCell({ value, summary, phases }: { value: number | undefined; summary: ModelSummary | undefined; phases: PhaseView[] | undefined }) {
   const current = summary?.current
   if (!summary || !current) return <td style={cell}>—</td>
   const green = current.state === 'green'
@@ -52,7 +63,8 @@ function PnlCell({ value, summary }: { value: number | undefined; summary: Model
   }`
   return (
     <td style={{ ...cell, color: green ? '#34d399' : '#f87171' }} title={title}>
-      {green ? '🟢' : '🔴'} {usd(pnl)} · {dur(current.durationSec)}
+      <div>{green ? '🟢' : '🔴'} {usd(pnl)} · {dur(current.durationSec)}</div>
+      <div style={{ fontSize: 11, marginTop: 2 }}><Blocks phases={phases} /></div>
     </td>
   )
 }
@@ -91,28 +103,7 @@ function PhaseTable({ phases }: { phases: PhaseView[] }) {
   )
 }
 
-function PhasesRow({ position, colSpan }: { position: ExecutionPosition; colSpan: number }) {
-  const [data, setData] = useState<Record<PnlModel, PhaseView[]> | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    let alive = true
-    const load = () =>
-      fetchPhases(position.id)
-        .then((d) => {
-          if (alive) setData(d)
-        })
-        .catch((err: unknown) => {
-          if (alive) setError(err instanceof Error ? err.message : String(err))
-        })
-    load()
-    const timer = setInterval(load, 10_000)
-    return () => {
-      alive = false
-      clearInterval(timer)
-    }
-  }, [position.id])
-
+function PhasesRow({ position, data, colSpan }: { position: ExecutionPosition; data: PhasesByModel | undefined; colSpan: number }) {
   const late = position.trackingSince && new Date(position.trackingSince).getTime() - new Date(position.openedAt).getTime() > 120_000
   return (
     <tr>
@@ -123,18 +114,109 @@ function PhasesRow({ position, colSpan }: { position: ExecutionPosition; colSpan
           {position.tracking?.live && ` · spread ahora ${(position.tracking.live.spread * pipFactor(position.symbol)).toFixed(1)} pips`}
           {late && ' · ⚠️ empezó a medirse después de abrir: lo anterior no quedó registrado'}
           {position.brokerGoneAt && ` · ⚠️ el broker ya no la tiene abierta desde ${stamp(position.brokerGoneAt)}`}
+          {position.closedAt && ` · cerrada ${stamp(position.closedAt)}`}
         </div>
-        {error && <p style={{ margin: '0 0 8px', color: '#f87171' }}>{error}</p>}
+        {!data && <p style={{ margin: '0 0 8px', color: '#6b7280' }}>Cargando fases…</p>}
         <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'flex-start' }}>
           {MODELS.map((m) => (
             <div key={m.id}>
-              <div style={{ color: '#d1d5db', fontWeight: 700, marginBottom: 4 }}>{m.label}</div>
+              <div style={{ color: '#d1d5db', fontWeight: 700, marginBottom: 4 }}>
+                {m.label} · <Blocks phases={data?.[m.id]} />
+              </div>
               <PhaseTable phases={data?.[m.id] ?? []} />
             </div>
           ))}
         </div>
       </td>
     </tr>
+  )
+}
+
+const closeReasons: Record<string, string> = {
+  manual: 'manual',
+  'ya-cerrada-en-broker': 'ya cerrada en el broker',
+}
+
+function ClosedModelCell({ summary, phases }: { summary: ModelSummary | undefined; phases: PhaseView[] | undefined }) {
+  if (!summary || summary.phases === 0) return <td style={cell}>sin medir</td>
+  const last = phases?.[phases.length - 1]
+  return (
+    <td style={cell}>
+      <div><Blocks phases={phases} /> {!phases && `${summary.phases} bloques`}</div>
+      <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>
+        rojo {dur(summary.redSec)} · verde {dur(summary.greenSec)}
+        {summary.firstGreenAfterSec !== null ? ` · 1er verde a los ${dur(summary.firstGreenAfterSec)}` : ' · nunca verde'}
+      </div>
+      {last && (
+        <div style={{ fontSize: 11, marginTop: 2, color: last.lastPnl > 0 ? '#34d399' : '#f87171' }}>último medido {usd(last.lastPnl)}</div>
+      )}
+    </td>
+  )
+}
+
+function ClosedSection({
+  positions,
+  error,
+  phases,
+  expanded,
+  toggle,
+}: {
+  positions: ExecutionPosition[]
+  error: string | null
+  phases: Record<number, PhasesByModel>
+  expanded: Set<number>
+  toggle: (id: number) => void
+}) {
+  return (
+    <div style={{ overflowX: 'auto', marginTop: 8 }}>
+      {error && <p style={{ margin: '0 0 8px', fontSize: 12, color: '#f87171' }}>{error}</p>}
+      <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12, fontFamily: 'monospace', color: '#d1d5db' }}>
+        <thead>
+          <tr>
+            <th style={head}>Abierta</th>
+            <th style={head}>Cerrada</th>
+            <th style={head}>Par</th>
+            <th style={head}>Dir.</th>
+            <th style={head}>Tamaño</th>
+            <th style={head}>Entrada</th>
+            <th style={head}>Cierre</th>
+            <th style={head}>Motivo</th>
+            <th style={head}>Origen</th>
+            <th style={head}>Capital.com</th>
+            <th style={head}>1 pip</th>
+            <th style={head}></th>
+          </tr>
+        </thead>
+        <tbody>
+          {positions.length === 0 && (
+            <tr><td style={cell} colSpan={12}>Todavía no hay operaciones cerradas.</td></tr>
+          )}
+          {positions.map((p) => (
+            <Fragment key={p.id}>
+              <tr>
+                <td style={cell}>{stamp(p.openedAt)}</td>
+                <td style={cell}>{p.closedAt ? stamp(p.closedAt) : '—'}</td>
+                <td style={cell}>{p.symbol}</td>
+                <td style={{ ...cell, color: p.direction === 'BUY' ? '#34d399' : '#f87171' }}>{p.direction}</td>
+                <td style={cell}>{p.size}</td>
+                <td style={cell}>{price(p.symbol, p.openPrice)}</td>
+                <td style={cell}>{price(p.symbol, p.closePrice)}</td>
+                <td style={cell}>{p.closeReason ? closeReasons[p.closeReason] ?? p.closeReason : '—'}</td>
+                <td style={cell}>{p.source === 'frontend' ? 'panel' : `${p.source === 'auto' ? 'auto · ' : ''}alerta${p.alertLogId ? ` #${p.alertLogId}` : ''}`}</td>
+                <ClosedModelCell summary={p.tracking?.models.capital} phases={phases[p.id]?.capital} />
+                <ClosedModelCell summary={p.tracking?.models.pip1} phases={phases[p.id]?.pip1} />
+                <td style={cell}>
+                  <button style={button('#374151')} onClick={() => toggle(p.id)}>
+                    fases {expanded.has(p.id) ? '▴' : '▾'}
+                  </button>
+                </td>
+              </tr>
+              {expanded.has(p.id) && <PhasesRow position={p} data={phases[p.id]} colSpan={12} />}
+            </Fragment>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }
 
@@ -182,6 +264,9 @@ export function ExecutionPanel({ execution }: { execution: ReturnType<typeof use
       else next.add(id)
       return next
     })
+  const [showClosed, setShowClosed] = useState(false)
+  const closed = useClosedPositions()
+  const phases = usePhases([...positions.map((p) => p.id), ...(showClosed ? closed.positions.map((p) => p.id) : [])])
 
   const locked = new Set(positions.map((p) => p.symbol))
   const symbol = symbolChoice || config?.symbols.find((s) => !locked.has(s)) || config?.symbols[0] || ''
@@ -281,8 +366,8 @@ export function ExecutionPanel({ execution }: { execution: ReturnType<typeof use
                   {p.brokerLabel}{p.note ? ' ⚠️' : ''}
                 </td>
                 <td style={cell}>{p.source === 'frontend' ? 'panel' : `${p.source === 'auto' ? 'auto · ' : ''}alerta${p.alertLogId ? ` #${p.alertLogId}` : ''}`}</td>
-                <PnlCell value={p.tracking?.live?.capital} summary={p.tracking?.models.capital} />
-                <PnlCell value={p.tracking?.live?.pip1} summary={p.tracking?.models.pip1} />
+                <PnlCell value={p.tracking?.live?.capital} summary={p.tracking?.models.capital} phases={phases[p.id]?.capital} />
+                <PnlCell value={p.tracking?.live?.pip1} summary={p.tracking?.models.pip1} phases={phases[p.id]?.pip1} />
                 <td style={cell}>
                   <span style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}>
                     <button style={button('#374151')} onClick={() => toggle(p.id)}>
@@ -292,7 +377,7 @@ export function ExecutionPanel({ execution }: { execution: ReturnType<typeof use
                   </span>
                 </td>
               </tr>
-              {expanded.has(p.id) && <PhasesRow position={p} colSpan={12} />}
+              {expanded.has(p.id) && <PhasesRow position={p} data={phases[p.id]} colSpan={12} />}
               </Fragment>
             ))}
           </tbody>
@@ -331,6 +416,16 @@ export function ExecutionPanel({ execution }: { execution: ReturnType<typeof use
             </span>
           )}
         </div>
+      )}
+
+      <button
+        style={{ ...button('#374151'), marginTop: 16 }}
+        onClick={() => setShowClosed((v) => !v)}
+      >
+        {showClosed ? 'Ocultar operaciones cerradas' : `Ver operaciones cerradas (${closed.positions.length})`}
+      </button>
+      {showClosed && (
+        <ClosedSection positions={closed.positions} error={closed.error} phases={phases} expanded={expanded} toggle={toggle} />
       )}
     </div>
   )
