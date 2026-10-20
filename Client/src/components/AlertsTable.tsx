@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { AlertRow, VersionSummary } from '../hooks/useAlerts'
 
 const fmt = (n: number | null | undefined, digits = 1) => (n === null || n === undefined ? '—' : n.toFixed(digits))
@@ -12,6 +13,7 @@ const cell: React.CSSProperties = { padding: '6px 8px', borderBottom: '1px solid
 const head: React.CSSProperties = { ...cell, color: '#6b7280', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', textAlign: 'left' }
 
 export function AlertsTable({ alerts, summary, error }: { alerts: AlertRow[]; summary: VersionSummary[]; error: string | null }) {
+  const [showHistory, setShowHistory] = useState(false)
   return (
     <div className="glass-panel" style={{ margin: 0 }}>
       <h3 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 4px', color: '#fff' }}>📒 Alertas y marcador</h3>
@@ -54,7 +56,14 @@ export function AlertsTable({ alerts, summary, error }: { alerts: AlertRow[]; su
         </table>
       </div>
 
-      <div style={{ overflowX: 'auto', maxHeight: 420, overflowY: 'auto' }}>
+      <button
+        onClick={() => setShowHistory((v) => !v)}
+        style={{ background: 'rgba(255,255,255,0.06)', border: 'none', borderRadius: 6, color: '#d1d5db', padding: '6px 12px', fontSize: 12, cursor: 'pointer', marginBottom: showHistory ? 12 : 0 }}
+      >
+        {showHistory ? 'Ocultar historial de alertas' : `Ver historial de alertas (${alerts.length})`}
+      </button>
+
+      {showHistory && <div style={{ overflowX: 'auto', maxHeight: 420, overflowY: 'auto' }}>
         <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12, fontFamily: 'monospace', color: '#d1d5db' }}>
           <thead>
             <tr>
@@ -68,6 +77,7 @@ export function AlertsTable({ alerts, summary, error }: { alerts: AlertRow[]; su
               <th style={head}>MFE</th>
               <th style={head}>Estado</th>
               <th style={head}>Min.</th>
+              <th style={head}>Telegram</th>
             </tr>
           </thead>
           <tbody>
@@ -83,11 +93,12 @@ export function AlertsTable({ alerts, summary, error }: { alerts: AlertRow[]; su
                 <td style={cell}>{fmt(a.mfePips)}</td>
                 <td style={cell}>{statusText[a.status]}</td>
                 <td style={cell}>{a.minutesToEma ?? '—'}</td>
+                <td style={cell}>{a.features?.telegramSuppressedBy ? `🔒 no enviada (op. #${a.features.telegramSuppressedBy})` : 'enviada'}</td>
               </tr>
             ))}
           </tbody>
         </table>
-      </div>
+      </div>}
     </div>
   )
 }

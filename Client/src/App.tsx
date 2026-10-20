@@ -4,12 +4,14 @@ import { WS_URL } from '@/config/env'
 
 import { useMarketData } from './hooks/useMarketData'
 import { useAlerts } from './hooks/useAlerts'
+import { useExecution } from './hooks/useExecution'
 
 import { Semaforo } from './components/Semaforo'
 import { ElasticityCard } from './components/ElasticityCard'
 import { ApiKeysStatus } from './components/ApiKeysStatus'
 import { ZonePanel } from './components/ZonePanel'
 import { AlertsTable } from './components/AlertsTable'
+import { ExecutionPanel } from './components/ExecutionPanel'
 
 interface Toast {
   id: string
@@ -51,6 +53,8 @@ function App() {
 
   const { data: market, status: wsStatus, keysStatus, exhaustAlert } = useMarketData()
   const { alerts, summary, error: alertsError } = useAlerts()
+  const execution = useExecution()
+  const lockedSymbols = new Set(execution.positions.map((p) => p.symbol))
 
   const activeKey = market && market[activeSymbol] ? activeSymbol : (market ? Object.keys(market)[0] : 'EUR/USD')
   const currentMarket = market ? market[activeKey] : null
@@ -150,6 +154,7 @@ function App() {
         </p>
         <div style={{ width: '100%', maxWidth: 1100, textAlign: 'left' }}>
           <ApiKeysStatus keysStatus={keysStatus} />
+          <ExecutionPanel execution={execution} />
           <AlertsTable alerts={alerts} summary={summary} error={alertsError} />
         </div>
       </div>
@@ -201,6 +206,7 @@ function App() {
             const item = market[sym]
             const isActive = sym === activeKey
             const zone = item.zone
+            const locked = lockedSymbols.has(sym)
             return (
               <div
                 key={sym}
@@ -208,7 +214,7 @@ function App() {
                 style={{
                   cursor: 'pointer',
                   background: isActive ? 'rgba(255, 255, 255, 0.04)' : 'rgba(255, 255, 255, 0.01)',
-                  border: isActive ? '1px solid rgba(59, 130, 246, 0.4)' : '1px solid rgba(255, 255, 255, 0.05)',
+                  border: locked ? '1px solid rgba(251, 191, 36, 0.5)' : isActive ? '1px solid rgba(59, 130, 246, 0.4)' : '1px solid rgba(255, 255, 255, 0.05)',
                   boxShadow: isActive ? '0 8px 24px rgba(59, 130, 246, 0.12)' : 'none',
                   borderRadius: 14,
                   padding: '20px 24px',
@@ -216,7 +222,7 @@ function App() {
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                  <span style={{ fontWeight: 700, fontSize: 18, color: '#f3f4f6' }}>{sym}</span>
+                  <span style={{ fontWeight: 700, fontSize: 18, color: '#f3f4f6' }}>{locked ? '🔒 ' : ''}{sym}</span>
                   <span style={{
                     fontSize: 10, fontWeight: 800, padding: '3px 8px', borderRadius: 6, fontFamily: 'monospace',
                     backgroundColor: item.fusedState === 'GREEN' ? 'rgba(16, 185, 129, 0.12)' : (item.fusedState === 'YELLOW' ? 'rgba(245, 158, 11, 0.12)' : 'rgba(239, 68, 68, 0.12)'),
@@ -229,6 +235,12 @@ function App() {
                 <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'monospace', color: '#fff', marginBottom: 12 }}>
                   {item.m5.price.toFixed(sym.includes('JPY') ? 3 : 5)}
                 </div>
+
+                {locked && (
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#fbbf24', marginBottom: 12 }}>
+                    🔒 Operación abierta · alertas en pausa
+                  </div>
+                )}
 
                 <div style={{ display: 'flex', gap: 16, alignItems: 'center', fontSize: 11, color: '#9ca3af', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: 12 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -300,6 +312,7 @@ function App() {
 
         </div>
 
+        <ExecutionPanel execution={execution} />
         <AlertsTable alerts={alerts} summary={summary} error={alertsError} />
       </div>
 

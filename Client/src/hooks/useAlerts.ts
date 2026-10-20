@@ -18,6 +18,7 @@ export type AlertRow = {
   mfePips: number | null
   touchedAt: string | null
   minutesToEma: number | null
+  features?: { telegramSuppressedBy?: number } | null
 }
 
 export type VersionSummary = {
