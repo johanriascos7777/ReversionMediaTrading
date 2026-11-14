@@ -161,6 +161,44 @@ describe('CapitalAdapter', () => {
   });
 });
 
+describe('CapitalAdapter.closedDeal', () => {
+  it('lee el precio, el origen y la ganancia real del cierre en el historial', async () => {
+    const { fn, calls } = fakeFetch([
+      login,
+      (c) =>
+        c.url.includes('/api/v1/history/activity')
+          ? {
+              status: 200,
+              body: {
+                activities: [
+                  { dealId: 'pos-1', type: 'WORKING_ORDER', source: 'TP', details: { level: 1.32314 } },
+                  { dealId: 'pos-1', type: 'POSITION', source: 'TP', dateUTC: '2026-11-13T06:39:51.962', details: { level: 1.32314, openPrice: 1.32262 } },
+                  { dealId: 'pos-1', type: 'POSITION', source: 'USER', details: { level: 1.32262 } },
+                ],
+              },
+            }
+          : null,
+      (c) =>
+        c.url.includes('/api/v1/history/transactions')
+          ? { status: 200, body: { transactions: [{ dealId: 'pos-1', transactionType: 'TRADE', size: '18.56' }] } }
+          : null,
+    ]);
+    const a = new CapitalAdapter(config, fn, async () => {}, () => Date.parse('2026-11-13T07:00:00Z'));
+    const deal = await a.closedDeal('pos-1', new Date('2026-11-13T06:25:46Z'));
+    expect(deal).toEqual({ level: 1.32314, pnl: 18.56, source: 'TP', at: new Date('2026-11-13T06:39:51.962Z') });
+    expect(calls.find((c) => c.url.includes('activity'))?.url).toContain('from=2026-11-13T06:24:46&to=2026-11-13T06:59:59');
+  });
+
+  it('devuelve null si el cierre todavía no aparece', async () => {
+    const { fn } = fakeFetch([
+      login,
+      (c) => (c.url.includes('/api/v1/history/activity') ? { status: 200, body: { activities: [] } } : null),
+    ]);
+    const a = new CapitalAdapter(config, fn, async () => {});
+    expect(await a.closedDeal('pos-1', new Date())).toBeNull();
+  });
+});
+
 describe('capitalConfigFromEnv', () => {
   const base = { CAPITAL_IDENTIFIER: 'u', CAPITAL_API_KEY: 'k', CAPITAL_API_PASSWORD: 'p' };
 

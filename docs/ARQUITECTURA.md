@@ -4,12 +4,17 @@ Lectura corta para personas y modelos. Si algo aquí contradice al código, mand
 
 ## Qué hace
 
-Sigue EUR/USD y EUR/GBP en velas de 5 y 15 minutos, mide qué tan lejos está el precio de su EMA 100 (en ATR) y manda **dos alertas** por Telegram:
+Sigue EUR/USD, EUR/GBP y GBP/USD en velas de 1, 5 y 15 minutos y manda **una sola alerta** por Telegram (desde el 2026-11-12; v1 y v2 quedaron apagadas, su código sigue en `market.service.ts` sin llamarse):
 
 | Alerta | Cuándo sale | Dónde nace |
 |---|---|---|
-| **v1 · Giro** | M5 y M15 sobreextendidos, Win Rate interno ≥ 65 % y el detector de pico confirma que la elasticidad empezó a ceder dentro de la vela de 5m. Es la antigua "Tipo C experimental"; el mensaje trae el escudo y el semáforo (antes eran alertas aparte). | `MarketService.processTick` → `checkAlertV1` |
-| **v2 · Zona de agotamiento** (experimental) | El precio cruza el percentil 75 de los picos de los estirones pasados del par (con M15 del mismo lado de su EMA). Una vez por estirón. | `MarketService.checkAlertV2`, cálculo en `alerts/zoneEngine.ts` |
+| **v3 · Cascada** | Precio estirado en abanico (EMA 100 de 1m, 5m y 15m en orden), estirón de 3 ATR de 5m o más en la última hora, al menos 4 pips hasta la EMA 100 de 5m, y la vela de 1m cierra al otro lado de su EMA 100. Una a la vez por par. | `cascade/cascadeEngine.ts` (motor puro con tests), llamado desde `MarketService.processTick` → `handleCascade` |
+
+Cada alerta v3 nace con un **contrato**: stop en el extremo de las últimas 3 h + 0,5 pips; objetivo en la mitad de la distancia a la EMA 100 de 5m (o antes si la toca); salida forzada a los 175 min. El tamaño se calcula para arriesgar `EXECUTION_RISK_USD` (20 USD por defecto, tope `EXECUTION_RISK_MAX_SIZE`). El motor sigue el contrato vela a vela de 1m, guarda el resultado en `alert_log` (`status` = `stop`, `objetivo`, `ema` o `tiempo`; detalle en `features.outcome`) y cierra la operación del broker si sigue abierta. Si el servidor se reinicia, el contrato abierto se recupera de `alert_log`. Las señales de velas con más de 4 min se descartan.
+
+**Copiloto** (`cascade/copilot.ts`): cada alerta v3 se manda a Claude con `claude -p` (Claude Code de este Mac, con la sesión del plan Pro de `~/.claude-personal`; sin clave de API ni costo extra). Va sin herramientas ni configuración global (unos 2.000 tokens por consulta, 15–30 s). Recibe las velas de 5m y 15m y los intentos de las últimas 12 h; su veredicto (tomar, no tomar o dudosa) llega como segundo mensaje de Telegram y se guarda en `features.copilot`. Está en sombra: no bloquea ni abre nada. Variables opcionales: `COPILOT_ENABLED=false`, `COPILOT_MODEL` (por defecto `opus`), `COPILOT_CLAUDE_BIN`, `COPILOT_CLAUDE_CONFIG_DIR`. El arnés de replay lo apaga.
+
+Evidencia de la regla: `docs/research/cascada-3tf/RESULTADO.md` (10 meses de EUR/USD 1m: gana 65 %, peor −30 pips, neto ≈ −0,5 pips por operación tras 0,8 de spread; reduce la holgura, no es una ventaja probada). `test/replay/cascade-fidelity.ts` comprueba que el motor TypeScript reproduce ese estudio (1.106 de 1.114 operaciones iguales).
 
 Cada alerta crea un `pending_signal` (botones "Registrar Trade" / "Descartar" del diario) y una fila en `alert_log` con su resultado.
 
@@ -71,7 +76,7 @@ npm run replay -- /tmp/r.json 2026-10-05T11:00:00Z 2026-10-17T00:00:00Z --check
 npm run replay -- /tmp/r.json 2026-10-05T11:00:00Z 2026-10-17T00:00:00Z --check --24h   # como en vivo (IGNORE_SCHEDULE=true)
 ```
 
-`npm run replay` corre el motor real sobre velas de 1 minuto grabadas (`test/replay/fixtures/`, EUR/USD y EUR/GBP del 2026-09-21 al 2026-10-17) sin red, sin base de datos y sin Telegram. Con `--check` falla si la v1 deja de salir en los mismos 8 instantes que la "Tipo C experimental" del código original (`test/replay/golden/v1-expected.json`). Con `--24h` corre como en vivo, sin el horario COT, y compara con las 16 alertas de `v1-expected-24h.json` (sacadas del código actual, no del original). Es la red de seguridad para cualquier refactor.
+`npm run replay` corre el motor real sobre velas de 1 minuto grabadas (`test/replay/fixtures/`, EUR/USD y EUR/GBP del 2026-09-21 al 2026-10-17) sin red, sin base de datos y sin Telegram. Con `--check` falla si la v3 deja de salir en los mismos 48 instantes de `test/replay/golden/v3-expected.json`; con `--24h` corre como en vivo y compara con las 66 de `v3-expected-24h.json` (las referencias v1 quedan como historia). Es la red de seguridad para cualquier refactor.
 
 ## Tableros
 

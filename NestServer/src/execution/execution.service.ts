@@ -25,6 +25,7 @@ export type OpenInput = {
   source: ExecutionSource;
   pendingSignalId?: number;
   alertLogId?: number;
+  sizeLimit?: number;
 };
 
 export class ExecutionError extends Error {
@@ -54,6 +55,9 @@ export class ExecutionService {
   readonly symbols: string[];
   readonly defaultSize: number;
   readonly maxSize: number;
+  readonly riskUsd: number;
+  readonly riskMaxSize: number;
+  readonly brokerStop: boolean;
   private readonly allowAutoLive: boolean;
   private auto: boolean;
 
@@ -75,6 +79,9 @@ export class ExecutionService {
       .filter(Boolean);
     this.defaultSize = Number(env.EXECUTION_DEFAULT_SIZE) || 1000;
     this.maxSize = Number(env.EXECUTION_MAX_SIZE) || 10000;
+    this.riskUsd = Number(env.EXECUTION_RISK_USD) || 20;
+    this.riskMaxSize = Number(env.EXECUTION_RISK_MAX_SIZE) || 50000;
+    this.brokerStop = env.EXECUTION_BROKER_STOP === 'true';
   }
 
   adapter(id: string): BrokerAdapter | undefined {
@@ -136,6 +143,9 @@ export class ExecutionService {
       symbols: this.symbols,
       defaultSize: this.defaultSize,
       maxSize: this.maxSize,
+      riskUsd: this.riskUsd,
+      riskMaxSize: this.riskMaxSize,
+      brokerStop: this.brokerStop,
     };
   }
 
@@ -164,9 +174,10 @@ export class ExecutionService {
     if (input.direction !== 'BUY' && input.direction !== 'SELL')
       throw new ExecutionError('La dirección debe ser BUY o SELL', 400);
     const size = input.size ?? this.defaultSize;
-    if (!(size > 0) || size > this.maxSize)
+    const limit = input.sizeLimit ?? this.maxSize;
+    if (!(size > 0) || size > limit)
       throw new ExecutionError(
-        `Tamaño inválido: debe estar entre 1 y ${this.maxSize}`,
+        `Tamaño inválido: debe estar entre 1 y ${limit}`,
         400,
       );
     const adapter = this.adapters.get(
@@ -249,17 +260,35 @@ export class ExecutionService {
     if (!signal)
       throw new ExecutionError(`La alerta #${pendingSignalId} no existe`, 404);
     const log = await em.findOne(AlertLog, { pendingSignalId });
+    const contract = log?.features?.contract as
+      | { size?: number; target?: number }
+      | undefined;
     return this.open({
       symbol: signal.symbol,
       direction: signal.direction,
-      stopLevel: num(signal.slPrice) ?? undefined,
+      stopLevel: this.brokerStop ? (num(signal.slPrice) ?? undefined) : undefined,
+      profitLevel: contract?.target,
+      size: contract?.size || undefined,
+      sizeLimit: contract?.size ? this.riskMaxSize : undefined,
       source,
       pendingSignalId,
       alertLogId: log?.id,
     });
   }
 
-  async close(id: number) {
+  async positionForAlert(alertLogId: number): Promise<ExecutionPosition | null> {
+    return this.em
+      .fork()
+      .findOne(ExecutionPosition, { alertLogId }, { orderBy: { id: 'DESC' } });
+  }
+
+  async openForAlert(alertLogId: number): Promise<ExecutionPosition | null> {
+    return this.em
+      .fork()
+      .findOne(ExecutionPosition, { alertLogId, status: 'open' });
+  }
+
+  async close(id: number, reason = 'manual') {
     const em = this.em.fork();
     const row = await em.findOne(ExecutionPosition, id);
     if (!row) throw new ExecutionError(`La operación #${id} no existe`, 404);
@@ -287,12 +316,42 @@ export class ExecutionService {
     row.status = 'closed';
     row.closedAt = new Date(Date.now());
     row.closePrice = res.level ?? undefined;
-    row.closeReason = res.alreadyClosed ? 'ya-cerrada-en-broker' : 'manual';
+    row.closeReason = res.alreadyClosed ? 'ya-cerrada-en-broker' : reason;
+    const deal = await this.settledDeal(adapter, row);
+    if (deal) {
+      if (deal.level !== null) row.closePrice = deal.level;
+      if (deal.pnl !== null) row.realizedPnl = deal.pnl;
+      if (deal.source) row.closeSource = deal.source;
+      if (deal.at && res.alreadyClosed) row.closedAt = deal.at;
+    }
     await em.flush();
     console.log(
       `[Ejecución] #${row.id} ${row.broker} ${row.symbol} cerrada (${row.closeReason}).`,
     );
     return this.view(row);
+  }
+
+  private async settledDeal(adapter: BrokerAdapter, row: ExecutionPosition) {
+    if (!adapter.closedDeal || !row.dealId) return null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const deal = await adapter.closedDeal(row.dealId, row.openedAt);
+        if (deal && deal.pnl !== null) return deal;
+        if (deal && attempt === 2) return deal;
+      } catch (err) {
+        console.warn(
+          `[Ejecución] #${row.id}: no se pudo leer el cierre real en ${row.broker}:`,
+          err instanceof Error ? err.message : err,
+        );
+        return null;
+      }
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+    return null;
+  }
+
+  viewOf(r: ExecutionPosition) {
+    return this.view(r);
   }
 
   private view(r: ExecutionPosition) {
@@ -313,6 +372,8 @@ export class ExecutionService {
       stopLevel: num(r.stopLevel),
       profitLevel: num(r.profitLevel),
       closePrice: num(r.closePrice),
+      realizedPnl: num(r.realizedPnl),
+      closeSource: r.closeSource ?? null,
       openedAt: r.openedAt,
       trackingSince: r.trackingSince ?? null,
       entrySpread: num(r.entrySpread),

@@ -112,7 +112,7 @@ describe('ExecutionService', () => {
       logs: [{ id: 3, pendingSignalId: 7 }],
     });
     const broker = new FakeBroker();
-    const s = new ExecutionService(em, [broker], env);
+    const s = new ExecutionService(em, [broker], { ...env, EXECUTION_BROKER_STOP: 'true' });
     const p = await s.openFromSignal(7);
     expect(p).toMatchObject({ symbol: 'EUR/GBP', direction: 'SELL', source: 'telegram', alertLogId: 3, pendingSignalId: 7, stopLevel: 0.845, profitLevel: null });
     expect(broker.opened[0]).toMatchObject({ stopLevel: 0.845, profitLevel: undefined });
@@ -157,8 +157,10 @@ describe('ExecutionService · entrada automática', () => {
 
   it('abre desde la alerta con origen auto', async () => {
     const { em } = memoryEm({ signals: [{ id: 9, symbol: 'GBP/USD', direction: 'BUY', slPrice: '1.33000' }], logs: [] });
-    const s = new ExecutionService(em, [new FakeBroker()], env, file);
+    const broker = new FakeBroker();
+    const s = new ExecutionService(em, [broker], env, file);
     const p = await s.openFromSignal(9, 'auto');
-    expect(p).toMatchObject({ source: 'auto', symbol: 'GBP/USD', stopLevel: 1.33 });
+    expect(p).toMatchObject({ source: 'auto', symbol: 'GBP/USD', stopLevel: null });
+    expect(broker.opened[0].stopLevel).toBeUndefined();
   });
 });

@@ -93,6 +93,7 @@ export type BackendMessage =
         prevClosedElasticityM5?: number | null;
       };
       zone?: Record<string, unknown> | null;
+      cascade?: Record<string, unknown> | null;
     }
   | { type: 'status';     status: 'connecting' | 'connected' | 'disconnected'; message: string }
   | { type: 'error';      message: string }

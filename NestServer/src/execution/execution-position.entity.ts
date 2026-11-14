@@ -89,6 +89,18 @@ export class ExecutionPosition {
   })
   entrySpread?: number;
 
+  @Property({
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    nullable: true,
+    fieldName: 'realized_pnl',
+  })
+  realizedPnl?: number;
+
+  @Property({ length: 20, nullable: true, fieldName: 'close_source' })
+  closeSource?: string;
+
   @Property({ nullable: true, fieldName: 'tracking_since' })
   trackingSince?: Date;
 

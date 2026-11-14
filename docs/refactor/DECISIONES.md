@@ -17,6 +17,7 @@
 | 2026-10-19 | Abrir operaciones desde el panel y desde la alerta de Telegram, para cualquier par configurado, con el broker aislado para poder cambiarlo (por ejemplo OANDA en real). |
 | 2026-10-19 | Cada alerta abre la operación de inmediato en su par (entrada automática en la demo de Capital.com). |
 | 2026-10-19 | Dejar las operaciones abiertas y cerrarlas a mano para medir cuánto tiempo pasa en rojo (holgura) y en verde, y cada cambio, con hora y fecha; con el spread de Capital.com y con 1 pip. |
+| 2026-11-12 | Una sola alerta, la nueva v3 · Cascada; apagar v1 y v2. Riesgo de 20 USD por operación. Copiloto de Claude en sombra. Permiso para reiniciar el backend y para descargar 1m de EUR/GBP y GBP/USD (triángulo). |
 
 ## Tomadas por Claude el 2026-10-17 (revisables por el trader)
 
@@ -67,3 +68,13 @@ Twelve Data entrega sábados y domingos completos: el 24 % de las barras grabada
 | ELAS-67 (sin barras de fin de semana en el historial) | 8: una sale 14 min antes, con 36 pips en contra en vez de 24,7 | 20: una cambia de hora y salen 4 más, todas compras de EUR/GBP la noche del 6 al 7 de octubre, con 25–29 pips en contra | 28 |
 
 Ninguna de las dos se aplica antes de la prueba: ELAS-68 no cambia nada en esta grabación y ELAS-67 la empeora en el único arranque grabado.
+
+## v3 · Cascada (2026-11-12, Claude con el trader)
+
+| Decisión | Motivo |
+|---|---|
+| Entrada en el cruce de la EMA 100 de 1m con estirón en 1m, 5m y 15m. | Es el patrón de las capturas del trader (EUR/USD 10-nov 04:00). Medido: no acierta más que el azar a la misma distancia (`docs/research/cascada-3tf/RESULTADO.md`), así que la regla no se vende como ventaja. |
+| Contrato de salida: stop en el extremo, objetivo al 50 % de la distancia a la EMA 100 de 5m, 175 min. | Fue la única variante pre-registrada que cumplió su criterio en DEV y VAL: recorrido en contra p90 de 35 a 12 pips, peor operación de −117 a −25, ninguna operación de más de 4 h, y neto mejor que aguantar (−0,42 frente a −0,87). |
+| Las operaciones de la v3 llevan SL y TP en el broker y el backend las cierra al tocar la EMA de 5m o a los 175 min. | El dolor del trader eran las horas en holgura; antes el cierre era manual y sin TP. |
+| El tamaño sale del riesgo (20 USD) y no de `EXECUTION_MAX_SIZE`; tope propio `EXECUTION_RISK_MAX_SIZE` (50.000). | Con stop, el riesgo queda acotado; el tope evita un tamaño absurdo si el stop es muy corto (piso de 3 pips para calcularlo). |
+| El copiloto llama a `claude -p` (Opus, sin herramientas, salida JSON con esquema) con la sesión Pro del trader, no a la API. | La API exige compra aparte; Claude Code ya está pagado y da el mismo modelo. Va en sombra hasta tener unas 100 alertas para comparar su veredicto con el resultado. |

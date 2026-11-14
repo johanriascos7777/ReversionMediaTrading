@@ -51,12 +51,12 @@ async function main() {
         path.join(
           __dirname,
           'golden',
-          live ? 'v1-expected-24h.json' : 'v1-expected.json',
+          live ? 'v3-expected-24h.json' : 'v3-expected.json',
         ),
         'utf8',
       ),
     ) as {
-      v1: Array<{
+      v3: Array<{
         iso: string;
         symbol: string;
         direction: string;
@@ -69,15 +69,15 @@ async function main() {
       direction: string;
       price: number;
     }) => `${a.iso} ${a.symbol} ${a.direction} ${a.price.toFixed(5)}`;
-    const expected = golden.v1.map(key);
-    const actual = result.alerts.filter((a) => a.tradeMode === 'v1').map(key);
+    const expected = golden.v3.map(key);
+    const actual = result.alerts.filter((a) => a.tradeMode === 'v3').map(key);
     const same =
       expected.length === actual.length &&
       expected.every((k, i) => k === actual[i]);
     console.log(
       same
-        ? `v1 idéntica a la línea base (${actual.length} alertas).`
-        : 'v1 DISTINTA a la línea base:',
+        ? `v3 idéntica a la línea base (${actual.length} alertas).`
+        : 'v3 DISTINTA a la línea base:',
     );
     if (!same) {
       console.log('  esperadas:', expected);

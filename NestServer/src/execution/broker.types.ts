@@ -23,6 +23,13 @@ export type CloseResult = {
 
 export type Quote = { bid: number; offer: number };
 
+export type ClosedDeal = {
+  level: number | null;
+  pnl: number | null;
+  source: string | null;
+  at: Date | null;
+};
+
 export type BrokerPositionMark = {
   dealId: string;
   dealReference: string | null;
@@ -47,6 +54,7 @@ export interface BrokerAdapter {
   }): Promise<CloseResult>;
   positions?(): Promise<BrokerPositionMark[]>;
   quotes?(symbols: string[]): Promise<Record<string, Quote>>;
+  closedDeal?(dealId: string, since: Date): Promise<ClosedDeal | null>;
 }
 
 export class BrokerError extends Error {

@@ -34,6 +34,7 @@ export type ReplayResult = {
   symbols: string[];
   ticks: number;
   alerts: CapturedAlert[];
+  outcomes: Array<Record<string, unknown>>;
   messages: CapturedMessage[];
 };
 
@@ -107,6 +108,9 @@ export async function runReplay(opts: {
 
   if (opts.ignoreSchedule) process.env.IGNORE_SCHEDULE = 'true';
   else delete process.env.IGNORE_SCHEDULE;
+  process.env.COPILOT_ENABLED = 'false';
+  process.env.CASCADE_STOP_EXIT = 'true';
+  process.env.CASCADE_TARGET_EXIT = 'true';
   process.env.TELEGRAM_BOT_TOKEN = 'replay';
   process.env.TELEGRAM_CHAT_ID = 'replay';
   process.env.TWELVE_DATA_API_KEY = 'replay-key';
@@ -150,6 +154,7 @@ export async function runReplay(opts: {
     flush: async () => {},
     find: async () => [],
     nativeUpdate: async () => 1,
+    findOne: async () => null,
     getRepository: () => ({ find: async () => [], findOne: async () => null }),
   };
   const historicalStub: any = {
@@ -157,6 +162,7 @@ export async function runReplay(opts: {
     getCandles: async () => [],
   };
 
+  const alerts: CapturedAlert[] = [];
   let consolidation: any = null;
   const alertsService: any = new AlertsService(em);
   const market: any = new (MarketService as any)(
@@ -173,27 +179,73 @@ export async function runReplay(opts: {
   structure.onModuleInit();
   consolidation.onModuleInit();
 
-  const historyBySymbol = new Map<string, { m5: Candle[]; m15: Candle[] }>();
+  const historyBySymbol = new Map<
+    string,
+    { m1: Candle[]; m5: Candle[]; m15: Candle[] }
+  >();
   for (const sym of symbols) {
     const before = opts.barsBySymbol[sym].filter((b) => b.t < opts.from);
     historyBySymbol.set(sym, {
+      m1: aggregate(before, 1),
       m5: aggregate(before, 5),
       m15: aggregate(before, 15),
     });
   }
   market.fetchHistoricalCandles = async (
     sym: string,
-    interval: '5min' | '15min',
+    interval: '1min' | '5min' | '15min',
     outputSize: number,
   ) => {
     const h = historyBySymbol.get(sym)!;
     const size = outputSize === 1000 ? historySize : outputSize;
-    return (interval === '5min' ? h.m5 : h.m15)
-      .slice(-size)
-      .map((c) => ({ ...c }));
+    const list =
+      interval === '1min' ? h.m1 : interval === '5min' ? h.m5 : h.m15;
+    return list.slice(-size).map((c) => ({ ...c }));
   };
 
-  const alerts: CapturedAlert[] = [];
+  const originalCascade = alertsService.sendCascadeAlert.bind(alertsService);
+  alertsService.sendCascadeAlert = async (
+    signal: any,
+    contract: any,
+    quote: number | null,
+    context: Record<string, unknown>,
+  ) => {
+    alerts.push({
+      at: now,
+      iso: new Date(now).toISOString(),
+      symbol: signal.symbol,
+      alertName: 'v3 · Cascada',
+      tradeMode: 'v3',
+      direction: signal.direction,
+      price: signal.price,
+      diag: {
+        stretchAtr5: signal.stretchAtr5,
+        roomPips: signal.roomPips,
+        stopPips: contract.stopPips,
+        targetPips: contract.targetPips,
+        ema1: signal.ema1,
+        ema5: signal.ema5,
+        ema15: signal.ema15,
+      },
+    });
+    return originalCascade(signal, contract, quote, context);
+  };
+  const outcomes: Array<Record<string, unknown>> = [];
+  const originalClose = alertsService.closeCascade.bind(alertsService);
+  alertsService.closeCascade = async (outcome: any) => {
+    outcomes.push({
+      iso: new Date(outcome.at).toISOString(),
+      symbol: outcome.contract.symbol,
+      direction: outcome.contract.direction,
+      openedAt: new Date(outcome.contract.openedAt).toISOString(),
+      reason: outcome.reason,
+      pips: Math.round(outcome.pips * 10) / 10,
+      minutes: outcome.minutes,
+      maePips: Math.round(outcome.contract.maePips * 10) / 10,
+    });
+    return originalClose(outcome);
+  };
+
   const originalSend = alertsService.sendAlert.bind(alertsService);
   alertsService.sendAlert = async (ctx: AlertContext) => {
     const state = market.symbolStates.get(ctx.symbol);
@@ -265,6 +317,7 @@ export async function runReplay(opts: {
     symbols,
     ticks: fed,
     alerts,
+    outcomes,
     messages,
   };
 }

@@ -6,26 +6,19 @@ import { useMarketData } from './hooks/useMarketData'
 import { useAlerts } from './hooks/useAlerts'
 import { useExecution } from './hooks/useExecution'
 
-import { Semaforo } from './components/Semaforo'
 import { ElasticityCard } from './components/ElasticityCard'
 import { ApiKeysStatus } from './components/ApiKeysStatus'
-import { ZonePanel } from './components/ZonePanel'
+import { CascadePanel } from './components/CascadePanel'
 import { AlertsTable } from './components/AlertsTable'
 import { ExecutionPanel } from './components/ExecutionPanel'
+import { ModeToggle } from './components/ModeToggle'
 
 interface Toast {
   id: string
   symbol: string
-  type: 'v1' | 'v2'
+  type: 'v3'
   title: string
   message: string
-}
-
-const triggerText: Record<string, string> = {
-  reposo: 'en reposo',
-  estirando: 'estirando',
-  'giro-provisional': 'giro provisional',
-  giro: 'giro confirmado',
 }
 
 const LED = ({ state, size = 8 }: { state: 'GREEN' | 'YELLOW' | 'RED'; size?: number }) => {
@@ -59,7 +52,7 @@ function App() {
   const activeKey = market && market[activeSymbol] ? activeSymbol : (market ? Object.keys(market)[0] : 'EUR/USD')
   const currentMarket = market ? market[activeKey] : null
 
-  const lastStateChecked = useRef<{ [symbol: string]: { trigger: string; zoneAlerted: boolean } }>({})
+  const lastSignalSeen = useRef<{ [symbol: string]: number | null }>({})
 
   useEffect(() => {
     if (!market) return
@@ -73,28 +66,18 @@ function App() {
     Object.keys(market).forEach((sym) => {
       const item = market[sym]
       if (!item) return
-      const prev = lastStateChecked.current[sym]
-      const trigger = item.triggerState ?? 'reposo'
-      const zoneAlerted = item.zone?.alerted ?? false
-
-      if (prev && prev.trigger !== 'giro' && trigger === 'giro') {
+      const last = item.cascade?.lastSignalAt ?? null
+      const seen = lastSignalSeen.current[sym]
+      const c = item.cascade?.contract
+      if (seen !== undefined && last !== null && last !== seen && c) {
         push({
           symbol: sym,
-          type: 'v1',
-          title: `🚨 v1 · Giro en ${sym}`,
-          message: `M5 ${item.m5.elasticity.toFixed(2)} · M15 ${item.m15.elasticity.toFixed(2)} · semáforo ${item.pedestrianLight ?? 'STOP'}`,
+          type: 'v3',
+          title: `🌊 v3 · Cascada en ${sym}`,
+          message: `${c.direction === 'SELL' ? 'Venta' : 'Compra'} · stop ${c.stopPips.toFixed(1)} pips · objetivo ${c.targetPips.toFixed(1)} pips`,
         })
       }
-      if (prev && !prev.zoneAlerted && zoneAlerted && item.zone) {
-        push({
-          symbol: sym,
-          type: 'v2',
-          title: `🧪 v2 · Zona de agotamiento en ${sym}`,
-          message: `${item.zone.direction === 'SELL' ? 'Venta' : 'Compra'} · ${item.zone.distanceAtr.toFixed(2)} ATR (p75 ${item.zone.q75Atr.toFixed(2)})`,
-        })
-      }
-
-      lastStateChecked.current[sym] = { trigger, zoneAlerted }
+      lastSignalSeen.current[sym] = last
     })
   }, [market])
 
@@ -146,7 +129,10 @@ function App() {
             </p>
           </div>
         )}
-        {connectionBadge}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', justifyContent: 'center' }}>
+          {connectionBadge}
+          <ModeToggle execution={execution} />
+        </div>
         <p style={{ margin: 0, fontSize: 13, color: '#f3f4f6' }}>
           {wsStatus === 'connecting' && 'Conectando con el backend...'}
           {wsStatus === 'disconnected' && `Backend desconectado — verifica que esté corriendo en ${WS_URL}`}
@@ -170,10 +156,13 @@ function App() {
             Señales de reversión a la EMA 100
           </h1>
           <p style={{ margin: '4px 0 0', fontSize: 13, color: '#9ca3af' }}>
-            v1 · Giro (la alerta de siempre) y v2 · Zona de agotamiento (experimental)
+            Una sola alerta: v3 · Cascada, con stop, objetivo y salida a los 175 min
           </p>
         </div>
-        {connectionBadge}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+          {connectionBadge}
+          <ModeToggle execution={execution} />
+        </div>
       </div>
 
       {exhaustAlert && (
@@ -205,7 +194,7 @@ function App() {
           {Object.keys(market).map((sym) => {
             const item = market[sym]
             const isActive = sym === activeKey
-            const zone = item.zone
+            const cas = item.cascade
             const locked = lockedSymbols.has(sym)
             return (
               <div
@@ -257,11 +246,12 @@ function App() {
                   </div>
                 </div>
 
-                <div style={{ marginTop: 10, fontSize: 11, color: '#9ca3af', fontFamily: 'monospace', lineHeight: 1.6 }}>
-                  <div>v1: {triggerText[item.triggerState ?? 'reposo']} · {item.pedestrianLight === 'WALK' ? 'WALK' : 'STOP'}</div>
-                  <div>
-                    v2: {zone ? `${zone.distanceAtr.toFixed(2)} / ${zone.q75Atr.toFixed(2)} ATR ${zone.distanceAtr >= zone.q75Atr ? '· en zona' : ''}` : 'sin historial'}
-                  </div>
+                <div style={{ marginTop: 10, fontSize: 11, color: cas?.armed ? '#34d399' : '#9ca3af', fontFamily: 'monospace', lineHeight: 1.6 }}>
+                  {!cas || !cas.ready
+                    ? 'v3: calentando'
+                    : cas.contract
+                      ? `v3: contrato ${cas.contract.direction} en curso`
+                      : `v3: ${cas.armed ? 'ARMADA' : 'en espera'} · estirón ${(cas.stretchAtr5 ?? 0).toFixed(1)}/${cas.stretchNeeded} ATR5 · ${cas.direction ?? ''}`}
                 </div>
               </div>
             )
@@ -282,24 +272,7 @@ function App() {
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))', gap: 24 }}>
 
-          <div className="glass-panel" style={{ margin: 0 }}>
-            <h3 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 8px', color: '#fff' }}>
-              🚨 v1 · Giro
-            </h3>
-            <p style={{ margin: '0 0 16px', fontSize: 13, color: '#9ca3af', lineHeight: 1.4 }}>
-              Sobreextensión M5/M15 y detector de pico. Avisa cuando el giro se confirma.
-            </p>
-            <div style={{ display: 'flex', gap: 12, marginBottom: 12, fontSize: 13, flexWrap: 'wrap' }}>
-              <span>M5: <strong>{currentMarket.m5.elasticity.toFixed(2)}</strong> ({currentMarket.m5.state})</span>
-              <span style={{ opacity: 0.3 }}>|</span>
-              <span>M15: <strong>{currentMarket.m15.elasticity.toFixed(2)}</strong> ({currentMarket.m15.state})</span>
-              <span style={{ opacity: 0.3 }}>|</span>
-              <span>Gatillo: <strong>{triggerText[currentMarket.triggerState ?? 'reposo']}</strong></span>
-            </div>
-            <Semaforo state={currentMarket.finalState} label="Estado actual" />
-          </div>
-
-          <ZonePanel symbol={activeKey} price={currentMarket.m5.price} zone={currentMarket.zone} />
+          <CascadePanel symbol={activeKey} cascade={currentMarket.cascade} />
 
           <div className="glass-panel" style={{ margin: 0, padding: 0, border: 'none', background: 'transparent' }}>
             <ElasticityCard
@@ -322,7 +295,7 @@ function App() {
             <div
               key={toast.id}
               className="toast-card"
-              style={{ borderLeft: toast.type === 'v1' ? '4px solid #10b981' : '4px solid #a78bfa' }}
+              style={{ borderLeft: '4px solid #3b82f6' }}
               onClick={() => {
                 setActiveSymbol(toast.symbol)
                 dismissToast(toast.id)

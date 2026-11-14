@@ -1,6 +1,14 @@
 import { Entity, PrimaryKey, Property } from '@mikro-orm/decorators/legacy';
 
-export type AlertOutcomeStatus = 'open' | 'touched' | 'expired';
+export type AlertOutcomeStatus =
+  | 'open'
+  | 'touched'
+  | 'expired'
+  | 'stop'
+  | 'ema'
+  | 'objetivo'
+  | 'tiempo'
+  | 'broker';
 
 @Entity({ tableName: 'alert_log' })
 export class AlertLog {

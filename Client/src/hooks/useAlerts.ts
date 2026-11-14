@@ -3,7 +3,7 @@ import { API_URL } from '@/config/env'
 
 export type AlertRow = {
   id: number
-  version: 'v1' | 'v2'
+  version: 'v1' | 'v2' | 'v3'
   name: string
   symbol: string
   direction: 'BUY' | 'SELL'
@@ -13,12 +13,17 @@ export type AlertRow = {
   shieldClear: boolean | null
   walk: boolean | null
   createdAt: string
-  status: 'open' | 'touched' | 'expired'
+  status: 'open' | 'touched' | 'expired' | 'stop' | 'ema' | 'objetivo' | 'tiempo' | 'broker'
   maePips: number | null
   mfePips: number | null
   touchedAt: string | null
   minutesToEma: number | null
-  features?: { telegramSuppressedBy?: number } | null
+  features?: {
+    telegramSuppressedBy?: number
+    outcome?: { reason: string; pips: number; minutes: number; broker?: { pnlUsd: number | null; pips: number | null; source: string | null } | null }
+    contract?: { stopPips: number; targetPips: number; size: number }
+    copilot?: { verdict: { decision: 'tomar' | 'no_tomar' | 'dudosa'; confianza: number } }
+  } | null
 }
 
 export type VersionSummary = {
@@ -31,6 +36,10 @@ export type VersionSummary = {
   touchedWithin4h: number
   decided4h: number
   minutesToEmaMedian: number | null
+  closed?: number
+  wins?: number
+  pipsMean?: number | null
+  pipsWorst?: number | null
 }
 
 export function useAlerts(refreshMs = 30_000) {

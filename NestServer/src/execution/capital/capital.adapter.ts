@@ -2,6 +2,7 @@ import {
   BrokerError,
   type BrokerAdapter,
   type BrokerPositionMark,
+  type ClosedDeal,
   type CloseResult,
   type OpenRequest,
   type OpenResult,
@@ -170,6 +171,31 @@ export class CapitalAdapter implements BrokerAdapter {
       });
     }
     return marks;
+  }
+
+  async closedDeal(dealId: string, since: Date): Promise<ClosedDeal | null> {
+    const fmt = (d: Date) => d.toISOString().slice(0, 19);
+    const from = Math.max(since.getTime() - 60_000, this.now() - 23.5 * 3_600_000);
+    const range = `from=${fmt(new Date(from))}&to=${fmt(new Date(this.now() - 1000))}`;
+    const activity = await this.request('GET', `/api/v1/history/activity?${range}&detailed=true`);
+    const close = (Array.isArray(activity?.activities) ? activity.activities : []).find(
+      (a: any) =>
+        a?.dealId === dealId &&
+        a?.type === 'POSITION' &&
+        a?.details?.openPrice !== undefined,
+    );
+    if (!close) return null;
+    const tx = await this.request('GET', `/api/v1/history/transactions?${range}`);
+    const trade = (Array.isArray(tx?.transactions) ? tx.transactions : []).find(
+      (t: any) => t?.dealId === dealId && t?.transactionType === 'TRADE',
+    );
+    const pnl = trade ? Number(trade.size) : NaN;
+    return {
+      level: typeof close.details?.level === 'number' ? close.details.level : null,
+      pnl: Number.isFinite(pnl) ? pnl : null,
+      source: close.source ?? null,
+      at: close.dateUTC ? new Date(`${close.dateUTC}Z`) : null,
+    };
   }
 
   async quotes(symbols: string[]): Promise<Record<string, Quote>> {

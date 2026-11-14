@@ -16,11 +16,13 @@ import { PendingSignal } from '../trade/pending-signal.entity';
 import { ConsolidationService } from '../consolidation/consolidation.service';
 import { AlertsService, pipSize } from '../alerts/alerts.service';
 import { buildZoneModel, emaSeries, atrSeries, lastValue, ZONE_DEFAULTS, type ZoneModel } from '../alerts/zoneEngine';
+import { CascadeEngine, type MinuteEvents, type CascadeSignal, type ContractExit, type Bar as MinuteBar } from '../cascade/cascadeEngine';
 
 const HISTORY_OUTPUT = 1000;
 const ZONE_HISTORY_OUTPUT = 5000;
 const REST_CREDITS_PER_KEY_PER_DAY = 760;
 const FOMOWATCH_REFRESH_MS = 30_000;
+const CASCADE_MAX_SIGNAL_AGE_MIN = 4;
 
 type FomowatchSignal = Pick<PendingSignal, 'id' | 'symbol' | 'direction' | 'status' | 'entryPrice' | 'tpPrice' | 'slPrice' | 'openedAt'>;
 
@@ -31,6 +33,8 @@ export class SymbolState {
   public readonly symbol: string;
   public readonly builderM5 = new CandleBuilder('M5');
   public readonly builderM15 = new CandleBuilder('M15');
+  public cascade: CascadeEngine;
+  public cascadeHistory: Array<{ at: number; direction: 'BUY' | 'SELL'; price: number; outcome?: ContractExit; pips?: number }> = [];
 
   public lastSnapshotM5: DirectionalSnapshot | null = null;
   public lastSnapshotM15: DirectionalSnapshot | null = null;
@@ -85,6 +89,9 @@ export class SymbolState {
 
   constructor(symbol: string) {
     this.symbol = symbol;
+    this.cascade = new CascadeEngine(symbol);
+    this.cascade.stopExit = process.env.CASCADE_STOP_EXIT === 'true';
+    this.cascade.targetExit = process.env.CASCADE_TARGET_EXIT === 'true';
   }
 }
 @Injectable()
@@ -284,6 +291,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
               `[MarketService] [${sym}] Vela M5 cerrada. Backtest M5 recalculado: WinRate: ${state.lastBacktestM5.winRate}%`
             );
 
+            state.cascade.closedM5(candle);
             void this.alertsService.onCandleClosed(sym, candle, 5 * 60_000, state.zoneEma);
             state.zoneBars.push(candle);
             if (state.zoneBars.length > ZONE_HISTORY_OUTPUT + HISTORY_OUTPUT) state.zoneBars.shift();
@@ -296,6 +304,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
 
             const el = calculateElasticityForCandles(state.builderM15.getCandles(), candle.close);
             if (el !== null) pushPercentileHistory(sym, 'M15', el);
+            state.cascade.closedM15(candle);
 
             state.zoneM15Ema = lastValue(emaSeries(state.historicalM15.map((c) => c.close)));
           });
@@ -428,6 +437,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       ...engine,
       experimental: engine,
       zone: this.zoneView(state, m5.price),
+      cascade: state.cascade.view(m5.price),
     };
   }
 
@@ -469,7 +479,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
   // ─── Fetch historial via REST ─────────────────────────────────────────────────
   private fetchHistoricalCandles(
     symbol: string,
-    interval: '5min' | '15min',
+    interval: '1min' | '5min' | '15min',
     outputSize: number
   ): Promise<Candle[]> {
     return new Promise((resolve, reject) => {
@@ -722,6 +732,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
             );
           }
 
+          await this.warmCascade(state);
           state.historyLoaded = true;
           await this.loadZoneHistory(state);
           return true;
@@ -775,6 +786,7 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
       this.delayHistory.reduce((a, b) => a + b, 0) / this.delayHistory.length
     );
 
+    const cascadeEvents = state.cascade.tick(price, timestamp);
     state.builderM5.tick(price, timestamp);
     state.builderM15.tick(price, timestamp);
 
@@ -905,9 +917,8 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
 
     this.events.emit('broadcast', this.snapshotPayload(state, snapshotM5, snapshotM15, finalState, fusedStateResult, comparison));
 
-    this.checkAlertV1(state, fusedStateResult, snapshotM5, snapshotM15, comparison);
     this.alertsService.onTick(symbol, price, timestamp, state.zoneEma);
-    this.checkAlertV2(state, price, fusedStateResult, snapshotM5, snapshotM15, comparison);
+    this.handleCascade(state, cascadeEvents);
 
     if (Math.random() < 0.05) {
       console.log(
@@ -921,6 +932,126 @@ export class MarketService implements OnModuleInit, OnModuleDestroy {
 
     // Correr simulación Fomowatch pasiva
     this.runFomowatchSimulation(symbol, snapshotM5.price);
+  }
+
+  private async warmCascade(state: SymbolState): Promise<void> {
+    const active = state.cascade.contract;
+    const engine = new CascadeEngine(state.symbol);
+    engine.stopExit = process.env.CASCADE_STOP_EXIT === 'true';
+    engine.targetExit = process.env.CASCADE_TARGET_EXIT === 'true';
+    let m1: Candle[] = [];
+    try {
+      await new Promise((r) => setTimeout(r, 1000));
+      m1 = await this.fetchHistoricalCandles(state.symbol, '1min', HISTORY_OUTPUT);
+      this.takeFormingCandle(m1, 60_000);
+    } catch (err: any) {
+      console.warn(`[Cascada] [${state.symbol}] Sin historial de 1m (${err?.message}); la EMA 100 de 1m se arma en vivo (100 min).`);
+    }
+    engine.warm(m1, state.historicalM5, state.historicalM15);
+    engine.contract = active ?? (await this.alertsService.restoreCascadeContract(state.symbol));
+    if (!active && engine.contract)
+      console.log(`[Cascada] [${state.symbol}] Contrato v3 #${engine.contract.alertLogId} recuperado de la base.`);
+    state.cascade = engine;
+    const v = engine.view(null);
+    console.log(
+      `[Cascada] [${state.symbol}] ${m1.length} velas de 1m · lista: ${v.ready ? 'sí' : 'no'} · EMA 100 1m ${v.ema1?.toFixed(5)} · 5m ${v.ema5?.toFixed(5)} · 15m ${v.ema15?.toFixed(5)}`
+    );
+  }
+
+  private quoteToUsd(symbol: string): number | null {
+    const quote = symbol.split('/')[1];
+    if (!quote) return null;
+    if (quote === 'USD') return 1;
+    const price = (s: string) => this.symbolStates.get(s)?.lastSnapshotM5?.price ?? null;
+    const direct = price(`${quote}/USD`);
+    if (direct) return direct;
+    const inverse = price(`USD/${quote}`);
+    if (inverse) return 1 / inverse;
+    const fallback = Number(process.env[`EXECUTION_USD_PER_${quote}`]);
+    return fallback > 0 ? fallback : null;
+  }
+
+  private handleCascade(state: SymbolState, events: MinuteEvents): void {
+    const lastBar = events.bars[events.bars.length - 1];
+    if (lastBar && events.outcomes.length === 0) void this.checkBrokerExit(state, lastBar);
+    for (const outcome of events.outcomes) {
+      const entry = [...state.cascadeHistory].reverse().find((h) => h.at === outcome.contract.openedAt);
+      if (entry) {
+        entry.outcome = outcome.reason;
+        entry.pips = Math.round(outcome.pips * 10) / 10;
+      }
+      console.log(`[Cascada] [${state.symbol}] contrato cerrado por ${outcome.reason}: ${outcome.pips.toFixed(1)} pips en ${outcome.minutes} min`);
+      void this.alertsService.closeCascade(outcome);
+    }
+    for (const signal of events.signals) {
+      const contract = state.cascade.contract;
+      if (!contract) continue;
+      const ageMin = (Date.now() - signal.at) / 60_000;
+      if (ageMin > CASCADE_MAX_SIGNAL_AGE_MIN) {
+        console.log(`[Cascada] [${state.symbol}] Señal de hace ${ageMin.toFixed(1)} min descartada (vela vieja reprocesada).`);
+        state.cascade.contract = null;
+        continue;
+      }
+      console.log(`[Cascada] [${state.symbol}] ${signal.direction} a ${signal.price} · estirón ${signal.stretchAtr5.toFixed(1)} ATR5 · stop ${contract.stopPips.toFixed(1)} pips · objetivo ${contract.targetPips.toFixed(1)} pips`);
+      const context = this.copilotContext(state, signal);
+      state.cascadeHistory.push({ at: signal.at, direction: signal.direction, price: signal.price });
+      if (state.cascadeHistory.length > 50) state.cascadeHistory.shift();
+      void this.alertsService.sendCascadeAlert(signal, contract, this.quoteToUsd(state.symbol), context);
+    }
+  }
+
+  private async checkBrokerExit(state: SymbolState, bar: MinuteBar): Promise<void> {
+    const contract = state.cascade.contract;
+    if (!contract || contract.alertLogId === null) return;
+    const ended = await this.alertsService.positionEnded(contract.alertLogId);
+    if (!ended || state.cascade.contract !== contract) return;
+    state.cascade.contract = null;
+    const end = bar.time + 60_000;
+    const exitPrice = ended.closePrice ?? bar.close;
+    const pip = state.symbol.includes('JPY') ? 0.01 : 0.0001;
+    this.handleCascade(state, {
+      bars: [],
+      signals: [],
+      outcomes: [{
+        contract,
+        reason: 'broker',
+        exitPrice,
+        pips: (contract.side * (contract.entry - exitPrice)) / pip,
+        minutes: Math.round((end - contract.openedAt) / 60_000),
+        at: end,
+      }],
+    });
+  }
+
+  private copilotContext(state: SymbolState, signal: CascadeSignal): Record<string, unknown> {
+    const d = state.symbol.includes('JPY') ? 3 : 5;
+    const r = (x: number) => Number(x.toFixed(d));
+    const bars = (list: Candle[], n: number) =>
+      list.slice(-n).map((c) => ({
+        t: new Date(c.time - 5 * 3_600_000).toISOString().slice(5, 16).replace('T', ' '),
+        o: r(c.open), h: r(c.high), l: r(c.low), c: r(c.close),
+      }));
+    const since = signal.at - 12 * 3_600_000;
+    return {
+      par: state.symbol,
+      direccion: signal.direction,
+      hora_cot: new Date(signal.at - 5 * 3_600_000).toISOString().slice(0, 16).replace('T', ' '),
+      precio: signal.price,
+      ema100: { m1: r(signal.ema1), m5: r(signal.ema5), m15: r(signal.ema15) },
+      atr14_m5_pips: Number((signal.atr5 / pipSize(state.symbol)).toFixed(1)),
+      estiron_atr5: Number(signal.stretchAtr5.toFixed(2)),
+      intentos_previos_12h: state.cascadeHistory
+        .filter((h) => h.at >= since)
+        .map((h) => ({
+          hora_cot: new Date(h.at - 5 * 3_600_000).toISOString().slice(11, 16),
+          direccion: h.direction,
+          precio: h.price,
+          resultado: h.outcome ?? 'abierta',
+          pips: h.pips ?? null,
+        })),
+      velas_15m_cot: bars(state.historicalM15, 24),
+      velas_5m_cot: bars(state.historicalM5, 36),
+    };
   }
 
   private async checkAlertV1(

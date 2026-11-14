@@ -80,6 +80,42 @@ export type ZoneView = {
   alerted:            boolean
 }
 
+export type CascadeContract = {
+  symbol:       string
+  side:         1 | -1
+  direction:    'BUY' | 'SELL'
+  openedAt:     number
+  deadline:     number
+  entry:        number
+  stop:         number
+  target:       number
+  initialEma5:  number
+  stopPips:     number
+  targetPips:   number
+  maePips:      number
+  mfePips:      number
+  alertLogId:   number | null
+}
+
+export type CascadeView = {
+  price:         number | null
+  ema1:          number | null
+  ema5:          number | null
+  ema15:         number | null
+  atr5:          number | null
+  direction:     'BUY' | 'SELL' | null
+  stretchAtr5:   number | null
+  stretchNeeded: number
+  fan:           boolean
+  roomPips:      number | null
+  roomNeeded:    number
+  ema15Pips:     number | null
+  armed:         boolean
+  ready:         boolean
+  contract:      CascadeContract | null
+  lastSignalAt:  number | null
+}
+
 export type FinalMarketView = {
   symbol:           string
   m5:               MarketSnapshot
@@ -94,6 +130,7 @@ export type FinalMarketView = {
   backtest:         any
   pedestrianLight?: 'STOP' | 'WALK'
   zone?:            ZoneView | null
+  cascade?:         CascadeView | null
   experimental?: {
     m5:               MarketSnapshot & { direction: 'BUY' | 'SELL' }
     m15:              MarketSnapshot & { direction: 'BUY' | 'SELL' }
@@ -159,6 +196,7 @@ type BackendMessage =
       backtest:         any
       pedestrianLight?: 'STOP' | 'WALK'
       zone?:            ZoneView | null
+  cascade?:         CascadeView | null
       experimental?: {
         m5:               MarketSnapshot & { direction: 'BUY' | 'SELL' }
         m15:              MarketSnapshot & { direction: 'BUY' | 'SELL' }
@@ -271,6 +309,7 @@ export function useMarketData(): {
               backtest:         msg.backtest,
               pedestrianLight:  msg.pedestrianLight,
               zone:             msg.zone,
+              cascade:          msg.cascade,
               experimental:     msg.experimental,
             }
           }))

@@ -14,13 +14,20 @@ import type {
 } from '../market/types';
 import { AlertLog } from './alert-log.entity';
 import {
+  sizeForRisk,
+  type CascadeSignal,
+  type Contract,
+  type ContractOutcome,
+} from '../cascade/cascadeEngine';
+import { Copilot } from '../cascade/copilot';
+import {
   applyPrice,
   summarize,
   type TrackedAlert,
   type VersionSummary,
 } from './outcomeTracker';
 
-export type AlertVersion = 'v1' | 'v2';
+export type AlertVersion = 'v1' | 'v2' | 'v3';
 
 export type AlertContext = {
   version: AlertVersion;
@@ -115,11 +122,377 @@ export function suggestTpSl(
 @Injectable()
 export class AlertsService {
   private readonly trackers = new Map<number, TrackedAlert>();
+  readonly copilot = new Copilot();
 
   constructor(
     private readonly em: EntityManager,
     @Optional() private readonly execution?: ExecutionService,
   ) {}
+
+  async sendCascadeAlert(
+    signal: CascadeSignal,
+    contract: Contract,
+    quoteToUsd: number | null,
+    copilotContext: Record<string, unknown>,
+  ): Promise<number | null> {
+    let logId: number | null = null;
+    await RequestContext.create(this.em, async () => {
+      try {
+        const pip = pipSize(signal.symbol);
+        const decimals = priceDecimals(signal.symbol);
+        const round = (x: number) =>
+          Math.round(x * Math.pow(10, decimals)) / Math.pow(10, decimals);
+        const riskUsd = this.execution?.riskUsd ?? 20;
+        const size =
+          quoteToUsd !== null
+            ? sizeForRisk(riskUsd, Math.abs(contract.stop - contract.entry), quoteToUsd, pip)
+            : 0;
+
+        const pending = new PendingSignal();
+        pending.symbol = signal.symbol;
+        pending.direction = signal.direction;
+        pending.tradeMode = 'experimental';
+        pending.status = 'pending';
+        pending.entryPrice = signal.price;
+        pending.tpPrice = round(contract.target);
+        pending.slPrice = round(contract.stop);
+        pending.session = detectSession(new Date());
+        pending.hasTypeC = false;
+        pending.hasPedestrianLight = false;
+        pending.openedAt = new Date();
+        this.em.persist(pending);
+        await this.em.flush();
+
+        const lockedBy = await this.lockingPositionId(signal.symbol);
+        const features: Record<string, unknown> = {
+          contract: {
+            entry: contract.entry,
+            stop: round(contract.stop),
+            target: round(contract.target),
+            stopPips: Math.round(contract.stopPips * 10) / 10,
+            targetPips: Math.round(contract.targetPips * 10) / 10,
+            deadline: new Date(contract.deadline).toISOString(),
+            size,
+            riskUsd,
+            quoteToUsd,
+          },
+          ema1: signal.ema1,
+          ema5: signal.ema5,
+          ema15: signal.ema15,
+          atr5: signal.atr5,
+          stretchAtr5: signal.stretchAtr5,
+          roomPips: signal.roomPips,
+          ema15Pips: signal.ema15Pips,
+          extreme: signal.extreme,
+          ...(lockedBy !== null ? { telegramSuppressedBy: lockedBy } : {}),
+        };
+
+        const log = new AlertLog();
+        log.version = 'v3';
+        log.name = 'Cascada';
+        log.symbol = signal.symbol;
+        log.direction = signal.direction;
+        log.price = signal.price;
+        log.emaTarget = signal.ema5;
+        log.atr = signal.atr5;
+        log.elasticityM5 = signal.stretchAtr5;
+        log.distanceAtr = signal.atr5 ? Math.abs(signal.price - signal.ema5) / signal.atr5 : undefined;
+        log.features = features;
+        log.pendingSignalId = pending.id;
+        log.createdAt = new Date(signal.at);
+        log.status = 'open';
+        log.maePips = 0;
+        log.mfePips = 0;
+        this.em.persist(log);
+        await this.em.flush();
+        logId = log.id;
+        contract.alertLogId = log.id;
+
+        if (lockedBy !== null) {
+          console.log(
+            `[Alertas] v3 Cascada ${signal.symbol} #${log.id} guardada sin enviar: operación #${lockedBy} abierta.`,
+          );
+          return;
+        }
+
+        let autoLine: string | null = null;
+        let autoOpened = false;
+        if (this.execution?.autoEnabled) {
+          if (size <= 0) {
+            autoLine = '⚠️ No se abrió automáticamente: no hay precio para pasar el riesgo a dólares.';
+          } else {
+            try {
+              const p = await this.execution.open({
+                symbol: signal.symbol,
+                direction: signal.direction,
+                size,
+                sizeLimit: this.execution.riskMaxSize,
+                stopLevel: this.execution.brokerStop ? round(contract.stop) : undefined,
+                profitLevel: round(contract.target),
+                source: 'auto',
+                pendingSignalId: pending.id,
+                alertLogId: log.id,
+              });
+              autoOpened = true;
+              autoLine = `🤖🔒 Abierta en ${p.brokerLabel}: #${p.id} · ${p.size} u. · entrada ${p.openPrice !== null ? p.openPrice.toFixed(decimals) : 'sin confirmar'} · ${this.execution.brokerStop ? 'SL y TP puestos' : 'TP puesto, sin SL'} en el broker.${p.note ? ` ⚠️ ${p.note}` : ''}`;
+            } catch (err) {
+              if (err instanceof ExecutionError && err.status === 409) {
+                features.telegramSuppressedBy = -1;
+                await this.em.nativeUpdate(AlertLog, { id: log.id }, { features });
+                console.log(`[Alertas] v3 Cascada ${signal.symbol} #${log.id}: ${err.message}`);
+                return;
+              }
+              autoLine = `⚠️ No se abrió automáticamente: ${err instanceof Error ? err.message : String(err)}`;
+            }
+          }
+        }
+
+        const text = [
+          this.composeCascadeMessage(signal, contract, size, riskUsd),
+          autoLine,
+        ]
+          .filter(Boolean)
+          .join('\n');
+        const broker = autoOpened ? null : (this.execution?.defaultBroker ?? null);
+        await this.sendTelegram(text, {
+          inline_keyboard: [
+            [
+              { text: '✅ Registrar Trade', callback_data: `approve:${pending.id}` },
+              { text: '❌ Descartar Alerta', callback_data: `discard:${pending.id}` },
+            ],
+            ...(broker
+              ? [[{ text: `🤖 Entrar en ${broker.label}`, callback_data: `exec:${pending.id}` }]]
+              : []),
+          ],
+        });
+        console.log(`[Alertas] v3 Cascada ${signal.symbol} #${log.id} enviada.`);
+
+        void this.askCopilot(log.id, signal, features, copilotContext);
+      } catch (err) {
+        console.error('[Alertas] Error procesando la alerta v3 Cascada:', err);
+      }
+    });
+    return logId;
+  }
+
+  async restoreCascadeContract(symbol: string): Promise<Contract | null> {
+    let restored: Contract | null = null;
+    await RequestContext.create(this.em, async () => {
+      try {
+        const rows = await this.em.find(
+          AlertLog,
+          { symbol, version: 'v3', status: 'open' },
+          { orderBy: { createdAt: 'ASC' } },
+        );
+        if (rows.length === 0) return;
+        let keep = rows[rows.length - 1];
+        for (const row of rows)
+          if (await this.execution?.openForAlert(row.id)) keep = row;
+        for (const row of rows) {
+          if (row.id === keep.id) continue;
+          await this.em.nativeUpdate(
+            AlertLog,
+            { id: row.id },
+            {
+              status: 'expired',
+              features: { ...(row.features ?? {}), outcome: { reason: 'duplicada-por-reinicio' } },
+              updatedAt: new Date(Date.now()),
+            },
+          );
+        }
+        const f = keep.features as {
+          contract?: { entry: number; stop: number; target: number; deadline: string; stopPips: number; targetPips: number };
+          ema5?: number;
+        };
+        if (!f?.contract) return;
+        const side = keep.direction === 'SELL' ? 1 : -1;
+        restored = {
+          symbol,
+          side,
+          direction: keep.direction,
+          openedAt: new Date(keep.createdAt).getTime(),
+          deadline: Date.parse(f.contract.deadline),
+          entry: Number(f.contract.entry),
+          stop: Number(f.contract.stop),
+          target: Number(f.contract.target),
+          initialEma5: Number(f.ema5 ?? keep.emaTarget),
+          stopPips: f.contract.stopPips,
+          targetPips: f.contract.targetPips,
+          maePips: Number(keep.maePips ?? 0),
+          mfePips: Number(keep.mfePips ?? 0),
+          alertLogId: keep.id,
+        };
+      } catch (err) {
+        console.error(`[Alertas] [${symbol}] No se pudo recuperar el contrato v3:`, err);
+      }
+    });
+    return restored;
+  }
+
+  private async askCopilot(
+    logId: number,
+    signal: CascadeSignal,
+    features: Record<string, unknown>,
+    context: Record<string, unknown>,
+  ): Promise<void> {
+    if (!this.copilot.enabled) return;
+    const result = await this.copilot.review({ ...context, alerta: features });
+    if (!result) return;
+    const v = result.verdict;
+    const icon = v.decision === 'tomar' ? '🟢' : v.decision === 'no_tomar' ? '🔴' : '🟡';
+    const label = v.decision === 'tomar' ? 'la tomaría' : v.decision === 'no_tomar' ? 'no la tomaría' : 'dudosa';
+    await this.sendTelegram(
+      [
+        `🧠 *Copiloto* (en sombra) — ${signal.symbol} ${signal.direction}: ${icon} ${label} · confianza ${Math.round(v.confianza)}`,
+        ...v.razones.slice(0, 3).map((r) => `• ${r}`),
+        `Riesgo: ${v.riesgo}`,
+      ].join('\n'),
+    );
+    await RequestContext.create(this.em, async () => {
+      try {
+        await this.em.nativeUpdate(
+          AlertLog,
+          { id: logId },
+          { features: { ...features, copilot: { ...result, at: new Date().toISOString() } } },
+        );
+      } catch (err) {
+        console.error('[Copiloto] No se pudo guardar el veredicto:', err);
+      }
+    });
+  }
+
+  composeCascadeMessage(
+    signal: CascadeSignal,
+    contract: Contract,
+    size: number,
+    riskUsd: number,
+  ): string {
+    const d = priceDecimals(signal.symbol);
+    const pip = pipSize(signal.symbol);
+    const hhmm = (ms: number) =>
+      new Date(ms - 5 * 3_600_000).toISOString().slice(11, 16);
+    return [
+      `🌊 *v3 · Cascada* — *${signal.symbol}*`,
+      signal.direction === 'BUY' ? '🟢 COMPRA (BUY) 📈' : '🔴 VENTA (SELL) 📉',
+      `Entrada: \`${signal.price.toFixed(d)}\``,
+      `Stop de referencia: \`${contract.stop.toFixed(d)}\` (${contract.stopPips.toFixed(1)} pips) · Objetivo: \`${contract.target.toFixed(d)}\` (${contract.targetPips.toFixed(1)} pips)`,
+      `Salida forzada: ${hhmm(contract.deadline)} COT (175 min) o al tocar la EMA 100 de 5m`,
+      size > 0
+        ? `Tamaño: ${size.toLocaleString('es-CO')} u. → ≈ ${riskUsd} USD si llega al stop de referencia`
+        : 'Tamaño: sin precio para calcularlo',
+      `EMA 100: 1m \`${signal.ema1.toFixed(d)}\` (cruzada) · 5m \`${signal.ema5.toFixed(d)}\` (a ${signal.roomPips.toFixed(1)} pips) · 15m \`${signal.ema15.toFixed(d)}\` (a ${signal.ema15Pips.toFixed(1)} pips)`,
+      `Estirón: ${signal.stretchAtr5.toFixed(1)} ATR de 5m · extremo \`${signal.extreme.toFixed(d)}\` (${(Math.abs(signal.extreme - signal.price) / pip).toFixed(1)} pips)`,
+      'Medido en EUR/USD ene–nov 2026: gana 65 %, peor −30 pips, neto ≈ −0,5 pips tras spread. Reduce la holgura; no es una ventaja probada.',
+    ].join('\n');
+  }
+
+  async closeCascade(outcome: ContractOutcome): Promise<void> {
+    const c = outcome.contract;
+    const reasonText: Record<string, string> = {
+      stop: 'stop',
+      ema: 'toque de la EMA 100 de 5m',
+      objetivo: 'objetivo',
+      tiempo: 'tiempo límite',
+      broker: 'cierre en el broker',
+    };
+    const sourceText: Record<string, string> = {
+      TP: 'TP',
+      SL: 'SL',
+      USER: 'cierre manual o del sistema',
+      SYSTEM: 'sistema del broker',
+      CLOSE_OUT: 'cierre por margen',
+    };
+    const iso = (ms: number | null | undefined) => (ms ? new Date(ms).toISOString() : null);
+    await RequestContext.create(this.em, async () => {
+      try {
+        let broker: Record<string, unknown> | null = null;
+        let row: AlertLog | null = null;
+        if (c.alertLogId !== null) {
+          row = await this.em.findOne(AlertLog, c.alertLogId);
+          const position = await this.execution?.positionForAlert(c.alertLogId);
+          if (position && this.execution) {
+            try {
+              const closed =
+                position.status === 'open'
+                  ? await this.execution.close(position.id, `contrato-${outcome.reason}`)
+                  : this.execution.viewOf(position);
+              const pip = pipSize(c.symbol);
+              const side = closed.direction === 'BUY' ? 1 : -1;
+              broker = {
+                positionId: closed.id,
+                openPrice: closed.openPrice,
+                closePrice: closed.closePrice,
+                pnlUsd: closed.realizedPnl,
+                source: closed.closeSource,
+                pips:
+                  closed.openPrice !== null && closed.closePrice !== null
+                    ? Math.round(((side * (closed.closePrice - closed.openPrice)) / pip) * 10) / 10
+                    : null,
+              };
+            } catch (err) {
+              console.error(
+                `[Alertas] v3 no pudo cerrar la operación #${position.id}:`,
+                err instanceof Error ? err.message : err,
+              );
+            }
+          }
+          await this.em.nativeUpdate(
+            AlertLog,
+            { id: c.alertLogId },
+            {
+              status: outcome.reason,
+              maePips: Math.round(c.maePips * 10) / 10,
+              mfePips: Math.round(c.mfePips * 10) / 10,
+              touchedAt: new Date(outcome.at),
+              minutesToEma: outcome.minutes,
+              features: {
+                ...(row?.features ?? {}),
+                outcome: {
+                  reason: outcome.reason,
+                  pips: Math.round(outcome.pips * 10) / 10,
+                  exitPrice: outcome.exitPrice,
+                  minutes: outcome.minutes,
+                  stopTouchedAt: iso(c.stopTouchedAt),
+                  targetTouchedAt: iso(c.targetTouchedAt),
+                  broker,
+                },
+              },
+              updatedAt: new Date(Date.now()),
+            },
+          );
+          if (row?.features?.telegramSuppressedBy !== undefined) return;
+        }
+        const sign = (x: number) => (x >= 0 ? '+' : '');
+        const usd = typeof broker?.pnlUsd === 'number' ? broker.pnlUsd : null;
+        const brokerPips = typeof broker?.pips === 'number' ? broker.pips : null;
+        const how =
+          outcome.reason === 'broker' && typeof broker?.source === 'string'
+            ? `${reasonText.broker} (${sourceText[broker.source] ?? broker.source})`
+            : reasonText[outcome.reason];
+        const result =
+          usd !== null
+            ? `${sign(usd)}${usd.toFixed(2)} USD${brokerPips !== null ? ` · ${sign(brokerPips)}${brokerPips.toFixed(1)} pips en el broker` : ''}`
+            : `${sign(outcome.pips)}${outcome.pips.toFixed(1)} pips en Twelve Data, sin dato del broker`;
+        await this.sendTelegram(
+          `🏁 v3 ${c.symbol} ${c.direction}: salió por ${how} en ${outcome.minutes} min · ${result} · máximo en contra ${c.maePips.toFixed(1)} pips${c.stopTouchedAt ? ' · pasó por el stop de referencia' : ''}`,
+        );
+      } catch (err) {
+        console.error('[Alertas] Error cerrando el contrato v3:', err);
+      }
+    });
+  }
+
+  async positionEnded(alertLogId: number): Promise<{ closePrice: number | null } | null> {
+    if (!this.execution) return null;
+    try {
+      const p = await this.execution.positionForAlert(alertLogId);
+      if (!p || (p.status === 'open' && !p.brokerGoneAt)) return null;
+      return { closePrice: p.closePrice != null ? Number(p.closePrice) : null };
+    } catch (err) {
+      console.error(`[Alertas] No se pudo revisar la operación de la alerta #${alertLogId}:`, err);
+      return null;
+    }
+  }
 
   private async lockingPositionId(symbol: string): Promise<number | null> {
     if (!this.execution) return null;
@@ -383,7 +756,11 @@ export class AlertsService {
     let restored = 0;
     await RequestContext.create(this.em, async () => {
       try {
-        const open = await this.em.find(AlertLog, { symbol, status: 'open' });
+        const open = await this.em.find(AlertLog, {
+          symbol,
+          status: 'open',
+          version: { $ne: 'v3' },
+        });
         const pip = pipSize(symbol);
         for (const row of open) {
           const t: TrackedAlert = {
@@ -476,6 +853,9 @@ export class AlertsService {
             : Number(r.maePips),
         minutesToEma: r.minutesToEma ?? null,
         createdAt: new Date(r.createdAt).getTime(),
+        pips:
+          (r.features?.outcome as { pips?: number } | undefined)?.pips ??
+          null,
       })),
       Date.now(),
     );

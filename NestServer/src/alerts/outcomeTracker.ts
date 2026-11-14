@@ -68,6 +68,10 @@ export type VersionSummary = {
   touchedWithin4h: number;
   decided4h: number;
   minutesToEmaMedian: number | null;
+  closed: number;
+  wins: number;
+  pipsMean: number | null;
+  pipsWorst: number | null;
 };
 
 function q(sorted: number[], p: number): number | null {
@@ -85,6 +89,7 @@ export function summarize(
     maePips: number | null;
     minutesToEma: number | null;
     createdAt: number;
+    pips?: number | null;
   }>,
   now: number,
 ): VersionSummary[] {
@@ -108,6 +113,9 @@ export function summarize(
           (r.minutesToEma !== null && r.minutesToEma <= 240) ||
           now - r.createdAt >= 4 * 60 * 60 * 1000,
       );
+      const pips = list
+        .map((r) => r.pips)
+        .filter((x): x is number => x !== null && x !== undefined);
       return {
         version,
         alerts: list.length,
@@ -120,6 +128,12 @@ export function summarize(
         ).length,
         decided4h: decided.length,
         minutesToEmaMedian: q(minutes, 0.5),
+        closed: pips.length,
+        wins: pips.filter((p) => p > 0).length,
+        pipsMean: pips.length
+          ? pips.reduce((a, b) => a + b, 0) / pips.length
+          : null,
+        pipsWorst: pips.length ? Math.min(...pips) : null,
       };
     });
 }
