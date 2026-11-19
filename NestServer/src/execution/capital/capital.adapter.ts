@@ -15,6 +15,7 @@ export type CapitalConfig = {
   apiKey: string;
   password: string;
   epicMap?: Record<string, string>;
+  account?: string;
 };
 
 type FetchFn = typeof fetch;
@@ -46,7 +47,8 @@ export function capitalConfigFromEnv(
     const [symbol, epic] = pair.split('=').map((s) => s?.trim());
     if (symbol && epic) epicMap[symbol] = epic;
   }
-  return { env: mode, identifier, apiKey, password, epicMap };
+  const account = env.CAPITAL_ACCOUNT_ID?.trim() || undefined;
+  return { env: mode, identifier, apiKey, password, epicMap, account };
 }
 
 export class CapitalAdapter implements BrokerAdapter {
@@ -273,8 +275,52 @@ export class CapitalAdapter implements BrokerAdapter {
     const token = res.headers.get('X-SECURITY-TOKEN');
     if (!cst || !token)
       throw new BrokerError('Capital.com no devolvió los tokens de sesión');
-    this.session = { cst, token, lastUsed: this.now() };
+    const session = { cst, token, lastUsed: this.now() };
+    if (this.config.account) {
+      const payload = await this.readJson(res);
+      await this.selectAccount(session, payload?.currentAccountId ?? null);
+    }
+    this.session = session;
     return this.session;
+  }
+
+  private async selectAccount(session: Session, current: string | null) {
+    const wanted = this.config.account!;
+    const headers = {
+      'Content-Type': 'application/json',
+      'X-CAP-API-KEY': this.config.apiKey,
+      CST: session.cst,
+      'X-SECURITY-TOKEN': session.token,
+    };
+    const list = await this.fetchFn(`${this.base}/api/v1/accounts`, {
+      method: 'GET',
+      headers,
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    const accounts: Array<{ accountId: string; accountName?: string }> =
+      (await this.readJson(list))?.accounts ?? [];
+    const match = accounts.find(
+      (a) => a.accountId === wanted || a.accountName === wanted,
+    );
+    if (!match)
+      throw new BrokerError(
+        `Capital.com: no existe la cuenta ${wanted} (CAPITAL_ACCOUNT_ID). Disponibles: ${accounts.map((a) => a.accountName ?? a.accountId).join(', ')}`,
+      );
+    if (match.accountId === current) return;
+    const res = await this.fetchFn(`${this.base}/api/v1/session`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ accountId: match.accountId }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      const payload = await this.readJson(res);
+      if (payload?.errorCode === 'error.not-different.accountId') return;
+      throw new BrokerError(
+        `Capital.com no cambió a la cuenta ${wanted} (${res.status}${payload?.errorCode ? ` ${payload.errorCode}` : ''})`,
+        res.status,
+      );
+    }
   }
 
   private async request(

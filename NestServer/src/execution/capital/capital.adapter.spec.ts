@@ -221,4 +221,45 @@ describe('capitalConfigFromEnv', () => {
     expect(a.epicFor('XAU/USD')).toBe('GOLD');
     expect(a.epicFor('EUR/USD')).toBe('EURUSD');
   });
+
+  describe('cuenta elegida con CAPITAL_ACCOUNT_ID', () => {
+    const accounts = (c: Call) =>
+      c.method === 'GET' && c.url.endsWith('/api/v1/accounts')
+        ? { status: 200, body: { accounts: [{ accountId: 'A1', accountName: 'demoj1normal' }, { accountId: 'A2', accountName: 'demoj2agents' }] } }
+        : null;
+    const loginOn = (current: string) => (c: Call) =>
+      c.method === 'POST' && c.url.endsWith('/api/v1/session')
+        ? { status: 200, body: { currentAccountId: current }, headers: { CST: 'cst-1', 'X-SECURITY-TOKEN': 'tok-1' } }
+        : null;
+    const positions = (c: Call) => (c.method === 'GET' && c.url.endsWith('/api/v1/positions') ? { status: 200, body: { positions: [] } } : null);
+
+    it('lee la variable', () => {
+      expect(capitalConfigFromEnv({ CAPITAL_IDENTIFIER: 'u', CAPITAL_API_KEY: 'k', CAPITAL_API_PASSWORD: 'p', CAPITAL_ACCOUNT_ID: ' demoj1normal ' })?.account).toBe('demoj1normal');
+    });
+
+    it('cambia a la cuenta por nombre antes de operar', async () => {
+      const { fn, calls } = fakeFetch([
+        loginOn('A2'),
+        accounts,
+        (c) => (c.method === 'PUT' && c.url.endsWith('/api/v1/session') ? { status: 200, body: {} } : null),
+        positions,
+      ]);
+      await new CapitalAdapter({ ...config, account: 'demoj1normal' }, fn, async () => {}).positions!();
+      const put = calls.find((c) => c.method === 'PUT');
+      expect(put?.body).toEqual({ accountId: 'A1' });
+      expect(calls.indexOf(put!)).toBeLessThan(calls.findIndex((c) => c.url.endsWith('/api/v1/positions')));
+    });
+
+    it('no cambia si ya está en esa cuenta', async () => {
+      const { fn, calls } = fakeFetch([loginOn('A1'), accounts, positions]);
+      await new CapitalAdapter({ ...config, account: 'A1' }, fn, async () => {}).positions!();
+      expect(calls.some((c) => c.method === 'PUT')).toBe(false);
+    });
+
+    it('no opera si la cuenta no existe', async () => {
+      const { fn, calls } = fakeFetch([loginOn('A1'), accounts, positions]);
+      await expect(new CapitalAdapter({ ...config, account: 'otra' }, fn, async () => {}).positions!()).rejects.toThrow('no existe la cuenta otra');
+      expect(calls.some((c) => c.url.endsWith('/api/v1/positions'))).toBe(false);
+    });
+  });
 });
