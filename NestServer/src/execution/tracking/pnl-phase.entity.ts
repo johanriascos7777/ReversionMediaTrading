@@ -23,7 +23,7 @@ export class ExecutionPnlPhase {
   @Property({ fieldName: 'started_at' })
   startedAt!: Date;
 
-  @Property({ nullable: true, fieldName: 'ended_at' })
+  @Property({ type: 'datetime', nullable: true, fieldName: 'ended_at' })
   endedAt?: Date | null;
 
   @Property({ fieldName: 'last_seen_at' })

@@ -164,3 +164,123 @@ export function summarize(
         : null,
   };
 }
+
+export type OperationInput = {
+  id: number;
+  symbol: string;
+  direction: Direction;
+  size: number;
+  status: string;
+  source: string;
+  alertLogId: number | null;
+  openedAt: Date;
+  trackingSince: Date | null;
+  closedAt: Date | null;
+  realizedPnl: number | null;
+  closeSource: string | null;
+  closeReason: string | null;
+};
+
+export type OperationRow = {
+  id: number;
+  symbol: string;
+  direction: Direction;
+  size: number;
+  status: string;
+  source: string;
+  alertLogId: number | null;
+  openedAt: Date;
+  closedAt: Date | null;
+  totalSec: number;
+  slackBeforeGreenSec: number | null;
+  bestUsd: number | null;
+  bestAt: Date | null;
+  bestAfterSec: number | null;
+  greenSec: number;
+  greenPhases: number;
+  worstUsd: number | null;
+  worstAt: Date | null;
+  resultUsd: number | null;
+  resultLive: boolean;
+  closeSource: string | null;
+  closeReason: string | null;
+};
+
+const secondsBetween = (from: Date, to: Date) =>
+  Math.max(0, Math.round((new Date(to).getTime() - new Date(from).getTime()) / 1000));
+
+export function operationRow(
+  pos: OperationInput,
+  phases: PhaseView[],
+  livePnl: number | null,
+  now: Date,
+): OperationRow {
+  const ordered = [...phases].sort((a, b) => a.seq - b.seq);
+  const start = pos.trackingSince ?? pos.openedAt;
+  const end = pos.closedAt ?? now;
+  const green = ordered.filter((p) => p.state === 'green');
+  const red = ordered.filter((p) => p.state === 'red');
+  const best = green.reduce<PhaseView | null>(
+    (m, p) => (!m || p.extremePnl > m.extremePnl ? p : m),
+    null,
+  );
+  const worst = red.reduce<PhaseView | null>(
+    (m, p) => (!m || p.extremePnl < m.extremePnl ? p : m),
+    null,
+  );
+  const firstGreen = green[0] ?? null;
+  const open = pos.status === 'open';
+  const last = ordered[ordered.length - 1];
+  return {
+    id: pos.id,
+    symbol: pos.symbol,
+    direction: pos.direction,
+    size: pos.size,
+    status: pos.status,
+    source: pos.source,
+    alertLogId: pos.alertLogId,
+    openedAt: pos.openedAt,
+    closedAt: pos.closedAt,
+    totalSec: secondsBetween(start, end),
+    slackBeforeGreenSec: firstGreen
+      ? secondsBetween(start, firstGreen.startedAt)
+      : null,
+    bestUsd: best ? best.extremePnl : null,
+    bestAt: best ? best.extremeAt : null,
+    bestAfterSec: best ? secondsBetween(start, best.extremeAt) : null,
+    greenSec: green.reduce((s, p) => s + p.durationSec, 0),
+    greenPhases: green.length,
+    worstUsd: worst ? worst.extremePnl : null,
+    worstAt: worst ? worst.extremeAt : null,
+    resultUsd: open
+      ? (livePnl ?? last?.lastPnl ?? null)
+      : (pos.realizedPnl ?? last?.lastPnl ?? null),
+    resultLive: open,
+    closeSource: pos.closeSource,
+    closeReason: pos.closeReason,
+  };
+}
+
+export type OperationSummary = {
+  operations: number;
+  closed: number;
+  everGreen: number;
+  neverGreen: number;
+  closedUsd: number;
+  openUsd: number;
+};
+
+export function operationSummary(rows: OperationRow[]): OperationSummary {
+  const closed = rows.filter((r) => !r.resultLive);
+  const open = rows.filter((r) => r.resultLive);
+  const sum = (xs: OperationRow[]) =>
+    round4(xs.reduce((s, r) => s + (r.resultUsd ?? 0), 0));
+  return {
+    operations: rows.length,
+    closed: closed.length,
+    everGreen: rows.filter((r) => r.greenPhases > 0).length,
+    neverGreen: rows.filter((r) => r.greenPhases === 0).length,
+    closedUsd: sum(closed),
+    openUsd: sum(open),
+  };
+}

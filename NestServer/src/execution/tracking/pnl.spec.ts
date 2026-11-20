@@ -1,4 +1,12 @@
-import { applyPnl, phaseView, pnlModels, stateOf, summarize } from './pnl';
+import {
+  applyPnl,
+  operationRow,
+  operationSummary,
+  phaseView,
+  pnlModels,
+  stateOf,
+  summarize,
+} from './pnl';
 
 const t = (s: number) => new Date(Date.UTC(2026, 9, 20, 4, 30, s));
 
@@ -84,5 +92,44 @@ describe('applyPnl', () => {
     const r = applyPnl(null, -0.3, t(0), t(0), 9000);
     applyPnl(r.active, -0.4, t(40), t(0), 9000);
     expect(r.active.gapSec).toBe(40);
+  });
+});
+
+describe('operationRow', () => {
+  const t = (min: number) => new Date(Date.UTC(2026, 10, 19, 9, 30 + min));
+  const phase = (seq: number, state: 'red' | 'green', from: number, to: number, extreme: number, at: number) => ({
+    seq, state, startedAt: t(from), endedAt: t(to), durationSec: (to - from) * 60,
+    startPnl: 0, lastPnl: extreme, extremePnl: extreme, extremeAt: t(at), samples: 1, gapSec: 0,
+  });
+  const pos = {
+    id: 24, symbol: 'GBP/JPY', direction: 'SELL' as const, size: 13800, status: 'closed', source: 'auto',
+    alertLogId: 52, openedAt: t(0), trackingSince: t(0), closedAt: t(175), realizedPnl: -27.44,
+    closeSource: 'USER', closeReason: 'contrato-tiempo',
+  };
+
+  it('mide la holgura antes del primer verde, el mejor momento y el rato en verde', () => {
+    const r = operationRow(pos, [
+      phase(1, 'red', 0, 10, -3.28, 5),
+      phase(2, 'green', 10, 11, 1.9, 10),
+      phase(3, 'red', 11, 175, -47.55, 98),
+    ], null, t(200));
+    expect(r.slackBeforeGreenSec).toBe(600);
+    expect(r.bestUsd).toBe(1.9);
+    expect(r.bestAfterSec).toBe(600);
+    expect(r.greenSec).toBe(60);
+    expect(r.greenPhases).toBe(1);
+    expect(r.worstUsd).toBe(-47.55);
+    expect(r.resultUsd).toBe(-27.44);
+    expect(r.totalSec).toBe(175 * 60);
+  });
+
+  it('una operación que nunca llegó a verde no tiene holgura ni mejor momento', () => {
+    const r = operationRow({ ...pos, status: 'open', closedAt: null, realizedPnl: null },
+      [phase(1, 'red', 0, 30, -5, 20)], -4.2, t(30));
+    expect(r.slackBeforeGreenSec).toBeNull();
+    expect(r.bestUsd).toBeNull();
+    expect(r.resultUsd).toBe(-4.2);
+    expect(r.resultLive).toBe(true);
+    expect(operationSummary([r]).neverGreen).toBe(1);
   });
 });

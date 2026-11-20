@@ -10,6 +10,11 @@ import {
 } from '@nestjs/common';
 import { ExecutionError, ExecutionService } from './execution.service';
 import { ExecutionTrackerService } from './tracking/execution-tracker.service';
+import {
+  operationRow,
+  operationSummary,
+  type OperationRow,
+} from './tracking/pnl';
 
 const toHttp = (err: unknown): never => {
   if (err instanceof ExecutionError)
@@ -44,6 +49,43 @@ export class ExecutionController {
     const rows = await this.execution.list(status || undefined, n);
     const tracking = await this.tracker.tracking(rows);
     return rows.map((r) => ({ ...r, tracking: tracking[r.id] ?? null }));
+  }
+
+  @Get('table')
+  async table(@Query('limit') limit?: string) {
+    const n = Math.min(Math.max(Number(limit) || 200, 1), 500);
+    const rows = (await this.execution.list(undefined, n)).filter(
+      (r) => r.status !== 'failed',
+    );
+    const tracking = await this.tracker.tracking(rows);
+    const now = new Date();
+    const out: OperationRow[] = [];
+    for (const r of rows) {
+      const phases = await this.tracker.phases(r.id);
+      out.push(
+        operationRow(
+          {
+            id: r.id,
+            symbol: r.symbol,
+            direction: r.direction,
+            size: r.size ?? 0,
+            status: r.status,
+            source: r.source,
+            alertLogId: r.alertLogId,
+            openedAt: r.openedAt,
+            trackingSince: r.trackingSince,
+            closedAt: r.closedAt,
+            realizedPnl: r.realizedPnl,
+            closeSource: r.closeSource,
+            closeReason: r.closeReason,
+          },
+          phases.capital,
+          tracking[r.id]?.live?.capital ?? null,
+          now,
+        ),
+      );
+    }
+    return { rows: out, summary: operationSummary(out) };
   }
 
   @Get('positions/:id/phases')
