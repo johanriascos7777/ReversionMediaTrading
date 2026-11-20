@@ -126,3 +126,53 @@ Mismo cálculo con el contrato de la investigación (con stop): −2,06 / −2,3
 **Veredicto:** ninguna variante pasa el criterio (+1 USD por operación en DEV y VAL y en los dos escenarios de costo). El objetivo mínimo mejora un periodo y empeora el otro, así que no se activa. El piso de 10 pips es lo más estable (+0,4 a +2,0 USD por operación) y baja el peor caso de −215 a −166, pero en DEV sin deslizamiento no llega a +1.
 
 **Lo más importante que deja:** sin stop, la v3 gana más veces (73 % contra 65 %), pero la peor operación pasa de −28 a −215 USD (MAE p99 53 pips, máximo 118), y en dólares por operación queda igual o un poco peor que con stop. En ninguna variante el resultado esperado es positivo tras los costos.
+
+## Experimento 5 (2026-11-19): escuchar a la divisa, no al par
+
+Script `divisa.py`; reglas y criterio fijados en su cabecera antes de correrlo. Tres pares alineados por minuto (2.485 alertas v3 en el año), índices de fuerza de EUR, GBP y USD, contrato X4 con stop, spread 0,8 pips. Holgura = minutos desde la entrada hasta ganar al menos el spread.
+
+| Variante | Periodo | Operaciones | Neto | Holgura mediana | p75 | Nunca en verde | MAE p90 |
+|---|---|---|---|---|---|---|---|
+| V0 (hoy) | DEV | 1761 | −0,39 | 3 | 13 | 10,3 % | 12,7 |
+| V0 (hoy) | VAL | 724 | −0,50 | 3 | 11 | 12,4 % | 10,7 |
+| V1 (espera a que la divisa culpable se agote) | DEV | 1759 | −0,39 | 3 | 12 | 10,1 % | 12,8 |
+| V1 | VAL | 724 | −0,50 | 3 | 11 | 12,3 % | 10,7 |
+| V2 (entrada en tres partes) | DEV | 1761 | −0,80 | — | — | — | 10,6 |
+| V2 | VAL | 724 | −0,42 | — | — | — | 9,0 |
+
+**Veredicto: no pasa.** V1 casi no cambió nada: en el 89,5 % de las alertas la divisa culpable ya se había dado vuelta cuando sale la alerta (retraso mediano 0 min). Es decir, cuando el precio sigue estirándose después de la alerta, no es el empuje de antes que no se había agotado, sino un empuje nuevo, y el índice de la divisa no lo anticipa. V2 mejora un periodo y empeora el otro. El horario (apertura de Londres, datos de NY) tampoco da un resultado estable entre DEV y VAL.
+
+**Lo que sí deja:** la holgura histórica de la v3 es corta en la mayoría de los casos (mediana 3 min, p75 11–13 min) y entre el 10 y el 12 % de las operaciones nunca llegan a verde, igual que en vivo (27 de 31). EUR/GBP tiene la holgura más larga (mediana 7, p75 19). La culpable más frecuente fue el dólar (63 %).
+
+## Experimento 6 (2026-11-19): «Persecución», la EMA que persigue al precio
+
+Script `persecucion.py`; reglas y criterio fijados en su cabecera antes de correrlo. La EMA 100 de 5m se acerca al precio 2/101 de la brecha por vela; si la velocidad del precio (pendiente de 12 velas de 5m) es mayor, la brecha CRECE y tiende a una brecha de equilibrio = velocidad × 50,5 velas. 2.334 alertas v3 en los tres pares, spread por par.
+
+**A. Como salida** (sale si pasa a CRECE con ≥ 1 ATR de 5m de estirón posible). Contrato vivo, sin stop, pips netos por operación; cola = media del peor 10 %:
+
+| Periodo | Hoy | Persecución | Control: salir si va 1 ATR de 5m en contra |
+|---|---|---|---|
+| DEV | −1,11 · cola −28,4 · peor −113,5 | −1,07 · cola −14,5 · peor −33,7 | −0,79 · cola −8,4 · peor −14,9 |
+| VAL | −0,88 · cola −23,4 · peor −75,4 | −0,96 · cola −10,3 · peor −21,5 | −1,03 · cola −7,5 · peor −14,9 |
+
+No pasa: corta la cola a la mitad, pero el control simple la corta más con un neto parecido, así que la física no aporta nada sobre un stop de 1 ATR.
+
+**B. Como predicción del estirón** (Spearman de X/ATR con lo que se estiró en 175 min): DEV +0,04, VAL +0,12; la pendiente sola da +0,02 y +0,13. No pasa: no predice cuánto más se estira.
+
+**Lo que deja (observación, no criterio):** en el contrato vivo sin stop, cualquier salida que corte cuando la operación va claramente en contra reduce la peor operación de −113 a unos −15 pips sin empeorar el neto de forma clara. Coincide con el experimento 4. Probarlo como regla exige un criterio propio y datos nuevos (por ejemplo en sombra, en vivo), no estos, que ya se miraron.
+
+## Experimento 7 (2026-11-19): el freno de 1 ATR, probado con 2025
+
+Script `freno.py`; reglas y criterio fijados en su cabecera antes de descargar y ver 2025. Regla idéntica al control del experimento 6: con el contrato vivo (sin stop), salir al cierre del minuto en que, desde la primera vela de 5m cerrada tras la entrada, el precio va al menos 1 ATR de 5m en contra. Datos nuevos: 1m de 2025 de EUR/USD, EUR/GBP y GBP/USD (`download_1m.py` con fechas y rotación de llaves; unas 490 consultas repartidas en las 13 llaves). Los datos de EUR/USD traían velas erróneas (1,10000 y 1,00000 exactos en febrero y marzo); se quitaron 69 velas a más de 30 pips de la mediana de sus vecinas y se informan los dos resultados.
+
+Con los datos limpios (3.114 alertas):
+
+| Periodo | Sin freno | Con freno |
+|---|---|---|
+| Ene–jun | neto −1,11 · gana 75,8 % · USD/op −1,90 · peor −209,7 USD | neto −1,19 · gana 51,0 % · USD/op −2,05 · peor −64,8 USD |
+| Jul–dic | neto −1,00 · gana 72,1 % · USD/op −2,21 · peor −161,7 USD | neto −1,26 · gana 45,9 % · USD/op −2,92 · peor −32,7 USD |
+| Año | neto −1,06 · USD/op −2,05 · peor −160,5 pips | neto −1,22 · USD/op −2,47 · peor −36,3 pips |
+
+**Veredicto: no pasa** (con datos limpios y sin limpiar). Corta la peor operación de −210 a −65 USD, pero el neto empeora en el segundo semestre y en el año: la mitad de las operaciones frenadas (793 de 1.598) habrían terminado ganando sin el freno. Es un seguro con costo (unos 0,4 USD por operación), no una mejora del resultado. En EUR/GBP el freno es claramente peor (−1,36 → −3,81 USD/op).
+
+**Lo que deja:** sin freno, una operación de 2025 llegó a −160 pips, cerca del margen de liquidación de unos 150 pips con x100 que preocupa al trader. Y en 2025, igual que en 2026, la v3 con este contrato pierde unos 2 USD por operación después del spread, con freno o sin él.

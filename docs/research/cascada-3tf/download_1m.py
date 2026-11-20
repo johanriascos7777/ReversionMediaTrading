@@ -3,14 +3,20 @@ import csv, json, re, sys, time, urllib.parse, urllib.request
 from datetime import datetime, timedelta
 
 env, suffix, symbol, out = sys.argv[1:5]
-key = next(k.strip().strip('"\'') for line in open(env)
-           for m in [re.match(r'\s*TWELVE_DATA_API_KEY\s*=\s*(.*)', line)] if m
-           for k in m.group(1).split(',') if k.strip().endswith(suffix))
-start, end = datetime(2026, 1, 1), datetime(2026, 11, 12)
+suffixes = suffix.split(',')
+keys = [k.strip().strip('"\'') for line in open(env)
+        for m in [re.match(r'\s*TWELVE_DATA_API_KEY\s*=\s*(.*)', line)] if m
+        for k in m.group(1).split(',') if any(k.strip().strip('"\'').endswith(x) for x in suffixes)]
+key = keys[0]
+start = datetime.fromisoformat(sys.argv[5]) if len(sys.argv) > 5 else datetime(2026, 1, 1)
+end = datetime.fromisoformat(sys.argv[6]) if len(sys.argv) > 6 else datetime(2026, 11, 12)
+turn = 0
 rows = {}
 d = start
 while d < end:
     e = min(d + timedelta(days=3), end)
+    key = keys[turn % len(keys)]
+    turn += 1
     q = urllib.parse.urlencode({'symbol': symbol, 'interval': '1min', 'start_date': d.strftime('%Y-%m-%d %H:%M:%S'),
                                 'end_date': (e - timedelta(seconds=1)).strftime('%Y-%m-%d %H:%M:%S'),
                                 'timezone': 'UTC', 'outputsize': 5000, 'order': 'ASC', 'apikey': key})
