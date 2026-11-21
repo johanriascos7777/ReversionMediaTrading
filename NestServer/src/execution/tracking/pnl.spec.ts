@@ -132,4 +132,28 @@ describe('operationRow', () => {
     expect(r.resultLive).toBe(true);
     expect(operationSummary([r]).neverGreen).toBe(1);
   });
+
+  it('el resumen separa ganadas, perdidas, cierres y las que siguen en rojo a los 5 y 10 min', () => {
+    const win = operationRow({ ...pos, closeSource: 'TP', closeReason: 'ya-cerrada-en-broker', realizedPnl: 8, closedAt: t(20) },
+      [phase(1, 'red', 0, 2, -1, 1), phase(2, 'green', 2, 20, 8, 19)], null, t(30));
+    const late = operationRow(pos, [
+      phase(1, 'red', 0, 10, -3.28, 5),
+      phase(2, 'green', 10, 11, 1.9, 10),
+      phase(3, 'red', 11, 175, -47.55, 98),
+    ], null, t(200));
+    const fresh = operationRow({ ...pos, status: 'open', closedAt: null, realizedPnl: null, openedAt: t(0), trackingSince: t(0) },
+      [phase(1, 'red', 0, 3, -1, 1)], -1, t(3));
+    const s = operationSummary([win, late, fresh]);
+    expect(s.wins).toBe(1);
+    expect(s.losses).toBe(1);
+    expect(s.winsUsd).toBe(8);
+    expect(s.lossesUsd).toBe(-27.44);
+    expect(s.closedBy.objetivo).toEqual({ n: 1, usd: 8 });
+    expect(s.closedBy.tiempo).toEqual({ n: 1, usd: -27.44 });
+    expect(s.slackMedianSec).toBe(360);
+    expect(s.pastMinute5).toBe(2);
+    expect(s.redAt5).toBe(1);
+    expect(s.pastMinute10).toBe(2);
+    expect(s.redAt10).toBe(0);
+  });
 });

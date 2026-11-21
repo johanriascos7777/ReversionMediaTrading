@@ -15,6 +15,7 @@ import {
   operationSummary,
   type OperationRow,
 } from './tracking/pnl';
+import { decisionGroups, decisionRow } from './tracking/decisions';
 
 const toHttp = (err: unknown): never => {
   if (err instanceof ExecutionError)
@@ -86,6 +87,37 @@ export class ExecutionController {
       );
     }
     return { rows: out, summary: operationSummary(out) };
+  }
+
+  @Get('decisions')
+  async decisions(@Query('limit') limit?: string) {
+    const n = Math.min(Math.max(Number(limit) || 300, 1), 1000);
+    const pairs = await this.execution.alertsWithPositions(n);
+    const rows = pairs.map(({ alert, position }) =>
+      decisionRow(
+        {
+          id: alert.id,
+          symbol: alert.symbol,
+          direction: alert.direction,
+          createdAt: new Date(alert.createdAt),
+          status: alert.status,
+          maePips: alert.maePips === undefined || alert.maePips === null ? null : Number(alert.maePips),
+          mfePips: alert.mfePips === undefined || alert.mfePips === null ? null : Number(alert.mfePips),
+          features: (alert.features as Record<string, any>) ?? null,
+        },
+        position
+          ? {
+              id: position.id,
+              status: position.status,
+              realizedPnl:
+                position.realizedPnl === undefined || position.realizedPnl === null
+                  ? null
+                  : Number(position.realizedPnl),
+            }
+          : null,
+      ),
+    );
+    return { rows, groups: decisionGroups(rows) };
   }
 
   @Get('positions/:id/phases')

@@ -276,6 +276,26 @@ export class ExecutionService {
     });
   }
 
+  async alertsWithPositions(limit: number) {
+    const em = this.em.fork();
+    const alerts = await em.find(
+      AlertLog,
+      { version: 'v3' },
+      { orderBy: { id: 'DESC' }, limit },
+    );
+    const ids = alerts.map((a) => a.id);
+    const positions = ids.length
+      ? await em.find(ExecutionPosition, { alertLogId: { $in: ids } }, { orderBy: { id: 'ASC' } })
+      : [];
+    const byAlert = new Map<number, ExecutionPosition>();
+    for (const p of positions) {
+      if (p.alertLogId === null || p.alertLogId === undefined) continue;
+      const prev = byAlert.get(p.alertLogId);
+      if (!prev || prev.status === 'failed') byAlert.set(p.alertLogId, p);
+    }
+    return alerts.map((a) => ({ alert: a, position: byAlert.get(a.id) ?? null }));
+  }
+
   async positionForAlert(alertLogId: number): Promise<ExecutionPosition | null> {
     return this.em
       .fork()

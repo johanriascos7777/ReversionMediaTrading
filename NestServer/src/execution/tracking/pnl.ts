@@ -268,6 +268,28 @@ export type OperationSummary = {
   neverGreen: number;
   closedUsd: number;
   openUsd: number;
+  wins: number;
+  winsUsd: number;
+  losses: number;
+  lossesUsd: number;
+  avgWinUsd: number | null;
+  avgLossUsd: number | null;
+  closedBy: Record<'objetivo' | 'tiempo' | 'otro', { n: number; usd: number }>;
+  slackMedianSec: number | null;
+  redAt5: number;
+  redAt10: number;
+  pastMinute5: number;
+  pastMinute10: number;
+};
+
+const closeKind = (r: OperationRow): 'objetivo' | 'tiempo' | 'otro' =>
+  r.closeSource === 'TP' ? 'objetivo' : r.closeReason === 'contrato-tiempo' ? 'tiempo' : 'otro';
+
+const median = (xs: number[]): number | null => {
+  if (xs.length === 0) return null;
+  const v = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(v.length / 2);
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
 };
 
 export function operationSummary(rows: OperationRow[]): OperationSummary {
@@ -275,6 +297,21 @@ export function operationSummary(rows: OperationRow[]): OperationSummary {
   const open = rows.filter((r) => r.resultLive);
   const sum = (xs: OperationRow[]) =>
     round4(xs.reduce((s, r) => s + (r.resultUsd ?? 0), 0));
+  const won = closed.filter((r) => (r.resultUsd ?? 0) > 0);
+  const lost = closed.filter((r) => (r.resultUsd ?? 0) < 0);
+  const closedBy = { objetivo: { n: 0, usd: 0 }, tiempo: { n: 0, usd: 0 }, otro: { n: 0, usd: 0 } };
+  for (const r of closed) {
+    const k = closedBy[closeKind(r)];
+    k.n += 1;
+    k.usd = round4(k.usd + (r.resultUsd ?? 0));
+  }
+  const redAt = (sec: number) => {
+    const past = rows.filter((r) => r.totalSec >= sec);
+    return {
+      past: past.length,
+      red: past.filter((r) => r.slackBeforeGreenSec === null || r.slackBeforeGreenSec > sec).length,
+    };
+  };
   return {
     operations: rows.length,
     closed: closed.length,
@@ -282,5 +319,19 @@ export function operationSummary(rows: OperationRow[]): OperationSummary {
     neverGreen: rows.filter((r) => r.greenPhases === 0).length,
     closedUsd: sum(closed),
     openUsd: sum(open),
+    wins: won.length,
+    winsUsd: sum(won),
+    losses: lost.length,
+    lossesUsd: sum(lost),
+    avgWinUsd: won.length ? round4(sum(won) / won.length) : null,
+    avgLossUsd: lost.length ? round4(sum(lost) / lost.length) : null,
+    closedBy,
+    slackMedianSec: median(
+      rows.flatMap((r) => (r.slackBeforeGreenSec === null ? [] : [r.slackBeforeGreenSec])),
+    ),
+    redAt5: redAt(300).red,
+    pastMinute5: redAt(300).past,
+    redAt10: redAt(600).red,
+    pastMinute10: redAt(600).past,
   };
 }
