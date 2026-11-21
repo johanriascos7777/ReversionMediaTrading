@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+
+type Session = 'asian' | 'european' | 'american'
 import { API_URL } from '@/config/env'
 
 type OperationRow = {
@@ -24,6 +26,7 @@ type OperationRow = {
   resultLive: boolean
   closeSource: string | null
   closeReason: string | null
+  session: Session
 }
 
 type Summary = {
@@ -39,6 +42,7 @@ type Summary = {
   lossesUsd: number
   avgWinUsd: number | null
   avgLossUsd: number | null
+  avgClosedUsd: number | null
   closedBy: Record<'objetivo' | 'tiempo' | 'otro', { n: number; usd: number }>
   slackMedianSec: number | null
   redAt5: number
@@ -66,6 +70,7 @@ type DecisionRow = {
   contractUsd: number | null
   realUsd: number | null
   copilot: string | null
+  session: Session
 }
 
 type DecisionGroup = {
@@ -116,6 +121,18 @@ const closeLabel = (r: OperationRow) => {
   return r.closeSource ?? '—'
 }
 
+const SESSION_LABEL: Record<Session, string> = {
+  american: '🗽 Americana',
+  asian: '🌏 Asiática',
+  european: '🇪🇺 Europea',
+}
+
+const SESSION_HOURS: Record<Session, string> = {
+  asian: '23:00–08:00 UTC',
+  european: '08:00–12:00 UTC',
+  american: '12:00–23:00 UTC',
+}
+
 const pct = (a: number, b: number) => (b === 0 ? '—' : `${Math.round((a / b) * 100)} %`)
 
 const DECISION_LABEL: Record<Decision, string> = {
@@ -138,6 +155,7 @@ const REASON_LABEL: Record<string, string> = {
 const box: React.CSSProperties = { padding: '10px 14px', borderRadius: 8, background: 'rgba(255,255,255,0.04)', fontSize: 13, lineHeight: 1.6 }
 
 const th: React.CSSProperties = { padding: '8px 10px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '.4px', borderBottom: '1px solid rgba(255,255,255,0.1)', whiteSpace: 'nowrap' }
+const select: React.CSSProperties = { background: '#111827', color: '#e5e7eb', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 6, padding: '4px 8px', fontSize: 13 }
 const td: React.CSSProperties = { padding: '8px 10px', fontSize: 13, borderBottom: '1px solid rgba(255,255,255,0.05)', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }
 
 export function OperationsTable() {
@@ -145,33 +163,36 @@ export function OperationsTable() {
   const [summary, setSummary] = useState<Summary | null>(null)
   const [decisions, setDecisions] = useState<DecisionRow[]>([])
   const [groups, setGroups] = useState<Record<Decision, DecisionGroup> | null>(null)
+  const [bySession, setBySession] = useState<{ session: Session; summary: Summary }[]>([])
+  const [allSymbols, setAllSymbols] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
   const [symbol, setSymbol] = useState<string>('')
+  const [session, setSession] = useState<Session | ''>('')
 
-  const symbols = useMemo(
-    () => Array.from(new Set([...rows.map((r) => r.symbol), ...decisions.map((r) => r.symbol)])).sort(),
-    [rows, decisions],
-  )
-  const shownRows = symbol ? rows.filter((r) => r.symbol === symbol) : rows
-  const shownDecisions = symbol ? decisions.filter((r) => r.symbol === symbol) : decisions
+  const symbols = useMemo(() => Array.from(new Set(allSymbols)).sort(), [allSymbols])
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/execution/table`)
+      const params = new URLSearchParams()
+      if (symbol) params.set('symbol', symbol)
+      if (session) params.set('session', session)
+      const res = await fetch(`${API_URL}/execution/table?${params}`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const body = await res.json()
       setRows(body.rows)
       setSummary(body.summary)
-      const dres = await fetch(`${API_URL}/execution/decisions`)
+      setBySession(body.bySession ?? [])
+      const dres = await fetch(`${API_URL}/execution/decisions?${params}`)
       if (!dres.ok) throw new Error(`HTTP ${dres.status}`)
       const dbody = await dres.json()
       setDecisions(dbody.rows)
       setGroups(dbody.groups)
+      setAllSymbols([...(body.symbols ?? []), ...(dbody.symbols ?? [])])
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
-  }, [])
+  }, [symbol, session])
 
   useEffect(() => {
     load()
@@ -185,6 +206,24 @@ export function OperationsTable() {
       <p style={{ fontSize: 12, color: MUTED, margin: '0 0 16px' }}>
         USD de Capital.com. Holgura = tiempo en rojo desde la apertura hasta el primer verde. Se actualiza cada 15 s.
       </p>
+
+      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center', fontSize: 13, marginBottom: 16 }}>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          Par:
+          <select value={symbol} onChange={(e) => setSymbol(e.target.value)} style={select}>
+            <option value="">Todos</option>
+            {symbols.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </label>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          Sesión:
+          <select value={session} onChange={(e) => setSession(e.target.value as Session | '')} style={select}>
+            <option value="">Todas</option>
+            {(['american', 'asian', 'european'] as Session[]).map((s) => <option key={s} value={s}>{SESSION_LABEL[s]}</option>)}
+          </select>
+        </label>
+        {(symbol || session) && <span style={{ color: MUTED }}>{rows.length} operaciones · {decisions.length} alertas · el resumen de abajo es solo de este filtro</span>}
+      </div>
 
       {summary && (
         <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', fontSize: 13, marginBottom: 16 }}>
@@ -216,20 +255,43 @@ export function OperationsTable() {
           </div>
         </div>
       )}
+      {bySession.length > 0 && (
+        <div style={{ ...box, marginBottom: 16, overflowX: 'auto' }}>
+          <div style={{ color: MUTED, fontSize: 11 }}>POR SESIÓN{symbol ? ` · ${symbol}` : ''} (hora de apertura)</div>
+          <table style={{ borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                <th style={th}>Sesión</th>
+                <th style={th}>Cerradas</th>
+                <th style={th}>Ganadas / perdidas</th>
+                <th style={th}>Resultado</th>
+                <th style={th}>Media por operación</th>
+                <th style={th}>Media ganada / perdida</th>
+                <th style={th}>Llegaron a verde</th>
+                <th style={th}>Mediana hasta el verde</th>
+                <th style={th}>En rojo a los 5 min</th>
+              </tr>
+            </thead>
+            <tbody>
+              {bySession.map(({ session: s, summary: g }) => (
+                <tr key={s} style={{ background: session === s ? 'rgba(37,99,235,0.08)' : undefined }}>
+                  <td style={{ ...td, fontWeight: 700 }} title={SESSION_HOURS[s]}>{SESSION_LABEL[s]}</td>
+                  <td style={td}>{g.closed}</td>
+                  <td style={td}><span style={{ color: GREEN }}>{g.wins}</span> / <span style={{ color: RED }}>{g.losses}</span></td>
+                  <td style={{ ...td, fontWeight: 700, color: color(g.closedUsd) }}>{usd(g.closedUsd)}</td>
+                  <td style={{ ...td, fontWeight: 700, color: color(g.avgClosedUsd) }}>{usd(g.avgClosedUsd)}</td>
+                  <td style={td}><span style={{ color: GREEN }}>{usd(g.avgWinUsd)}</span> / <span style={{ color: RED }}>{usd(g.avgLossUsd)}</span></td>
+                  <td style={td}>{g.everGreen} de {g.operations} ({pct(g.everGreen, g.operations)})</td>
+                  <td style={td}>{dur(g.slackMedianSec)}</td>
+                  <td style={td}>{g.redAt5} de {g.pastMinute5} ({pct(g.redAt5, g.pastMinute5)})</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
       {error && <p style={{ color: RED, fontSize: 13 }}>No se pudo cargar: {error}</p>}
 
-      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 12 }}>
-        Par:
-        <select
-          value={symbol}
-          onChange={(e) => setSymbol(e.target.value)}
-          style={{ background: '#111827', color: '#e5e7eb', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 6, padding: '4px 8px', fontSize: 13 }}
-        >
-          <option value="">Todos</option>
-          {symbols.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
-        {symbol && <span style={{ color: MUTED }}>{shownRows.length} operaciones · {shownDecisions.length} alertas</span>}
-      </label>
 
       <div style={{ overflowX: 'auto' }}>
         <table style={{ borderCollapse: 'collapse', width: '100%' }}>
@@ -239,6 +301,7 @@ export function OperationsTable() {
               <th style={th}>Par</th>
               <th style={th}>Lado</th>
               <th style={th}>Apertura</th>
+              <th style={th}>Sesión</th>
               <th style={th}>Holgura antes del verde</th>
               <th style={th}>Mejor momento</th>
               <th style={th}>Rato en verde</th>
@@ -249,12 +312,13 @@ export function OperationsTable() {
             </tr>
           </thead>
           <tbody>
-            {shownRows.map((r) => (
+            {rows.map((r) => (
               <tr key={r.id} style={{ background: r.resultLive ? 'rgba(37,99,235,0.08)' : undefined }}>
                 <td style={td}>{r.id}</td>
                 <td style={{ ...td, fontWeight: 700 }}>{r.symbol}</td>
                 <td style={{ ...td, color: r.direction === 'BUY' ? GREEN : RED }}>{r.direction}</td>
                 <td style={td}>{when(r.openedAt)}</td>
+                <td style={td}>{SESSION_LABEL[r.session]}</td>
                 <td style={td}>{r.slackBeforeGreenSec === null ? <span style={{ color: RED }}>nunca llegó a verde</span> : dur(r.slackBeforeGreenSec)}</td>
                 <td style={td}>
                   {r.bestUsd === null ? '—' : (
@@ -310,6 +374,7 @@ export function OperationsTable() {
             <tr>
               <th style={th}>Alerta</th>
               <th style={th}>Hora</th>
+              <th style={th}>Sesión</th>
               <th style={th}>Par</th>
               <th style={th}>Lado</th>
               <th style={th}>Decisión</th>
@@ -322,10 +387,11 @@ export function OperationsTable() {
             </tr>
           </thead>
           <tbody>
-            {shownDecisions.map((r) => (
+            {decisions.map((r) => (
               <tr key={r.alertId}>
                 <td style={td}>{r.alertId}{r.positionId !== null ? <span style={{ color: MUTED }}> · op #{r.positionId}</span> : null}</td>
                 <td style={td}>{when(r.at)}</td>
+                <td style={td}>{SESSION_LABEL[r.session]}</td>
                 <td style={{ ...td, fontWeight: 700 }}>{r.symbol}</td>
                 <td style={{ ...td, color: r.direction === 'BUY' ? GREEN : RED }}>{r.direction}</td>
                 <td style={td}>{DECISION_LABEL[r.decision]}</td>

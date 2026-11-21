@@ -274,6 +274,7 @@ export type OperationSummary = {
   lossesUsd: number;
   avgWinUsd: number | null;
   avgLossUsd: number | null;
+  avgClosedUsd: number | null;
   closedBy: Record<'objetivo' | 'tiempo' | 'otro', { n: number; usd: number }>;
   slackMedianSec: number | null;
   redAt5: number;
@@ -325,6 +326,7 @@ export function operationSummary(rows: OperationRow[]): OperationSummary {
     lossesUsd: sum(lost),
     avgWinUsd: won.length ? round4(sum(won) / won.length) : null,
     avgLossUsd: lost.length ? round4(sum(lost) / lost.length) : null,
+    avgClosedUsd: closed.length ? round4(sum(closed) / closed.length) : null,
     closedBy,
     slackMedianSec: median(
       rows.flatMap((r) => (r.slackBeforeGreenSec === null ? [] : [r.slackBeforeGreenSec])),

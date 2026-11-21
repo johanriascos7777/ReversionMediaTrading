@@ -16,6 +16,7 @@ import {
   type OperationRow,
 } from './tracking/pnl';
 import { decisionGroups, decisionRow } from './tracking/decisions';
+import { SESSIONS, isSession, sessionOf, type Session } from './tracking/session';
 
 const toHttp = (err: unknown): never => {
   if (err instanceof ExecutionError)
@@ -53,18 +54,22 @@ export class ExecutionController {
   }
 
   @Get('table')
-  async table(@Query('limit') limit?: string) {
+  async table(
+    @Query('limit') limit?: string,
+    @Query('symbol') symbol?: string,
+    @Query('session') session?: string,
+  ) {
     const n = Math.min(Math.max(Number(limit) || 200, 1), 500);
     const rows = (await this.execution.list(undefined, n)).filter(
       (r) => r.status !== 'failed',
     );
     const tracking = await this.tracker.tracking(rows);
     const now = new Date();
-    const out: OperationRow[] = [];
+    const out: (OperationRow & { session: Session })[] = [];
     for (const r of rows) {
       const phases = await this.tracker.phases(r.id);
-      out.push(
-        operationRow(
+      out.push({
+        ...operationRow(
           {
             id: r.id,
             symbol: r.symbol,
@@ -84,17 +89,35 @@ export class ExecutionController {
           tracking[r.id]?.live?.capital ?? null,
           now,
         ),
-      );
+        session: sessionOf(r.openedAt),
+      });
     }
-    return { rows: out, summary: operationSummary(out) };
+    const symbols = [...new Set(out.map((r) => r.symbol))].sort();
+    const bySymbol = symbol ? out.filter((r) => r.symbol === symbol) : out;
+    const shown = isSession(session)
+      ? bySymbol.filter((r) => r.session === session)
+      : bySymbol;
+    return {
+      rows: shown,
+      summary: operationSummary(shown),
+      bySession: SESSIONS.map((s) => ({
+        session: s,
+        summary: operationSummary(bySymbol.filter((r) => r.session === s)),
+      })),
+      symbols,
+    };
   }
 
   @Get('decisions')
-  async decisions(@Query('limit') limit?: string) {
+  async decisions(
+    @Query('limit') limit?: string,
+    @Query('symbol') symbol?: string,
+    @Query('session') session?: string,
+  ) {
     const n = Math.min(Math.max(Number(limit) || 300, 1), 1000);
     const pairs = await this.execution.alertsWithPositions(n);
-    const rows = pairs.map(({ alert, position }) =>
-      decisionRow(
+    const all = pairs.map(({ alert, position }) => ({
+      ...decisionRow(
         {
           id: alert.id,
           symbol: alert.symbol,
@@ -116,8 +139,15 @@ export class ExecutionController {
             }
           : null,
       ),
+      session: sessionOf(alert.createdAt),
+    }));
+    const symbols = [...new Set(all.map((r) => r.symbol))].sort();
+    const rows = all.filter(
+      (r) =>
+        (!symbol || r.symbol === symbol) &&
+        (!isSession(session) || r.session === session),
     );
-    return { rows, groups: decisionGroups(rows) };
+    return { rows, groups: decisionGroups(rows), symbols };
   }
 
   @Get('positions/:id/phases')
