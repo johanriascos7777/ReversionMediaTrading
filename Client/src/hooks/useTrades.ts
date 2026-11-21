@@ -285,13 +285,8 @@ const TRADE_URL = `${API_URL}/trade`
 
 export function useTrades() {
   const [trades, setTrades] = useState<Trade[]>([])
-  const [analytics, setAnalytics] = useState<Analytics | null>(null)
-  const [analyticsMode, setAnalyticsMode] = useState<string>('all')
-  const [analyticsMinTrades, setAnalyticsMinTrades] = useState<number>(3)
-  const [analyticsAccountType, setAnalyticsAccountType] = useState<string>('all')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [fomowatch, setFomowatch] = useState<FomowatchData | null>(null)
 
   const fetchTrades = useCallback(async (filters?: {
     symbol?: string; outcome?: string; session?: string
@@ -317,52 +312,6 @@ export function useTrades() {
     }
   }, [])
 
-  const fetchAnalytics = useCallback(async (tradeMode?: string, minTrades?: number, accountType?: string) => {
-    const activeMode = tradeMode !== undefined ? tradeMode : analyticsMode
-    const activeMinTrades = minTrades !== undefined ? minTrades : analyticsMinTrades
-    const activeAccountType = accountType !== undefined ? accountType : analyticsAccountType
-    
-    if (tradeMode !== undefined) {
-      setAnalyticsMode(tradeMode)
-    }
-    if (minTrades !== undefined) {
-      setAnalyticsMinTrades(minTrades)
-    }
-    if (accountType !== undefined) {
-      setAnalyticsAccountType(accountType)
-    }
-    
-    try {
-      const params = new URLSearchParams()
-      if (activeMode && activeMode !== 'all') {
-        params.set('tradeMode', activeMode)
-      }
-      if (activeAccountType && activeAccountType !== 'all') {
-        params.set('accountType', activeAccountType)
-      }
-      params.set('minTrades', String(activeMinTrades))
-      const res = await fetch(`${TRADE_URL}/analytics?${params}`)
-      if (!res.ok) return
-      const data = await res.json()
-      if (data?.summary) setAnalytics(data)
-      else setAnalytics(null)
-    } catch {
-      setAnalytics(null)
-    }
-  }, [analyticsMode, analyticsMinTrades, analyticsAccountType])
-
-  const fetchFomowatch = useCallback(async () => {
-    try {
-      const res = await fetch(`${TRADE_URL}/fomowatch`)
-      if (!res.ok) return
-      const data = await res.json()
-      if (data?.summary) setFomowatch(data)
-      else setFomowatch(null)
-    } catch {
-      setFomowatch(null)
-    }
-  }, [])
-
   const createTrade = useCallback(async (payload: CreateTradePayload): Promise<Trade | null> => {
     try {
       const res = await fetch(TRADE_URL, {
@@ -372,14 +321,12 @@ export function useTrades() {
       })
       const data: Trade = await res.json()
       await fetchTrades()
-      await fetchAnalytics()
-      await fetchFomowatch()
       return data
     } catch {
       setError('Error registrando operación')
       return null
     }
-  }, [fetchTrades, fetchAnalytics])
+  }, [fetchTrades])
 
   const closeTrade = useCallback(async (id: number, payload: CloseTradePayload): Promise<boolean> => {
     try {
@@ -389,14 +336,12 @@ export function useTrades() {
         body: JSON.stringify(payload),
       })
       await fetchTrades()
-      await fetchAnalytics()
-      await fetchFomowatch()
       return true
     } catch {
       setError('Error cerrando operación')
       return false
     }
-  }, [fetchTrades, fetchAnalytics])
+  }, [fetchTrades])
 
   const updateTrade = useCallback(async (id: number, payload: Partial<Trade>): Promise<boolean> => {
     try {
@@ -406,48 +351,35 @@ export function useTrades() {
         body: JSON.stringify(payload),
       })
       await fetchTrades()
-      await fetchAnalytics()
-      await fetchFomowatch()
       return true
     } catch {
       setError('Error actualizando operación')
       return false
     }
-  }, [fetchTrades, fetchAnalytics])
+  }, [fetchTrades])
 
 
   const deleteTrade = useCallback(async (id: number): Promise<boolean> => {
     try {
       await fetch(`${TRADE_URL}/${id}`, { method: 'DELETE' })
       await fetchTrades()
-      await fetchAnalytics()
-      await fetchFomowatch()
       return true
     } catch {
       setError('Error eliminando operación')
       return false
     }
-  }, [fetchTrades, fetchAnalytics])
+  }, [fetchTrades])
 
   // Carga inicial
   useEffect(() => {
     fetchTrades()
-    fetchAnalytics()
-    fetchFomowatch()
-  }, [fetchTrades, fetchAnalytics, fetchFomowatch])
+  }, [fetchTrades])
 
   return {
     trades,
-    analytics,
-    analyticsMode,
-    analyticsMinTrades,
-    analyticsAccountType,
-    fomowatch,
     loading,
     error,
     fetchTrades,
-    fetchAnalytics,
-    fetchFomowatch,
     createTrade,
     closeTrade,
     updateTrade,
