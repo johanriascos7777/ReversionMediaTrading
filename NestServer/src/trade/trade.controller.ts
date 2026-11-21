@@ -53,24 +53,6 @@ export class TradeController {
     return this.tradeService.findAll({ symbol, outcome, session, fromDate, toDate });
   }
 
-  // ─── GET /trade/fomowatch ──────────────────────────────────────────────────
-  @Get('fomowatch')
-  getFomowatch() {
-    return this.tradeService.getFomowatch();
-  }
-
-  // ─── GET /trade/analytics ─────────────────────────────────────────────────
-  // Panel de analytics: win rate por sesión/señal/par, MAE/MFE, alertas
-  @Get('analytics')
-  getAnalytics(
-    @Query('tradeMode')   tradeMode?:   string,
-    @Query('minTrades')   minTrades?:   string,
-    @Query('accountType') accountType?: string,
-  ) {
-    const min = minTrades ? parseInt(minTrades, 10) : 3;
-    return this.tradeService.getAnalytics(tradeMode, isNaN(min) ? 3 : min, accountType);
-  }
-
   // ─── DELETE /trade/:id ────────────────────────────────────────────────────
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
