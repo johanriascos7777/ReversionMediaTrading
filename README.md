@@ -1,5 +1,25 @@
 # 📡 Market Streaming Engine
 
+## 🧭 Misión y visión
+
+**Misión.** Darle a un trader alertas de reversión a la media en las que pueda apoyarse para tomar ganancia del
+mercado, medidas con sus propias operaciones y no con promesas. Hoy el sistema alerta y el trader decide con sus
+ojos en el gráfico: entrar en ese momento, más tarde o no entrar, y cuánto cobrar cuando llega a verde.
+
+**Visión.** Pulir el alertador hasta confiar tanto en él que pueda operar en automático, sin mirar el gráfico. El
+camino es gradual: primero manual, quizá después semiautomático, y en automático solo cuando la evidencia lo
+justifique. No se toma a la ligera, porque se opera con dinero real.
+
+**Cómo se trabaja mientras llega ese momento**
+
+- En demo las operaciones se dejan correr a propósito, sin cerrarlas, para medir cuánto tiempo pasan en holgura,
+  cuánto en verde, el mejor y el peor momento. Un número en rojo en el peor momento no es un descuido: es la
+  medición.
+- Esa medición sirve para decidir más adelante, operando a mano, qué alertas tomar y cuánto cobrar (1, 3, 7 USD o
+  más). Las entradas de hoy son de 20 USD; en el futuro serán mayores y bastará con unas cuantas alertas buenas
+  entre muchas.
+- Mientras tanto, se aprovecha lo que el sistema ya ofrece.
+
 # LO ULTIMO
 
 1. FVG (Fair Value Gaps / Imbalances)

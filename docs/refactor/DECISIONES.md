@@ -78,3 +78,11 @@ Ninguna de las dos se aplica antes de la prueba: ELAS-68 no cambia nada en esta 
 | Las operaciones de la v3 llevan SL y TP en el broker y el backend las cierra al tocar la EMA de 5m o a los 175 min. | El dolor del trader eran las horas en holgura; antes el cierre era manual y sin TP. |
 | El tamaño sale del riesgo (20 USD) y no de `EXECUTION_MAX_SIZE`; tope propio `EXECUTION_RISK_MAX_SIZE` (50.000). | Con stop, el riesgo queda acotado; el tope evita un tamaño absurdo si el stop es muy corto (piso de 3 pips para calcularlo). |
 | El copiloto llama a `claude -p` (Opus, sin herramientas, salida JSON con esquema) con la sesión Pro del trader, no a la API. | La API exige compra aparte; Claude Code ya está pagado y da el mismo modelo. Va en sombra hasta tener unas 100 alertas para comparar su veredicto con el resultado. |
+
+## 2026-11-21 — Misión y visión
+
+| Decisión | Motivo |
+|---|---|
+| La misión y la visión del proyecto quedan en `README.md`, sección "Misión y visión". | El trader quiere que cualquier persona o agente sepa hacia dónde va el alertador. |
+| En demo las operaciones se dejan correr a propósito, sin cerrarlas, para medir holgura, tiempo en verde, mejor y peor momento. | Es la medición con la que decidirá, cuando opere a mano, qué alertas tomar y cuánto cobrar. |
+| El botón "entro / espero / no entro" y las etiquetas de por qué no entró quedan para cuando pase a manual. | Lo tomó en cuenta, pero no es el momento. |

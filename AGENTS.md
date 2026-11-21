@@ -3,6 +3,8 @@
 > Este archivo da contexto persistente a cualquier agente de IA que trabaje en este repo (Antigravity, Cursor, Claude Code...). Se carga siempre, así que se mantiene conciso. Para detalle profundo de un subsistema, ver los Skills en `.agents/skills/`.
 
 ## Qué es este proyecto
+Misión y visión del trader: ver la sección "Misión y visión" al inicio de `README.md`. En demo las operaciones se dejan correr a propósito para medir holgura y tiempo en verde; no sugerir cerrarlas.
+
 Motor de streaming de mercado para forex que implementa una estrategia de **reversión a la media** basada en una métrica propia llamada **Elasticidad**: `|Precio − EMA100| / ATR14`. No es un bot que opera solo: es un sistema de observabilidad que calcula señales y las expone en tiempo real a un dashboard ("semáforo").
 
 ## Arquitectura de alto nivel
