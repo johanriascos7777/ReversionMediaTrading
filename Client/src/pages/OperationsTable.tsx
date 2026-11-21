@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { API_URL } from '@/config/env'
 
 type OperationRow = {
@@ -146,6 +146,14 @@ export function OperationsTable() {
   const [decisions, setDecisions] = useState<DecisionRow[]>([])
   const [groups, setGroups] = useState<Record<Decision, DecisionGroup> | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [symbol, setSymbol] = useState<string>('')
+
+  const symbols = useMemo(
+    () => Array.from(new Set([...rows.map((r) => r.symbol), ...decisions.map((r) => r.symbol)])).sort(),
+    [rows, decisions],
+  )
+  const shownRows = symbol ? rows.filter((r) => r.symbol === symbol) : rows
+  const shownDecisions = symbol ? decisions.filter((r) => r.symbol === symbol) : decisions
 
   const load = useCallback(async () => {
     try {
@@ -210,6 +218,19 @@ export function OperationsTable() {
       )}
       {error && <p style={{ color: RED, fontSize: 13 }}>No se pudo cargar: {error}</p>}
 
+      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 12 }}>
+        Par:
+        <select
+          value={symbol}
+          onChange={(e) => setSymbol(e.target.value)}
+          style={{ background: '#111827', color: '#e5e7eb', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 6, padding: '4px 8px', fontSize: 13 }}
+        >
+          <option value="">Todos</option>
+          {symbols.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+        {symbol && <span style={{ color: MUTED }}>{shownRows.length} operaciones · {shownDecisions.length} alertas</span>}
+      </label>
+
       <div style={{ overflowX: 'auto' }}>
         <table style={{ borderCollapse: 'collapse', width: '100%' }}>
           <thead>
@@ -228,7 +249,7 @@ export function OperationsTable() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
+            {shownRows.map((r) => (
               <tr key={r.id} style={{ background: r.resultLive ? 'rgba(37,99,235,0.08)' : undefined }}>
                 <td style={td}>{r.id}</td>
                 <td style={{ ...td, fontWeight: 700 }}>{r.symbol}</td>
@@ -301,7 +322,7 @@ export function OperationsTable() {
             </tr>
           </thead>
           <tbody>
-            {decisions.map((r) => (
+            {shownDecisions.map((r) => (
               <tr key={r.alertId}>
                 <td style={td}>{r.alertId}{r.positionId !== null ? <span style={{ color: MUTED }}> · op #{r.positionId}</span> : null}</td>
                 <td style={td}>{when(r.at)}</td>
